@@ -1,0 +1,12 @@
+# Local pi configuration and credentials
+/bin/*
+!/bin/README.md
+/auth.json
+/models-store.json
+/settings.json
+/trust.json
+/sessions/
+
+# OS and editor files
+.DS_Store
+*.swp
