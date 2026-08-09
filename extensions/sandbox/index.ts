@@ -10,7 +10,7 @@
  * via `tool_call` input mutation without replacing the tool.
  *
  * Config files (merged, project takes precedence):
- * - ~/.pi/agent/extensions/sandbox.json (global)
+ * - ~/.pi/agent/sandbox.json (global)
  * - <cwd>/.pi/sandbox.json (project-local)
  *
  * Example .pi/sandbox.json:
@@ -79,7 +79,7 @@ const DEFAULT_CONFIG: SandboxConfig = {
 
 function loadConfig(cwd: string): SandboxConfig {
 	const projectConfigPath = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
-	const globalConfigPath = join(getAgentDir(), "extensions", "sandbox.json");
+	const globalConfigPath = join(getAgentDir(), "sandbox.json");
 
 	let globalConfig: Partial<SandboxConfig> = {};
 	let projectConfig: Partial<SandboxConfig> = {};
