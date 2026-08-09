@@ -42,8 +42,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type BashOperations, CONFIG_DIR_NAME, createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -102,6 +103,142 @@ function loadConfig(cwd: string): SandboxConfig {
 	return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
+interface SymlinkedConfigPath {
+	configuredPath: string;
+	absolutePath: string;
+	resolvedPath: string;
+	isDirectory: boolean;
+}
+
+interface FilesystemSymlinkWarnings {
+	denyReadDirectories: SymlinkedConfigPath[];
+	allowReadPaths: SymlinkedConfigPath[];
+	allowWritePaths: SymlinkedConfigPath[];
+}
+
+function findSymlinkedConfigPaths(paths: string[] | undefined, cwd: string): SymlinkedConfigPath[] {
+	if (!paths) return [];
+
+	const symlinks: SymlinkedConfigPath[] = [];
+	for (const configuredPath of paths) {
+		// Resolving a glob to one path would misrepresent the complete rule.
+		if (/[*?[\]{}]/.test(configuredPath)) continue;
+
+		const expandedPath = configuredPath === "~"
+			? homedir()
+			: configuredPath.startsWith("~/")
+				? join(homedir(), configuredPath.slice(2))
+				: configuredPath;
+		const absolutePath = resolve(cwd, expandedPath);
+
+		try {
+			const stats = statSync(absolutePath);
+			const resolvedPath = realpathSync(absolutePath);
+			if (resolvedPath !== absolutePath) {
+				symlinks.push({
+					configuredPath,
+					absolutePath,
+					resolvedPath,
+					isDirectory: stats.isDirectory(),
+				});
+			}
+		} catch {
+			// Missing, dangling, or inaccessible paths are handled by sandbox-runtime.
+		}
+	}
+
+	return symlinks;
+}
+
+function isCrossBoundarySymlink({ absolutePath, resolvedPath }: SymlinkedConfigPath): boolean {
+	// This is the Linux case of sandbox-runtime's isSymlinkOutsideBoundary():
+	// only resolutions that remain at or beneath the configured path are accepted.
+	return resolvedPath !== absolutePath && !resolvedPath.startsWith(`${absolutePath}/`);
+}
+
+function findFilesystemSymlinkWarnings(config: SandboxConfig, cwd: string): FilesystemSymlinkWarnings {
+	const denyReadDirectories = findSymlinkedConfigPaths(config.filesystem?.denyRead, cwd)
+		.filter((entry) => entry.isDirectory && isCrossBoundarySymlink(entry));
+	const allowReadPaths = findSymlinkedConfigPaths(config.filesystem?.allowRead, cwd)
+		.filter(isCrossBoundarySymlink);
+	const allowWritePaths = findSymlinkedConfigPaths(config.filesystem?.allowWrite, cwd)
+		.filter(isCrossBoundarySymlink);
+
+	return { denyReadDirectories, allowReadPaths, allowWritePaths };
+}
+
+const SANDBOX_SYMLINK_WIDGET_KEY = "sandbox-symlink-warning";
+
+function hasFilesystemSymlinkWarnings(warnings: FilesystemSymlinkWarnings): boolean {
+	return Object.values(warnings).some((paths) => paths.length > 0);
+}
+
+function formatFilesystemSymlinkWidget(warnings: FilesystemSymlinkWarnings): string[] {
+	const mappings = [
+		...warnings.denyReadDirectories.map(
+			({ configuredPath, resolvedPath }) => `denyRead: ${configuredPath} -> ${resolvedPath}`,
+		),
+		...warnings.allowReadPaths.map(
+			({ configuredPath, resolvedPath }) => `allowRead: ${configuredPath} -> ${resolvedPath}`,
+		),
+		...warnings.allowWritePaths.map(
+			({ configuredPath, resolvedPath }) => `allowWrite (skipped): ${configuredPath} -> ${resolvedPath}`,
+		),
+	];
+	const visibleMappings = mappings.slice(0, 5);
+	const hiddenCount = mappings.length - visibleMappings.length;
+
+	return [
+		"⚠ Sandbox filesystem symlink warning",
+		...visibleMappings,
+		...(hiddenCount > 0 ? [`... and ${hiddenCount} more`] : []),
+		"Run /sandbox for behavior details and upstream references.",
+	];
+}
+
+function formatFilesystemSymlinkWarning(warnings: FilesystemSymlinkWarnings): string {
+	const lines = ["Sandbox configuration warning:", "", "Cross-boundary filesystem symlinks detected:"];
+	const addPaths = (heading: string, paths: SymlinkedConfigPath[]) => {
+		if (paths.length === 0) return;
+		lines.push("", heading, ...paths.map(({ configuredPath, resolvedPath }) => `  ${configuredPath} -> ${resolvedPath}`));
+	};
+
+	addPaths(
+		"Directory denyRead paths (left unresolved; may prevent bubblewrap from starting):",
+		warnings.denyReadDirectories,
+	);
+	addPaths(
+		"allowRead paths (left in their configured spelling; keep them consistent with denyRead):",
+		warnings.allowReadPaths,
+	);
+	addPaths(
+		"allowWrite paths (skipped to avoid unexpectedly making their targets writable):",
+		warnings.allowWritePaths,
+	);
+
+	lines.push(
+		"",
+		"Behavior:",
+		"- File denyRead symlinks are resolved to their targets.",
+		"- Cross-boundary directory denyRead symlinks remain unresolved; use canonical targets.",
+		"- allowRead rebinds matching carve-outs read-only; use canonical paths when denyRead is canonical.",
+		"- Cross-boundary allowWrite symlinks are skipped; use canonical targets only when write access is intended.",
+		"- denyWrite symlinks and symlinked ancestors are resolved.",
+		"",
+		"References:",
+		"- PR #289: resolves file denyRead symlinks but preserves directory paths for allowRead carve-outs.",
+		"  https://github.com/anthropic-experimental/sandbox-runtime/pull/289",
+		"- PR #166: adds allowRead by rebinding carve-outs after denyRead overlays.",
+		"  https://github.com/anthropic-experimental/sandbox-runtime/pull/166",
+		"- PR #138: skips cross-boundary allowWrite symlinks to prevent unintended write access.",
+		"  https://github.com/anthropic-experimental/sandbox-runtime/pull/138",
+		"- PR #392: canonicalizes denyWrite paths before creating bubblewrap mounts.",
+		"  https://github.com/anthropic-experimental/sandbox-runtime/pull/392",
+	);
+
+	return lines.join("\n");
+}
+
 function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): SandboxConfig {
 	const result: SandboxConfig = { ...base };
 
@@ -139,6 +276,18 @@ function createSandboxedBashOps(): BashOperations {
 			const wrappedCommand = await SandboxManager.wrapWithSandbox(command);
 
 			return new Promise((resolve, reject) => {
+				let mountPointsCleaned = false;
+				const cleanupMountPoints = () => {
+					if (mountPointsCleaned) return;
+					mountPointsCleaned = true;
+					try {
+						// Linux bwrap creates host mount-point placeholders for absent deny paths.
+						SandboxManager.cleanupAfterCommand();
+					} catch {
+						// Cleanup must not obscure the command result.
+					}
+				};
+
 				const child = spawn("bash", ["-c", wrappedCommand], {
 					cwd,
 					detached: true,
@@ -166,6 +315,7 @@ function createSandboxedBashOps(): BashOperations {
 
 				child.on("error", (err) => {
 					if (timeoutHandle) clearTimeout(timeoutHandle);
+					cleanupMountPoints();
 					reject(err);
 				});
 
@@ -184,6 +334,7 @@ function createSandboxedBashOps(): BashOperations {
 				child.on("close", (code) => {
 					if (timeoutHandle) clearTimeout(timeoutHandle);
 					signal?.removeEventListener("abort", onAbort);
+					cleanupMountPoints();
 
 					if (signal?.aborted) {
 						reject(new Error("aborted"));
@@ -232,6 +383,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		// Extension UI is recreated on session replacement, but explicitly clear this
+		// so configuration changes also remove a warning during reload.
+		ctx.ui.setWidget(SANDBOX_SYMLINK_WIDGET_KEY, undefined);
+
 		const noSandbox = pi.getFlag("no-sandbox") as boolean;
 
 		if (noSandbox) {
@@ -253,6 +408,22 @@ export default function (pi: ExtensionAPI) {
 			sandboxEnabled = false;
 			ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
 			return;
+		}
+
+		// These symlink behaviors are specific to Linux's bubblewrap mount rules;
+		// macOS uses Seatbelt profiles and does not create the same bind/tmpfs mounts.
+		if (platform === "linux") {
+			const symlinkWarnings = findFilesystemSymlinkWarnings(config, ctx.cwd);
+			if (hasFilesystemSymlinkWarnings(symlinkWarnings)) {
+				if (ctx.mode === "tui") {
+					// Notifications emitted during session_start can scroll behind restored
+					// history, while a widget remains visible beside the resumed editor.
+					ctx.ui.setWidget(SANDBOX_SYMLINK_WIDGET_KEY, formatFilesystemSymlinkWidget(symlinkWarnings));
+				} else if (ctx.hasUI) {
+					// RPC clients receive notifications but may not render TUI widgets.
+					ctx.ui.notify(formatFilesystemSymlinkWarning(symlinkWarnings), "warning");
+				}
+			}
 		}
 
 		try {
@@ -297,14 +468,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("sandbox", {
 		description: "Show sandbox configuration",
 		handler: async (_args, ctx) => {
-			if (!sandboxEnabled) {
-				ctx.ui.notify("Sandbox is disabled", "info");
-				return;
-			}
-
 			const config = loadConfig(ctx.cwd);
 			const lines = [
 				"Sandbox Configuration:",
+				`  Status: ${sandboxEnabled && sandboxInitialized ? "initialized" : "disabled or not initialized"}`,
 				"",
 				"Network:",
 				`  Allowed: ${config.network?.allowedDomains?.join(", ") || "(none)"}`,
@@ -312,10 +479,22 @@ export default function (pi: ExtensionAPI) {
 				"",
 				"Filesystem:",
 				`  Deny Read: ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
+				`  Allow Read: ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
 				`  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
 				`  Deny Write: ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
 			];
-			ctx.ui.notify(lines.join("\n"), "info");
+
+			const symlinkWarnings = process.platform === "linux"
+				? findFilesystemSymlinkWarnings(config, ctx.cwd)
+				: undefined;
+			const hasSymlinkWarnings = symlinkWarnings
+				? hasFilesystemSymlinkWarnings(symlinkWarnings)
+				: false;
+			if (symlinkWarnings && hasSymlinkWarnings) {
+				lines.push("", formatFilesystemSymlinkWarning(symlinkWarnings));
+			}
+
+			ctx.ui.notify(lines.join("\n"), hasSymlinkWarnings ? "warning" : "info");
 		},
 	});
 }
