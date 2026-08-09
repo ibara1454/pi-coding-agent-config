@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "permissionPromptTimeoutSeconds": 600,
+  "allowBrowserProcess": true,
+  "network": {
+    "allowLocalBinding": true,
+    "allowAllUnixSockets": true,
+    "allowUnauthenticatedSocksProxy": true,
+    "allowedDomains": ["github.com", "*.github.com"],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "allowRead": [".", "~/.config", "~/.local", "Library"],
+    "denyRead": ["/Users", "/home", "~/.ssh"],
+    "allowWrite": [".", "/tmp"],
+    "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
+  }
+}
