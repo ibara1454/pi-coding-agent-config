@@ -1,7 +1,5 @@
 {
   "name": "pi-extensions",
   "private": true,
-  "dependencies": {
-    "pi-powerline-footer": "^0.12.2"
-  }
+  "dependencies": {}
 }
