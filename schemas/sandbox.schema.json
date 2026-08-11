@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi sandbox extension configuration",
+  "description": "Configuration for extensions/sandbox. This describes the JSON settings the extension actually merges and passes to @anthropic-ai/sandbox-runtime 0.0.71.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON Schema URI used by editors. Ignored by the extension."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable the sandbox extension."
+    },
+    "network": {
+      "$ref": "#/$defs/network"
+    },
+    "filesystem": {
+      "$ref": "#/$defs/filesystem"
+    },
+    "ignoreViolations": {
+      "type": "object",
+      "description": "Map command substrings to violation-text substrings that should be suppressed from runtime reports. The special command key '*' applies to every command. This does not change policy enforcement.",
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "enableWeakerNestedSandbox": {
+      "type": "boolean",
+      "default": false,
+      "description": "Linux: enable weaker isolation for nested environments such as unprivileged containers."
+    }
+  },
+  "$defs": {
+    "domainPortPattern": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?:localhost|(?:\\*\\.)?[^\\s/:*]+(?:\\.[^\\s/:*]+)+)(?::(?:[1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\[(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?:(?::[0-9A-Fa-f]{1,4}){1,6})|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:))\\](?::(?:[1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+        }
+      ],
+      "description": "Exact domain, leading-wildcard subdomain, localhost, or bracketed IPv6 literal, optionally followed by a port from 1 through 65535. Bare '*' and overly broad wildcards such as '*.com' are not allowed.",
+      "examples": [
+        "github.com",
+        "*.npmjs.org",
+        "api.example.com:443",
+        "localhost:3000",
+        "[::1]:8080"
+      ]
+    },
+    "deniedDomainPortPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/domainPortPattern"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\*(?::(?:[1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$",
+          "description": "Deny all domains, optionally on one destination port."
+        }
+      ]
+    },
+    "hostDomainPattern": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "ipv6"
+        },
+        {
+          "type": "string",
+          "pattern": "^(?:localhost|(?:\\*\\.)?[^\\s/:*]+(?:\\.[^\\s/:*]+)+)$"
+        }
+      ],
+      "description": "Host-only domain pattern without a port suffix. IPv6 literals are unbracketed in these host-only fields.",
+      "examples": [
+        "api.example.com",
+        "*.internal.example.com",
+        "::1"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Filesystem path. Relative paths resolve against the process working directory; '~' expands to the host user's home directory."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedDomains": {
+          "type": "array",
+          "default": [
+            "npmjs.org",
+            "*.npmjs.org",
+            "registry.npmjs.org",
+            "registry.yarnpkg.com",
+            "pypi.org",
+            "*.pypi.org",
+            "github.com",
+            "*.github.com",
+            "api.github.com",
+            "raw.githubusercontent.com"
+          ],
+          "items": {
+            "$ref": "#/$defs/domainPortPattern"
+          },
+          "description": "Allowed outbound domains. An empty array denies every unmatched host because this extension installs no permission callback."
+        },
+        "deniedDomains": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/deniedDomainPortPattern"
+          },
+          "description": "Explicitly denied outbound domains. Deny rules take precedence over allow rules."
+        },
+        "deniedDomainReasons": {
+          "type": "object",
+          "description": "Model-facing reasons keyed by exact deniedDomains entries.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "strictAllowlist": {
+          "type": "boolean",
+          "default": false,
+          "description": "Deny unmatched hosts without consulting a permission callback. This extension supplies no callback, so unmatched hosts are denied regardless."
+        },
+        "allowUnixSockets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "macOS only: Unix socket paths to allow. Ignored on Linux."
+        },
+        "allowAllUnixSockets": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow all Unix sockets and disable Unix-socket blocking on both supported platforms."
+        },
+        "allowLocalBinding": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow sandboxed processes to bind local listening ports."
+        },
+        "allowMachLookup": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^*]*\\*?$",
+            "description": "macOS XPC/Mach service name. A wildcard is allowed only as one trailing '*'."
+          },
+          "description": "macOS only: additional XPC/Mach services to allow."
+        },
+        "httpProxyPort": {
+          "$ref": "#/$defs/port",
+          "description": "Local external HTTP proxy port. The external proxy must enforce domain policy."
+        },
+        "socksProxyPort": {
+          "$ref": "#/$defs/port",
+          "description": "Local external SOCKS proxy port. The external proxy must enforce domain policy."
+        },
+        "mitmProxy": {
+          "$ref": "#/$defs/mitmProxy"
+        },
+        "tlsTerminate": {
+          "$ref": "#/$defs/tlsTerminate"
+        },
+        "parentProxy": {
+          "$ref": "#/$defs/parentProxy"
+        }
+      }
+    },
+    "mitmProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "socketPath",
+        "domains"
+      ],
+      "properties": {
+        "socketPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unix socket path of the upstream MITM proxy."
+        },
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/hostDomainPattern"
+          },
+          "description": "Host-only domain patterns routed through the MITM proxy."
+        }
+      }
+    },
+    "tlsTerminate": {
+      "type": "object",
+      "additionalProperties": false,
+      "dependentRequired": {
+        "caCertPath": [
+          "caKeyPath"
+        ],
+        "caKeyPath": [
+          "caCertPath"
+        ]
+      },
+      "properties": {
+        "caCertPath": {
+          "$ref": "#/$defs/path",
+          "description": "PEM CA certificate used to sign per-host certificates."
+        },
+        "caKeyPath": {
+          "$ref": "#/$defs/path",
+          "description": "PEM private key corresponding to caCertPath."
+        },
+        "excludeDomains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hostDomainPattern"
+          },
+          "description": "Host-only patterns whose HTTPS traffic remains an opaque tunnel."
+        },
+        "extraCaCertPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "description": "Additional PEM CA files appended to the child trust bundle."
+        }
+      },
+      "description": "Experimental in-process HTTPS termination. Omit both CA paths to use a generated CA."
+    },
+    "parentProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "type": "string",
+          "format": "uri",
+          "description": "Parent proxy URL for plain HTTP traffic."
+        },
+        "https": {
+          "type": "string",
+          "format": "uri",
+          "description": "Parent proxy URL for HTTPS/CONNECT traffic; falls back to http when unset."
+        },
+        "noProxy": {
+          "type": "string",
+          "description": "Comma-separated hostname-suffix and CIDR bypass list."
+        }
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable all filesystem restrictions, including mandatory protections. Network restrictions remain active."
+        },
+        "denyRead": {
+          "type": "array",
+          "default": [
+            "~/.ssh",
+            "~/.aws",
+            "~/.gnupg"
+          ],
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "description": "Paths denied for reading."
+        },
+        "allowRead": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "description": "Paths re-allowed for reading inside denied regions. Takes precedence over denyRead."
+        },
+        "allowWrite": {
+          "type": "array",
+          "default": [
+            ".",
+            "/tmp"
+          ],
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "description": "Paths allowed for writing. All other paths are read-only."
+        },
+        "denyWrite": {
+          "type": "array",
+          "default": [
+            ".env",
+            ".env.*",
+            "*.pem",
+            "*.key"
+          ],
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "description": "Paths denied for writing inside allowed write paths. Takes precedence over allowWrite. Linux supports literal paths only."
+        },
+        "allowGitConfig": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow writes to repository .git/config files while keeping .git/hooks protected. Does not control reads or the working-directory .gitconfig mandatory protection."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "enabled": true,
+      "network": {
+        "allowedDomains": [
+          "github.com",
+          "*.github.com"
+        ],
+        "deniedDomains": []
+      },
+      "filesystem": {
+        "denyRead": [
+          "~/.ssh"
+        ],
+        "allowWrite": [
+          ".",
+          "/tmp"
+        ],
+        "denyWrite": [
+          ".env"
+        ]
+      }
+    }
+  ]
+}
