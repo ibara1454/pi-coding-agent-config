@@ -1,0 +1,14 @@
+{
+  "name": "pi-extension-omp-status-line",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "bun test --pass-with-no-tests"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

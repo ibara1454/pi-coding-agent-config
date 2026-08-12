@@ -123,4 +123,12 @@ The `pr` segment runs `gh pr view --json number,url` in the active working direc
 
 ## Installation in this repository
 
-The extension has no additional npm dependencies. Pi discovers `extensions/omp-status-line/index.ts` automatically when this repository is used as `PI_CODING_AGENT_DIR`.
+The extension has no runtime npm dependencies. Pi discovers `extensions/omp-status-line/index.ts` automatically when this repository is used as `PI_CODING_AGENT_DIR`.
+
+Run the unit tests from the extension directory:
+
+```bash
+npm test
+```
+
+The npm script delegates to Bun's test runner. It currently passes when no test files exist, so the command remains stable until focused status-line tests are added.
