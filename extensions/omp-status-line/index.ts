@@ -398,16 +398,32 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     if (pathIndex >= 0 && totalWidth() > width) {
       const overflow = totalWidth() - width;
       const currentWidth = visibleWidth(left[pathIndex] ?? "");
-      const maxLength = preset.segmentOptions.path?.maxLength ?? 40;
-      const nextMaxLength = Math.max(4, maxLength - Math.min(Math.max(0, currentWidth - 8), overflow));
-      const adjustedCtx: SegmentContext = {
-        ...segmentCtx,
-        options: { ...segmentCtx.options, path: { ...segmentCtx.options.path, maxLength: nextMaxLength } },
-      };
-      const adjusted = renderSegment("path", adjustedCtx);
-      if (adjusted.visible && adjusted.content) {
-        left[pathIndex] = adjusted.content;
-        leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+      const minPathWidth = 8;
+      const shrinkable = currentWidth - minPathWidth;
+      if (shrinkable > 0) {
+        const shrinkBy = Math.min(shrinkable, overflow);
+        const currentMaxLength = preset.segmentOptions.path?.maxLength ?? 40;
+        let nextMaxLength = Math.max(4, Math.min(currentMaxLength, currentWidth) - shrinkBy);
+        const pathCtx = (maxLength: number): SegmentContext => ({
+          ...segmentCtx,
+          options: { ...segmentCtx.options, path: { ...segmentCtx.options.path, maxLength } },
+        });
+        let adjusted = renderSegment("path", pathCtx(nextMaxLength));
+        if (adjusted.visible && adjusted.content) {
+          // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const saved = currentWidth - visibleWidth(adjusted.content);
+            if (saved >= shrinkBy) break;
+            const correctedMaxLength = Math.max(4, nextMaxLength - (shrinkBy - saved));
+            if (correctedMaxLength >= nextMaxLength) break;
+            nextMaxLength = correctedMaxLength;
+            const rerendered = renderSegment("path", pathCtx(nextMaxLength));
+            if (!rerendered.visible || !rerendered.content) break;
+            adjusted = rerendered;
+          }
+          left[pathIndex] = adjusted.content;
+          leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+        }
       }
     }
 

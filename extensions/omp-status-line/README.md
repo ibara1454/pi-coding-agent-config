@@ -131,4 +131,4 @@ Run the unit tests from the extension directory:
 npm test
 ```
 
-The npm script delegates to Bun's test runner. It currently passes when no test files exist, so the command remains stable until focused status-line tests are added.
+The npm script delegates to Bun's test runner.

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "bun test --pass-with-no-tests"
+    "test": "bun test"
   },
   "pi": {
     "extensions": [
