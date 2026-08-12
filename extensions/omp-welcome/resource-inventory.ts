@@ -1,5 +1,5 @@
 const SUPPORTED_PI_MINOR = /^0\.84\.\d+(?:[-+].*)?$/;
-const PATCH_REGISTRY = Symbol.for("pi-agent.extensions.welcome.resource-inventory-patches");
+const PATCH_REGISTRY = Symbol.for("pi-agent.extensions.omp-welcome.resource-inventory-patches");
 
 const METHOD_ANCHORS = [
   "loadedResourcesContainer.clear",

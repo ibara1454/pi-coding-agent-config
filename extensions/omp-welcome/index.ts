@@ -10,7 +10,7 @@ interface WelcomeProcessState {
   inventoryWarningShown?: boolean;
 }
 
-const PROCESS_STATE = Symbol.for("pi-agent.extensions.welcome.state");
+const PROCESS_STATE = Symbol.for("pi-agent.extensions.omp-welcome.state");
 
 function processState(): WelcomeProcessState {
   const root = globalThis as typeof globalThis & { [PROCESS_STATE]?: WelcomeProcessState };
