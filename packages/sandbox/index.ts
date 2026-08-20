@@ -30,13 +30,13 @@
  * ```
  *
  * Usage:
- * - `pi -e ./sandbox` - sandbox enabled with default/config settings
- * - `pi -e ./sandbox --no-sandbox` - disable sandboxing
+ * - `PI_CODING_AGENT_DIR="$PWD/apps/agent" pi` - load the extension from the tracked agent settings
+ * - `pi -e ./packages/sandbox --no-sandbox` - load it directly with sandboxing disabled
  * - `/sandbox` - show current sandbox configuration
  *
  * Setup:
- * 1. Copy sandbox/ directory to ~/.pi/agent/extensions/
- * 2. Run `npm install` in ~/.pi/agent/extensions/sandbox/
+ * 1. Run `npm ci` from the repository root
+ * 2. Use `apps/agent` as `PI_CODING_AGENT_DIR`
  *
  * Linux also requires: bubblewrap, socat, ripgrep
  */

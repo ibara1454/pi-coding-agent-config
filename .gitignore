@@ -1,12 +1,6 @@
-# Local pi configuration and credentials
-/bin/*
-!/bin/README.md
-/auth.json
-/models-store.json
+node_modules/
+# The tracked Pi configuration lives under apps/agent.
 /settings.json
-/trust.json
-/sessions/
-
 # OS and editor files
 .DS_Store
 *.swp

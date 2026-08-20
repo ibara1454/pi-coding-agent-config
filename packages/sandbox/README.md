@@ -8,17 +8,16 @@ This extension was originally copied from the [pi sandbox extension example](htt
 
 ## Install
 
-Install the extension dependencies:
+Install all workspace dependencies from the repository root:
 
 ```sh
-cd ~/.pi/agent/extensions/sandbox
-npm install
+npm ci
 ```
 
-Start pi with the extension:
+Start Pi with the repository's agent configuration:
 
 ```sh
-pi -e ~/.pi/agent/extensions/sandbox
+PI_CODING_AGENT_DIR="$PWD/apps/agent" pi
 ```
 
 On Linux, install `bubblewrap`, `socat`, and `ripgrep` through your system package manager.
@@ -33,7 +32,7 @@ The extension reads configuration from these sources; later sources take precede
 
 `network` and `filesystem` are merged one property deep. Arrays and nested objects such as `tlsTerminate` replace the earlier value rather than being concatenated or recursively merged. A project-level `ignoreViolations` replaces the complete global map.
 
-The JSON Schema for both configuration files is [`schemas/sandbox.schema.json`](../../schemas/sandbox.schema.json). Unknown properties are currently ignored at runtime, but the schema rejects them so misspelled or unsupported settings are visible in editors and validators. A config may include a `$schema` string for editor integration; the extension itself ignores it.
+The JSON Schema for both configuration files is [`apps/agent/schemas/sandbox.schema.json`](../../apps/agent/schemas/sandbox.schema.json). Unknown properties are currently ignored at runtime, but the schema rejects them so misspelled or unsupported settings remain visible in editors and validators. A config may include a `$schema` string for editor integration; the extension itself ignores it.
 
 ### Built-in defaults
 
@@ -63,10 +62,10 @@ The JSON Schema for both configuration files is [`schemas/sandbox.schema.json`](
 }
 ```
 
-Set `"enabled": false` in either configuration file to disable the sandbox. Use `--no-sandbox` to disable it for one invocation:
+Set `--no-sandbox` to disable sandboxing for one run:
 
 ```sh
-pi -e ~/.pi/agent/extensions/sandbox --no-sandbox
+PI_CODING_AGENT_DIR="$PWD/apps/agent" pi --no-sandbox
 ```
 
 ### Top-level settings

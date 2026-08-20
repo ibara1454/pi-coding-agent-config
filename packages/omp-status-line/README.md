@@ -123,7 +123,7 @@ The `pr` segment runs `gh pr view --json number,url` in the active working direc
 
 ## Installation in this repository
 
-The extension has no runtime npm dependencies. Pi discovers `extensions/omp-status-line/index.ts` automatically when this repository is used as `PI_CODING_AGENT_DIR`.
+The extension has no runtime npm dependencies. When `apps/agent` is used as `PI_CODING_AGENT_DIR`, its tracked `settings.json` loads `packages/omp-status-line` through the `../../packages/*` extension glob.
 
 Run the unit tests from the extension directory:
 

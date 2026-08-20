@@ -1,5 +1,5 @@
 {
-  "name": "pi-extension-provider-base-url-overrides",
+  "name": "provider-base-url-overrides",
   "private": true,
   "version": "1.0.0",
   "type": "module",

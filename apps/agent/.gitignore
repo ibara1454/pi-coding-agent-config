@@ -1,0 +1,7 @@
+# Local Pi state and credentials
+/bin/*
+!/bin/README.md
+/auth.json
+/models-store.json
+/trust.json
+/sessions/

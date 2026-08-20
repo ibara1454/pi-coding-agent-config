@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Pi sandbox extension configuration",
-  "description": "Configuration for extensions/sandbox. This describes the JSON settings the extension actually merges and passes to @anthropic-ai/sandbox-runtime 0.0.71.",
+  "description": "Configuration for packages/sandbox. This describes the JSON settings the extension actually merges and passes to @anthropic-ai/sandbox-runtime 0.0.71.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
