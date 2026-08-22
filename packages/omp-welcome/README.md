@@ -116,12 +116,10 @@ The extension has no extension-specific configuration.
 
 ## Installation in this repository
 
-The extension has no runtime npm dependencies. When `apps/agent` is used as `PI_CODING_AGENT_DIR`, its tracked `settings.json` loads `packages/omp-welcome` through the `../../packages/*` extension glob.
+The extension has no runtime package dependencies. When `apps/agent` is used as `PI_CODING_AGENT_DIR`, its tracked `settings.json` loads `packages/omp-welcome` through the `../../packages/*` extension glob.
 
 Run the unit tests from the extension directory:
 
 ```bash
-npm test
+bun test
 ```
-
-The npm script delegates to Bun's test runner.

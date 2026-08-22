@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as an npm monorepo. `packages/` contains self-contained TypeScript extensions. `apps/agent/` contains the Pi configuration; its tracked `settings.json` loads `../../packages/*`. The root `package.json` and `package-lock.json` manage workspace dependencies. Pi controls extension discovery and lifecycle.
+This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `packages/` contains self-contained TypeScript extensions. `apps/agent/` contains the Pi configuration; its tracked `settings.json` loads `../../packages/*`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle.
 
 ## Architecture & Data Flow
 
@@ -22,7 +22,7 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - `packages/sandbox/` — sandbox bash replacement, npm dependency lockfile, and no test suite.
 - `apps/agent/` — Pi Coding Agent configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
 - `apps/agent/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `apps/agent/sandbox.json`.
-- `package.json` and `package-lock.json` — authoritative npm workspace definition and dependency lock.
+- `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
 
 ## Development Commands
 
@@ -30,18 +30,18 @@ Run commands from the repository root unless stated otherwise. There is no root 
 
 ```bash
 # Install every workspace dependency from the root lockfile.
-npm ci
+bun install --frozen-lockfile
 
-# Run every declared package test.
-npm test --workspaces --if-present
+# Run every extension test.
+bun test
 
 # Run one extension's tests.
-npm test --workspace packages/provider-base-url-overrides
-npm test --workspace packages/omp-status-line
-npm test --workspace packages/omp-welcome
+bun test packages/provider-base-url-overrides
+bun test packages/omp-status-line
+bun test packages/omp-welcome
 ```
 
-`packages/sandbox` has no test script. Do not treat its `npm run build` or `npm run check` commands as validation; both are explicit no-ops.
+`packages/sandbox` has no test suite. Do not treat its `bun run build` or `bun run check` commands as validation; both are explicit no-ops.
 
 ## Code Conventions & Common Patterns
 
@@ -59,7 +59,7 @@ npm test --workspace packages/omp-welcome
 ## Important Files
 
 - `README.md` — repository purpose and root setup entry point.
-- `package.json` and `package-lock.json` — root workspace manifest and lockfile.
+- `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
 - `apps/agent/settings.json` — tracked, non-secret Pi defaults and extension references.
 - `apps/agent/sandbox.json` and `apps/agent/schemas/sandbox.schema.json` — sandbox policy and its strict schema.
 - `packages/omp-status-line/index.ts` — status-line integration entry point.
@@ -70,7 +70,7 @@ npm test --workspace packages/omp-welcome
 
 ## Runtime/Tooling Preferences
 
-- Use **npm** for root workspace dependency installation and **Bun** through the declared package test scripts.
+- Use **Bun** for root workspace dependency installation and tests.
 - Extension packages are private ESM packages with Pi entry points declared in their local `package.json` files.
 - The sandbox dependency declares Node `>=20.11.0`; this is a sandbox dependency constraint, not evidence of a repository-wide engine declaration.
 - Pi-host modules are available in Pi at runtime. Unit tests that import host-facing extensions should mock host modules before dynamically importing the extension, as `packages/omp-status-line/index.test.ts` does.
@@ -80,7 +80,7 @@ npm test --workspace packages/omp-welcome
 ## Testing & QA
 
 - Tests use `bun:test`; there is no Jest, Vitest, coverage configuration, root build, root lint, or root typecheck command.
-- Run all declared tests with `npm test --workspaces --if-present`.
+- Run all declared tests with `bun test`.
 - Current coverage is localized: `packages/omp-status-line/index.test.ts` covers responsive status-line behavior; `packages/omp-welcome/*.test.ts` covers rendering, discovery, terminal-cell safety, lifecycle, gradients, and inventory overrides; `packages/provider-base-url-overrides/index.test.ts` covers URL validation, API mapping, provider delegation, Azure precedence, and lifecycle/immutability. `packages/sandbox/` has no test script or test files.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
 - Prefer lightweight fake Pi/UI/context objects over broad integration setup. For filesystem/configuration tests, create deterministic temp roots, restore environment variables, invoke shutdown/dispose paths, and remove temp data in `finally`/`afterEach`.

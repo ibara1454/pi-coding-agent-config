@@ -50,8 +50,7 @@ For `azure-openai-responses`, the wrapper overwrites both `options.azureBaseUrl`
 From the repository root:
 
 ```sh
-cd packages/provider-base-url-overrides
-npm test
+bun test packages/provider-base-url-overrides
 ```
 
 ## Security

@@ -11,7 +11,7 @@ This extension was originally copied from the [pi sandbox extension example](htt
 Install all workspace dependencies from the repository root:
 
 ```sh
-npm ci
+bun install --frozen-lockfile
 ```
 
 Start Pi with the repository's agent configuration:

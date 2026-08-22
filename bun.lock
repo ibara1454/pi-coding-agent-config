@@ -1,0 +1,47 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 0,
+  "workspaces": {
+    "": {
+      "name": "pi-ibara1454-mono",
+    },
+    "packages/omp-status-line": {
+      "name": "pi-extension-omp-status-line",
+      "version": "1.0.0",
+    },
+    "packages/omp-welcome": {
+      "name": "omp-welcome",
+      "version": "1.0.0",
+    },
+    "packages/provider-base-url-overrides": {
+      "name": "provider-base-url-overrides",
+      "version": "1.0.0",
+    },
+    "packages/sandbox": {
+      "name": "sandbox",
+      "version": "1.14.1",
+      "dependencies": {
+        "@anthropic-ai/sandbox-runtime": "0.0.71",
+      },
+    },
+  },
+  "packages": {
+    "@anthropic-ai/sandbox-runtime": ["@anthropic-ai/sandbox-runtime@0.0.71", "", { "dependencies": { "@pondwader/socks5-server": "^1.0.10", "commander": "^12.1.0", "node-forge": "^1.4.0", "zod": "^3.24.1" }, "bin": { "srt": "dist/cli.js" } }, "sha512-/ZMCavpMElD0ku2BlA95vezKUsVN0DD/wVd3WIEAfFjkTF2nsmzQA+MhejIWhuSUS9HpxMtTj57eFL+kdbKZ/A=="],
+
+    "@pondwader/socks5-server": ["@pondwader/socks5-server@1.0.10", "", {}, "sha512-bQY06wzzR8D2+vVCUoBsr5QS2U6UgPUQRmErNwtsuI6vLcyRKkafjkr3KxbtGFf9aBBIV2mcvlsKD1UYaIV+sg=="],
+
+    "commander": ["commander@12.1.0", "", {}, "sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA=="],
+
+    "node-forge": ["node-forge@1.4.0", "", {}, "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="],
+
+    "omp-welcome": ["omp-welcome@workspace:packages/omp-welcome"],
+
+    "pi-extension-omp-status-line": ["pi-extension-omp-status-line@workspace:packages/omp-status-line"],
+
+    "provider-base-url-overrides": ["provider-base-url-overrides@workspace:packages/provider-base-url-overrides"],
+
+    "sandbox": ["sandbox@workspace:packages/sandbox"],
+
+    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+  }
+}
