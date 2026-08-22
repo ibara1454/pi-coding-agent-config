@@ -14,6 +14,17 @@
   "author": "",
   "type": "module",
   "packageManager": "bun@1.3.14",
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1",
+    "bun-types": "1.3.14"
+  },
   "scripts": {},
   "workspaces": [
     "packages/omp-status-line",
