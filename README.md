@@ -16,10 +16,18 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`omp-welcome`](packages/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test packages/omp-welcome` |
 | [`sandbox`](packages/sandbox/README.md) | Replaces Pi's bash tool schema-backed sandbox policy. | Dependencies installed with `bun install --frozen-lockfile`; no test suite. |
 
-## Testing
+## Validation
 
-Run all extension tests from the repository root:
+Run strict type checking for every workspace:
 
 ```bash
-bun test
+bun run typecheck
 ```
+
+Run all extension tests through Turborepo:
+
+```bash
+bun run test
+```
+
+Use the focused `bun test packages/...` commands above while iterating on one extension.

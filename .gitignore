@@ -1,4 +1,5 @@
 node_modules/
+.turbo/
 # The tracked Pi configuration lives under apps/agent.
 /settings.json
 # OS and editor files
