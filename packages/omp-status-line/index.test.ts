@@ -21,7 +21,7 @@ function statusText(line: string): string {
 
 test("shrinks a short path before dropping context usage", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-status-line-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousAgentDir = process.env["PI_CODING_AGENT_DIR"];
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   let editorFactory: ((...args: unknown[]) => { render(width: number): string[] }) | undefined;
 
@@ -42,7 +42,7 @@ test("shrinks a short path before dropping context usage", async () => {
         },
       }),
     );
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    process.env["PI_CODING_AGENT_DIR"] = agentDir;
 
     const theme = {
       fg: (_color: string, text: string): string => text,
@@ -105,8 +105,8 @@ test("shrinks a short path before dropping context usage", async () => {
     expect(Bun.stringWidth(Bun.stripANSI(narrowTop))).toBe(narrowWidth);
   } finally {
     await handlers.get("session_shutdown")?.({});
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousAgentDir === undefined) delete process.env["PI_CODING_AGENT_DIR"];
+    else process.env["PI_CODING_AGENT_DIR"] = previousAgentDir;
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

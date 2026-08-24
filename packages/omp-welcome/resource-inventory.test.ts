@@ -115,7 +115,8 @@ describe("native resource inventory override", () => {
         if (options?.showDiagnosticsWhenQuiet === true || !quiet) calls.push(options ?? {});
       }
       loadedResourcesContainer = { clear() {} };
-      settingsManager: never = undefined as never;
+      // Declaration-only by design: this fixture exercises an unavailable runtime settings-manager seam.
+      declare settingsManager: { getQuietStartup(): boolean };
     }
 
     const override = installResourceInventoryOverride("0.84.1", MissingManager);

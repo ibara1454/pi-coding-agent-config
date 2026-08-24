@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEventStream, Model, Provider } from "@earendil-works/pi-ai";
 import providerBaseUrlOverrides from "./index.ts";
 
 const ENVIRONMENT_VARIABLES = [
@@ -11,87 +13,58 @@ const ENVIRONMENT_VARIABLES = [
 ] as const;
 
 type EnvironmentVariable = (typeof ENVIRONMENT_VARIABLES)[number];
-type TestContext = Record<string, unknown>;
-type TestOptions = Record<string, unknown>;
-type TestCredential = Record<string, unknown>;
-type TestHandle = Record<string, unknown>;
+type TestModel = Model<Api>;
+type RefreshModels = NonNullable<Provider["refreshModels"]>;
+type FilterModels = NonNullable<Provider["filterModels"]>;
+type FetchDeferred = NonNullable<Provider["fetchDeferred"]>;
+type CancelDeferred = NonNullable<Provider["cancelDeferred"]>;
 
-interface TestModel {
-  id: string;
-  name: string;
-  api: string;
-  provider: string;
-  baseUrl: string;
-  reasoning: boolean;
-  input: ["text"];
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
-  contextWindow: number;
-  maxTokens: number;
-  [key: string]: unknown;
+interface StreamCall {
+  model: Parameters<Provider["stream"]>[0];
+  context: Parameters<Provider["stream"]>[1];
+  options: Parameters<Provider["stream"]>[2];
 }
 
-interface TransportCall {
-  model: TestModel;
-  context?: TestContext;
-  options?: TestOptions;
-  handle?: TestHandle;
+interface StreamSimpleCall {
+  model: Parameters<Provider["streamSimple"]>[0];
+  context: Parameters<Provider["streamSimple"]>[1];
+  options: Parameters<Provider["streamSimple"]>[2];
+}
+
+interface DeferredFetchCall {
+  model: Parameters<FetchDeferred>[0];
+  handle: Parameters<FetchDeferred>[1];
+  options: Parameters<FetchDeferred>[2];
+}
+
+interface DeferredCancelCall {
+  model: Parameters<CancelDeferred>[0];
+  handle: Parameters<CancelDeferred>[1];
+  options: Parameters<CancelDeferred>[2];
 }
 
 interface ProviderCalls {
   getModels: number;
-  stream: TransportCall[];
-  streamSimple: TransportCall[];
-  refreshModels: TestContext[];
+  stream: StreamCall[];
+  streamSimple: StreamSimpleCall[];
+  refreshModels: Array<Parameters<RefreshModels>[0]>;
   filterModels: Array<{
-    models: readonly TestModel[];
-    credential: TestCredential | undefined;
+    models: Parameters<FilterModels>[0];
+    credential: Parameters<FilterModels>[1];
   }>;
-  fetchDeferred: TransportCall[];
-  cancelDeferred: TransportCall[];
+  fetchDeferred: DeferredFetchCall[];
+  cancelDeferred: DeferredCancelCall[];
 }
 
-interface TestProvider {
-  id: string;
-  name: string;
-  baseUrl?: string;
-  headers?: Record<string, string | null>;
-  auth: TestCredential;
-  getModels(): readonly TestModel[];
-  stream(
-    model: TestModel,
-    context: TestContext,
-    options?: TestOptions,
-  ): unknown;
-  streamSimple(
-    model: TestModel,
-    context: TestContext,
-    options?: TestOptions,
-  ): unknown;
-  refreshModels?(context: TestContext): Promise<void>;
-  filterModels?(
-    models: readonly TestModel[],
-    credential: TestCredential | undefined,
-  ): readonly TestModel[];
-  fetchDeferred?(
-    model: TestModel,
-    handle: TestHandle,
-    options?: TestOptions,
-  ): unknown;
-  cancelDeferred?(
-    model: TestModel,
-    handle: TestHandle,
-    options?: TestOptions,
-  ): Promise<void>;
+interface ProviderResults {
+  stream: AssistantMessageEventStream;
+  streamSimple: AssistantMessageEventStream;
+  fetchDeferred: AssistantMessageEventStream;
 }
 
 interface TestModelRegistry {
   getAll(): readonly TestModel[];
-  getProvider(id: string): TestProvider | undefined;
+  getProvider(id: string): Provider | undefined;
 }
 
 interface SessionHandler {
@@ -102,9 +75,10 @@ interface SessionHandler {
 
 interface ExtensionHarness {
   handlers: Array<{ event: string; handler: SessionHandler }>;
-  registrations: TestProvider[];
+  registrations: Provider[];
   warnings: string[];
 }
+
 
 function makeModel(
   provider: string,
@@ -130,7 +104,7 @@ function makeProvider(
   id: string,
   models: readonly TestModel[],
   includeOptionalMethods = false,
-): { provider: TestProvider; calls: ProviderCalls } {
+): { provider: Provider; calls: ProviderCalls; results: ProviderResults } {
   const calls: ProviderCalls = {
     getModels: 0,
     stream: [],
@@ -140,67 +114,65 @@ function makeProvider(
     fetchDeferred: [],
     cancelDeferred: [],
   };
+  const results: ProviderResults = {
+    stream: createAssistantMessageEventStream(),
+    streamSimple: createAssistantMessageEventStream(),
+    fetchDeferred: createAssistantMessageEventStream(),
+  };
   const headers = { "x-provider": id };
-  const auth = { kind: "test-auth", provider: id };
-  const provider = {
+  const auth: Provider["auth"] = {
+    apiKey: {
+      name: `${id} test auth`,
+      async resolve() {
+        return undefined;
+      },
+    },
+  };
+  const provider: Provider = {
     id,
     name: `${id} provider`,
     baseUrl: `https://origin.test/${id}`,
     headers,
     auth,
-    getModels(this: TestProvider) {
+    getModels() {
       expect(this).toBe(provider);
       calls.getModels += 1;
       return models;
     },
-    stream(this: TestProvider, model: TestModel, context: TestContext, options?: TestOptions) {
+    stream(model, context, options) {
       expect(this).toBe(provider);
       calls.stream.push({ model, context, options });
-      return { kind: "stream", provider: id };
+      return results.stream;
     },
-    streamSimple(this: TestProvider, model: TestModel, context: TestContext, options?: TestOptions) {
+    streamSimple(model, context, options) {
       expect(this).toBe(provider);
       calls.streamSimple.push({ model, context, options });
-      return { kind: "stream-simple", provider: id };
+      return results.streamSimple;
     },
-  } as TestProvider;
+  };
 
   if (includeOptionalMethods) {
-    provider.refreshModels = async function (this: TestProvider, context: TestContext) {
+    provider.refreshModels = async function (this: Provider, context) {
       expect(this).toBe(provider);
       calls.refreshModels.push(context);
     };
-    provider.filterModels = function (
-      this: TestProvider,
-      filterableModels: readonly TestModel[],
-      credential: TestCredential | undefined,
-    ) {
+    provider.filterModels = function (this: Provider, filterableModels, credential) {
       expect(this).toBe(provider);
       calls.filterModels.push({ models: filterableModels, credential });
-      return [models[0]];
+      return filterableModels.slice(0, 1);
     };
-    provider.fetchDeferred = function (
-      this: TestProvider,
-      model: TestModel,
-      handle: TestHandle,
-      options?: TestOptions,
-    ) {
+    provider.fetchDeferred = function (this: Provider, model, handle, options) {
       expect(this).toBe(provider);
       calls.fetchDeferred.push({ model, handle, options });
-      return { kind: "fetch-deferred", provider: id };
+      return results.fetchDeferred;
     };
-    provider.cancelDeferred = async function (
-      this: TestProvider,
-      model: TestModel,
-      handle: TestHandle,
-      options?: TestOptions,
-    ) {
+    provider.cancelDeferred = async function (this: Provider, model, handle, options) {
       expect(this).toBe(provider);
       calls.cancelDeferred.push({ model, handle, options });
     };
   }
 
-  return { provider, calls };
+  return { provider, calls, results };
 }
 
 function makeHarness(): {
@@ -216,7 +188,7 @@ function makeHarness(): {
     on(event: string, handler: SessionHandler) {
       state.handlers.push({ event, handler });
     },
-    registerProvider(provider: TestProvider) {
+    registerProvider(provider: Provider) {
       state.registrations.push(provider);
     },
   } as unknown as ExtensionAPI;
@@ -256,7 +228,7 @@ function runExtension(environment: Partial<Record<EnvironmentVariable, string>>)
 
 function makeRegistry(
   models: readonly TestModel[],
-  providers: Record<string, TestProvider>,
+  providers: Record<string, Provider>,
 ): { registry: TestModelRegistry; lookups: string[] } {
   const lookups: string[] = [];
   return {
@@ -358,15 +330,15 @@ test("valid PROVIDER_BASE_URL installs only session_start and wraps every repres
     baseUrl.trim(),
     baseUrl.trim(),
   ]);
-  expect(harness.registrations[0].getModels()).toEqual([
+  expect(harness.registrations[0]!.getModels()).toEqual([
     { ...alphaModel },
     { ...alphaSecondModel },
   ]);
-  expect(harness.registrations[1].getModels()).toEqual([
+  expect(harness.registrations[1]!.getModels()).toEqual([
     { ...betaModel },
   ]);
-  expect(harness.registrations[0].getModels()[0]).not.toBe(alphaModel);
-  expect(harness.registrations[1].getModels()[0]).not.toBe(betaModel);
+  expect(harness.registrations[0]!.getModels()[0]).not.toBe(alphaModel);
+  expect(harness.registrations[1]!.getModels()[0]).not.toBe(betaModel);
   expect(alphaModel.baseUrl).toBe("https://origin.test/alpha-one");
   expect(alphaSecondModel.baseUrl).toBe("https://origin.test/alpha-two");
   expect(betaModel.baseUrl).toBe("https://origin.test/beta-one");
@@ -393,7 +365,7 @@ test("routes every supported model API and preserves unrelated model URLs", asyn
 
   await triggerSessionStart(harness, registry);
 
-  const routedModels = harness.registrations[0].getModels();
+  const routedModels = harness.registrations[0]!.getModels();
   expect(routedModels.map((model) => model.baseUrl)).toEqual([
     providerBaseUrl,
     `${providerBaseUrl}/v1`,
@@ -408,7 +380,7 @@ test("routes every supported model API and preserves unrelated model URLs", asyn
     "https://origin.test/custom",
   ]);
   for (const [index, model] of models.entries()) {
-    expect(routedModels[index]).not.toBe(model);
+    expect(routedModels[index]!).not.toBe(model);
     expect(model.baseUrl).toBe(`https://origin.test/${model.id}`);
   }
 });
@@ -446,11 +418,11 @@ test("trailing roots route Google APIs with one separator", async () => {
 
   await triggerSessionStart(harness, registry);
 
-  const routedModels = harness.registrations[0].getModels();
-  expect(routedModels[0].baseUrl).toBe(providerBaseUrl.trim());
-  expect(routedModels[1].baseUrl).toBe("https://proxy.test/root/v1");
-  expect(routedModels[2].baseUrl).toBe("https://proxy.test/root/v1beta");
-  expect(routedModels[3].baseUrl).toBe(providerBaseUrl.trim());
+  const routedModels = harness.registrations[0]!.getModels();
+  expect(routedModels[0]!.baseUrl).toBe(providerBaseUrl.trim());
+  expect(routedModels[1]!.baseUrl).toBe("https://proxy.test/root/v1");
+  expect(routedModels[2]!.baseUrl).toBe("https://proxy.test/root/v1beta");
+  expect(routedModels[3]!.baseUrl).toBe(providerBaseUrl.trim());
 });
 
 test("preserves provider metadata and omits absent optional methods", async () => {
@@ -461,7 +433,7 @@ test("preserves provider metadata and omits absent optional methods", async () =
 
   await triggerSessionStart(harness, registry);
 
-  const wrapped = harness.registrations[0];
+  const wrapped = harness.registrations[0]!;
   expect(wrapped.id).toBe(provider.id);
   expect(wrapped.name).toBe(provider.name);
   expect(wrapped.headers).toBe(provider.headers);
@@ -480,14 +452,16 @@ test("delegates stream and streamSimple with per-model routes and preserved non-
     "https://origin.test/model",
     "openai-completions",
   );
-  const { provider, calls } = makeProvider("transport", [originalModel], true);
+  const { provider, calls, results } = makeProvider("transport", [originalModel], true);
   const harness = runExtension({ PROVIDER_BASE_URL: "https://proxy.test/override" });
   const { registry } = makeRegistry([originalModel], { transport: provider });
   await triggerSessionStart(harness, registry);
-  const wrapped = harness.registrations[0];
-  const context = { request: "context" };
+  const wrapped = harness.registrations[0]!;
+  const context: Parameters<Provider["stream"]>[1] = { messages: [] };
   const streamOptions = { temperature: 0.2 };
-  const simpleOptions = { reasoning: "high" };
+  const simpleOptions = {
+    reasoning: "high",
+  } satisfies NonNullable<Parameters<Provider["streamSimple"]>[2]>;
   const streamInput = { ...originalModel, baseUrl: "https://caller.test/stream" };
   const simpleInput = {
     ...originalModel,
@@ -498,22 +472,22 @@ test("delegates stream and streamSimple with per-model routes and preserved non-
   const streamResult = wrapped.stream(streamInput, context, streamOptions);
   const simpleResult = wrapped.streamSimple(simpleInput, context, simpleOptions);
 
-  expect(streamResult).toEqual({ kind: "stream", provider: "transport" });
-  expect(simpleResult).toEqual({ kind: "stream-simple", provider: "transport" });
-  expect(calls.stream[0]).toEqual({
+  expect(streamResult).toBe(results.stream);
+  expect(simpleResult).toBe(results.streamSimple);
+  expect(calls.stream[0]!).toEqual({
     model: { ...streamInput, baseUrl: "https://proxy.test/override/v1" },
     context,
     options: streamOptions,
   });
-  expect(calls.streamSimple[0]).toEqual({
+  expect(calls.streamSimple[0]!).toEqual({
     model: { ...simpleInput, baseUrl: "https://proxy.test/override" },
     context,
     options: simpleOptions,
   });
-  expect(calls.stream[0].options).toBe(streamOptions);
-  expect(calls.streamSimple[0].options).toBe(simpleOptions);
-  expect(calls.stream[0].model).not.toBe(streamInput);
-  expect(calls.streamSimple[0].model).not.toBe(simpleInput);
+  expect(calls.stream[0]!.options).toBe(streamOptions);
+  expect(calls.streamSimple[0]!.options).toBe(simpleOptions);
+  expect(calls.stream[0]!.model).not.toBe(streamInput);
+  expect(calls.streamSimple[0]!.model).not.toBe(simpleInput);
   expect(streamInput.baseUrl).toBe("https://caller.test/stream");
   expect(simpleInput.baseUrl).toBe("https://caller.test/simple");
   expect(originalModel.baseUrl).toBe("https://origin.test/model");
@@ -546,17 +520,21 @@ test("delegates refreshModels and filterModels with per-model routes and the ori
   const harness = runExtension({ PROVIDER_BASE_URL: "https://proxy.test/catalog" });
   const { registry } = makeRegistry([model], { catalog: provider });
   await triggerSessionStart(harness, registry);
-  const wrapped = harness.registrations[0];
-  const refreshContext = { allowNetwork: true };
-  const credential = { token: "secret" };
+  const wrapped = harness.registrations[0]!;
+  const refreshContext: Parameters<RefreshModels>[0] = {
+    allowNetwork: true,
+    publish: async () => true,
+    signal: new AbortController().signal,
+  };
+  const credential: Parameters<FilterModels>[1] = { type: "api_key", key: "secret" };
   const filterInput = [model, secondModel, thirdModel];
 
   await wrapped.refreshModels?.(refreshContext);
   const filtered = wrapped.filterModels?.(filterInput, credential);
-  const delegatedModels = calls.filterModels[0].models;
+  const delegatedModels = calls.filterModels[0]!.models;
 
   expect(calls.refreshModels).toEqual([refreshContext]);
-  expect(calls.filterModels[0].credential).toBe(credential);
+  expect(calls.filterModels[0]!.credential).toBe(credential);
   expect(delegatedModels).toEqual([
     { ...model, baseUrl: "https://proxy.test/catalog/v1" },
     { ...secondModel, baseUrl: "https://proxy.test/catalog" },
@@ -584,13 +562,19 @@ test("delegates deferred fetch and cancel with per-model routes and preserved no
     "https://origin.test/model",
     "openai-responses",
   );
-  const { provider, calls } = makeProvider("deferred", [originalModel], true);
+  const { provider, calls, results } = makeProvider("deferred", [originalModel], true);
   const harness = runExtension({ PROVIDER_BASE_URL: "https://proxy.test/deferred" });
   const { registry } = makeRegistry([originalModel], { deferred: provider });
   await triggerSessionStart(harness, registry);
-  const wrapped = harness.registrations[0];
-  const handle = { id: "deferred-handle" };
-  const options = { wait: 5000 };
+  const wrapped = harness.registrations[0]!;
+  const handle: Parameters<FetchDeferred>[1] = {
+    provider: "deferred",
+    modelId: originalModel.id,
+    api: originalModel.api,
+    id: "deferred-handle",
+  };
+  const fetchOptions = { wait: 5000 };
+  const cancelOptions = { timeoutMs: 5000 };
   const fetchInput = { ...originalModel, baseUrl: "https://caller.test/fetch" };
   const cancelInput = {
     ...originalModel,
@@ -598,24 +582,24 @@ test("delegates deferred fetch and cancel with per-model routes and preserved no
     baseUrl: "https://caller.test/cancel",
   };
 
-  const fetchResult = await wrapped.fetchDeferred?.(fetchInput, handle, options);
-  await wrapped.cancelDeferred?.(cancelInput, handle, options);
+  const fetchResult = await wrapped.fetchDeferred?.(fetchInput, handle, fetchOptions);
+  await wrapped.cancelDeferred?.(cancelInput, handle, cancelOptions);
 
-  expect(fetchResult).toEqual({ kind: "fetch-deferred", provider: "deferred" });
-  expect(calls.fetchDeferred[0]).toEqual({
+  expect(fetchResult).toBe(results.fetchDeferred);
+  expect(calls.fetchDeferred[0]!).toEqual({
     model: { ...fetchInput, baseUrl: "https://proxy.test/deferred/v1" },
     handle,
-    options,
+    options: fetchOptions,
   });
-  expect(calls.cancelDeferred[0]).toEqual({
+  expect(calls.cancelDeferred[0]!).toEqual({
     model: { ...cancelInput, baseUrl: "https://proxy.test/deferred" },
     handle,
-    options,
+    options: cancelOptions,
   });
-  expect(calls.fetchDeferred[0].options).toBe(options);
-  expect(calls.cancelDeferred[0].options).toBe(options);
-  expect(calls.fetchDeferred[0].model).not.toBe(fetchInput);
-  expect(calls.cancelDeferred[0].model).not.toBe(cancelInput);
+  expect(calls.fetchDeferred[0]!.options).toBe(fetchOptions);
+  expect(calls.cancelDeferred[0]!.options).toBe(cancelOptions);
+  expect(calls.fetchDeferred[0]!.model).not.toBe(fetchInput);
+  expect(calls.cancelDeferred[0]!.model).not.toBe(cancelInput);
   expect(fetchInput.baseUrl).toBe("https://caller.test/fetch");
   expect(cancelInput.baseUrl).toBe("https://caller.test/cancel");
   expect(originalModel.baseUrl).toBe("https://origin.test/model");
@@ -632,15 +616,20 @@ test("forces Azure routing options for every transport without mutating caller o
   const harness = runExtension({ PROVIDER_BASE_URL: "https://proxy.test/azure/" });
   const { registry } = makeRegistry([originalModel], { azure: provider });
   await triggerSessionStart(harness, registry);
-  const wrapped = harness.registrations[0];
-  const context = { request: "context" };
-  const handle = { id: "azure-handle" };
+  const wrapped = harness.registrations[0]!;
+  const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+  const handle: Parameters<FetchDeferred>[1] = {
+    provider: "azure",
+    modelId: originalModel.id,
+    api: originalModel.api,
+    id: "azure-handle",
+  };
   const callerEnv = {
     AZURE_OPENAI_BASE_URL: "https://configured.azure",
     AZURE_OPENAI_API_VERSION: "2024-10-21",
     KEEP_ENV: "keep",
   };
-  const callerOptions: TestOptions = {
+  const callerOptions = {
     apiKey: "key",
     azureBaseUrl: "https://configured-option",
     azureResourceName: "configured-resource",
@@ -664,15 +653,15 @@ test("forces Azure routing options for every transport without mutating caller o
   await wrapped.cancelDeferred?.(cancelInput, handle, callerOptions);
 
   for (const call of [
-    calls.stream[0],
-    calls.streamSimple[0],
-    calls.fetchDeferred[0],
-    calls.cancelDeferred[0],
+    calls.stream[0]!,
+    calls.streamSimple[0]!,
+    calls.fetchDeferred[0]!,
+    calls.cancelDeferred[0]!,
   ]) {
     expect(call.model.baseUrl).toBe(expectedBaseUrl);
     expect(call.options).toEqual(expectedOptions);
     expect(call.options).not.toBe(callerOptions);
-    expect(call.options?.env).not.toBe(callerEnv);
+    expect(call.options?.["env"]).not.toBe(callerEnv);
   }
   expect(callerOptions).toEqual({
     apiKey: "key",

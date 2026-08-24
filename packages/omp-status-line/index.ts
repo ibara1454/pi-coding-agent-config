@@ -91,7 +91,7 @@ function readJsonObject(filePath: string): Record<string, unknown> {
 }
 
 function agentDir(): string {
-  const configured = process.env.PI_CODING_AGENT_DIR?.trim();
+  const configured = process.env["PI_CODING_AGENT_DIR"]?.trim();
   return configured || path.join(os.homedir(), ".pi", "agent");
 }
 
@@ -109,34 +109,49 @@ function parseSegmentIds(value: unknown): StatusLineSegmentId[] | undefined {
   return value.filter((item): item is StatusLineSegmentId => typeof item === "string" && SEGMENT_IDS[item as StatusLineSegmentId] === true);
 }
 
+type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
+  [K in keyof T]?: NonNullable<T[K]>;
+};
+
+function toNonNullRecord<T extends Record<PropertyKey, unknown>>(record: T): NonNullRecord<T> {
+  const result: NonNullRecord<T> = {};
+  for (const key of Reflect.ownKeys(record) as Array<keyof T>) {
+    const value = record[key];
+    if (value !== null && value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
 function readSettings(cwd: string): StatusLineSettings {
   const global = readJsonObject(path.join(agentDir(), "settings.json"));
   const project = readJsonObject(path.join(cwd, ".pi", "settings.json"));
-  const globalStatus = isObjectRecord(global.statusLine) ? global.statusLine : {};
-  const projectStatus = isObjectRecord(project.statusLine) ? project.statusLine : {};
+  const globalStatus = isObjectRecord(global["statusLine"]) ? global["statusLine"] : {};
+  const projectStatus = isObjectRecord(project["statusLine"]) ? project["statusLine"] : {};
   const raw = { ...globalStatus, ...projectStatus };
-  const preset = typeof raw.preset === "string" && PRESETS[raw.preset as StatusLineSettings["preset"]] === true
-    ? raw.preset as StatusLineSettings["preset"]
+  const preset = typeof raw["preset"] === "string" && PRESETS[raw["preset"] as StatusLineSettings["preset"]] === true
+    ? raw["preset"] as StatusLineSettings["preset"]
     : "default";
-  const separator = typeof raw.separator === "string" && SEPARATORS[raw.separator as StatusLineSeparatorStyle] === true
-    ? raw.separator as StatusLineSeparatorStyle
+  const separator = typeof raw["separator"] === "string" && SEPARATORS[raw["separator"] as StatusLineSeparatorStyle] === true
+    ? raw["separator"] as StatusLineSeparatorStyle
     : undefined;
-  const segmentOptions = isObjectRecord(globalStatus.segmentOptions) || isObjectRecord(projectStatus.segmentOptions)
+  const segmentOptions = isObjectRecord(globalStatus["segmentOptions"]) || isObjectRecord(projectStatus["segmentOptions"])
     ? mergeOptions(
-        isObjectRecord(globalStatus.segmentOptions) ? globalStatus.segmentOptions as StatusLineSegmentOptions : undefined,
-        isObjectRecord(projectStatus.segmentOptions) ? projectStatus.segmentOptions as StatusLineSegmentOptions : undefined,
+        isObjectRecord(globalStatus["segmentOptions"]) ? globalStatus["segmentOptions"] as StatusLineSegmentOptions : undefined,
+        isObjectRecord(projectStatus["segmentOptions"]) ? projectStatus["segmentOptions"] as StatusLineSegmentOptions : undefined,
       )
     : undefined;
   return {
     preset,
-    leftSegments: parseSegmentIds(raw.leftSegments),
-    rightSegments: parseSegmentIds(raw.rightSegments),
-    separator,
-    segmentOptions,
-    showHookStatus: raw.showHookStatus !== false,
-    sessionAccent: raw.sessionAccent !== false,
-    transparent: raw.transparent === true,
-    compactThinkingLevel: raw.compactThinkingLevel === true,
+    ...toNonNullRecord({
+      leftSegments: parseSegmentIds(raw["leftSegments"]),
+      rightSegments: parseSegmentIds(raw["rightSegments"]),
+      separator,
+      segmentOptions,
+    }),
+    showHookStatus: raw["showHookStatus"] !== false,
+    sessionAccent: raw["sessionAccent"] !== false,
+    transparent: raw["transparent"] === true,
+    compactThinkingLevel: raw["compactThinkingLevel"] === true,
   };
 }
 
@@ -151,8 +166,8 @@ function effectivePreset(settings: StatusLineSettings): PresetDef {
 }
 
 function messageUsage(message: unknown): Record<string, unknown> | undefined {
-  if (!isObjectRecord(message) || message.role !== "assistant" || !isObjectRecord(message.usage)) return undefined;
-  return message.usage;
+  if (!isObjectRecord(message) || message["role"] !== "assistant" || !isObjectRecord(message["usage"])) return undefined;
+  return message["usage"];
 }
 
 function numeric(value: unknown): number {
@@ -165,12 +180,13 @@ function aggregateUsage(ctx: ExtensionContext, tokensPerSecond: number | null): 
     if (entry.type !== "message") continue;
     const usage = messageUsage(entry.message);
     if (!usage) continue;
-    stats.input += numeric(usage.input);
-    stats.output += numeric(usage.output);
-    stats.cacheRead += numeric(usage.cacheRead);
-    stats.cacheWrite += numeric(usage.cacheWrite);
-    stats.premiumRequests += numeric(usage.premiumRequests);
-    stats.cost += isObjectRecord(usage.cost) ? numeric(usage.cost.total) : numeric(usage.cost);
+    stats.input += numeric(usage["input"]);
+    stats.output += numeric(usage["output"]);
+    stats.cacheRead += numeric(usage["cacheRead"]);
+    stats.cacheWrite += numeric(usage["cacheWrite"]);
+    stats.premiumRequests += numeric(usage["premiumRequests"]);
+    const cost = usage["cost"];
+    stats.cost += isObjectRecord(cost) ? numeric(cost["total"]) : numeric(cost);
   }
   return stats;
 }
@@ -216,8 +232,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         gitState.pr = null;
       } else {
         const parsed: unknown = JSON.parse(result.stdout);
-        gitState.pr = isObjectRecord(parsed) && typeof parsed.number === "number" && typeof parsed.url === "string"
-          ? { number: parsed.number, url: parsed.url }
+        gitState.pr = isObjectRecord(parsed) && typeof parsed["number"] === "number" && typeof parsed["url"] === "string"
+          ? { number: parsed["number"], url: parsed["url"] }
           : null;
       }
     } catch {
@@ -314,8 +330,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       if (entry.message.stopReason === "aborted" || entry.message.stopReason === "error") continue;
       const usage = messageUsage(entry.message);
       if (!usage) continue;
-      const contextTokens = numeric(usage.totalTokens)
-        || numeric(usage.input) + numeric(usage.output) + numeric(usage.cacheRead) + numeric(usage.cacheWrite);
+      const contextTokens = numeric(usage["totalTokens"])
+        || numeric(usage["input"]) + numeric(usage["output"]) + numeric(usage["cacheRead"]) + numeric(usage["cacheWrite"]);
       if (contextTokens > 0) return true;
     }
     return false;
@@ -588,7 +604,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
-      const output = numeric(usage.output);
+      const output = numeric(usage["output"]);
       if (elapsed > 0 && output > 0) tokensPerSecond = output / elapsed;
     }
     requestRender();
@@ -598,7 +614,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
-      const output = numeric(usage.output);
+      const output = numeric(usage["output"]);
       if (elapsed > 0 && output > 0) tokensPerSecond = output / elapsed;
     }
     requestRender();
@@ -619,8 +635,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       void refreshGit(true);
       return;
     }
-    if (event.toolName === "bash" && isObjectRecord(event.input) && typeof event.input.command === "string"
-      && /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(event.input.command)) {
+    if (event.toolName === "bash" && isObjectRecord(event.input) && typeof event.input["command"] === "string"
+      && /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(event.input["command"])) {
       gitLastFetch = 0;
       prBranchKey = null;
       void refreshGit(true);

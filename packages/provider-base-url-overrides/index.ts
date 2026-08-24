@@ -11,8 +11,21 @@ type TransportOptions = {
   [key: string]: unknown;
 };
 
+type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
+  [K in keyof T]?: NonNullable<T[K]>;
+};
+
+function toNonNullRecord<T extends Record<PropertyKey, unknown>>(record: T): NonNullRecord<T> {
+  const result: NonNullRecord<T> = {};
+  for (const key of Reflect.ownKeys(record) as Array<keyof T>) {
+    const value = record[key];
+    if (value !== null && value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
 function readProviderBaseUrl(): string | undefined {
-  const value = process.env.PROVIDER_BASE_URL?.trim();
+  const value = process.env["PROVIDER_BASE_URL"]?.trim();
   if (!value) return undefined;
 
   if (!isValidProviderBaseUrl(value)) {
@@ -109,11 +122,40 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
     return provider.streamSimple.call(provider, request.model, context, request.options);
   };
 
-  const wrapper: Provider = {
+  const refreshModels = provider.refreshModels;
+  const wrappedRefreshModels: Provider["refreshModels"] = refreshModels
+    ? (context) => refreshModels.call(provider, context)
+    : undefined;
+
+  const filterModels = provider.filterModels;
+  const wrappedFilterModels: Provider["filterModels"] = filterModels
+    ? (models, credential) => {
+        const routedModels = models.map((model) => routeModel(model, providerBaseUrl));
+        const filteredModels = filterModels.call(provider, routedModels, credential);
+        return filteredModels.map((model) => routeModel(model, providerBaseUrl));
+      }
+    : undefined;
+
+  const fetchDeferred = provider.fetchDeferred;
+  const wrappedFetchDeferred: Provider["fetchDeferred"] = fetchDeferred
+    ? (model, handle, options) => {
+        const request = routeRequest(model, providerBaseUrl, options);
+        return fetchDeferred.call(provider, request.model, handle, request.options);
+      }
+    : undefined;
+
+  const cancelDeferred = provider.cancelDeferred;
+  const wrappedCancelDeferred: Provider["cancelDeferred"] = cancelDeferred
+    ? (model, handle, options) => {
+        const request = routeRequest(model, providerBaseUrl, options);
+        return cancelDeferred.call(provider, request.model, handle, request.options);
+      }
+    : undefined;
+
+  return {
     id: provider.id,
     name: provider.name,
     baseUrl: providerBaseUrl,
-    headers: provider.headers,
     auth: provider.auth,
     getModels() {
       return provider
@@ -122,39 +164,14 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
     },
     stream,
     streamSimple,
+    ...toNonNullRecord({
+      headers: provider.headers,
+      refreshModels: wrappedRefreshModels,
+      filterModels: wrappedFilterModels,
+      fetchDeferred: wrappedFetchDeferred,
+      cancelDeferred: wrappedCancelDeferred,
+    }),
   };
-
-  const refreshModels = provider.refreshModels;
-  if (refreshModels) {
-    wrapper.refreshModels = (context) => refreshModels.call(provider, context);
-  }
-
-  const filterModels = provider.filterModels;
-  if (filterModels) {
-    wrapper.filterModels = (models, credential) => {
-      const routedModels = models.map((model) => routeModel(model, providerBaseUrl));
-      const filteredModels = filterModels.call(provider, routedModels, credential);
-      return filteredModels.map((model) => routeModel(model, providerBaseUrl));
-    };
-  }
-
-  const fetchDeferred = provider.fetchDeferred;
-  if (fetchDeferred) {
-    wrapper.fetchDeferred = (model, handle, options) => {
-      const request = routeRequest(model, providerBaseUrl, options);
-      return fetchDeferred.call(provider, request.model, handle, request.options);
-    };
-  }
-
-  const cancelDeferred = provider.cancelDeferred;
-  if (cancelDeferred) {
-    wrapper.cancelDeferred = (model, handle, options) => {
-      const request = routeRequest(model, providerBaseUrl, options);
-      return cancelDeferred.call(provider, request.model, handle, request.options);
-    };
-  }
-
-  return wrapper;
 }
 
 export default function providerBaseUrlOverrides(pi: ExtensionAPI): void {

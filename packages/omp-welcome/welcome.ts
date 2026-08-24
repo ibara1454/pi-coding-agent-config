@@ -62,10 +62,12 @@ function colorMode(theme: WelcomeTheme): ColorMode {
  */
 export class WelcomeHeader {
   private readonly animation: IntroAnimation;
+  private readonly options: WelcomeHeaderOptions;
   private cache: { width: number; rows: number; lines: string[] } | undefined;
   private disposed = false;
 
-  constructor(private readonly options: WelcomeHeaderOptions) {
+  constructor(options: WelcomeHeaderOptions) {
+    this.options = options;
     this.animation = new IntroAnimation(() => {
       if (this.disposed) return;
       this.invalidate();

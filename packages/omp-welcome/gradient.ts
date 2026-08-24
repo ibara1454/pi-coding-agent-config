@@ -105,8 +105,13 @@ const systemTimer: IntroTimer = {
 export class IntroAnimation {
   private startedAt: number | undefined;
   private timer: IntroTimerHandle | undefined;
+  private readonly requestRender: () => void;
+  private readonly clock: IntroTimer;
 
-  constructor(private readonly requestRender: () => void, private readonly clock: IntroTimer = systemTimer) {}
+  constructor(requestRender: () => void, clock: IntroTimer = systemTimer) {
+    this.requestRender = requestRender;
+    this.clock = clock;
+  }
 
   start(): void {
     this.dispose();

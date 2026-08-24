@@ -68,7 +68,7 @@ function renderModel(ctx: SegmentContext): RenderedSegment {
   }
   const thinking = thinkingDisplay(ctx);
   const compact = ctx.settings.compactThinkingLevel && thinking !== "";
-  const icon = compact ? thinking.split(" ", 1)[0] : icons.model;
+  const icon = compact ? (thinking.split(" ", 1)[0] ?? icons.model) : icons.model;
   const tail = !compact && thinking ? ` · ${thinking}` : "";
   return { content: color(statusColor.model, `${withIcon(icon, name)}${tail}`), visible: true };
 }

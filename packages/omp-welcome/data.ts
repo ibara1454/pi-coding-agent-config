@@ -29,11 +29,6 @@ interface PiSettings {
   extensions?: string[];
 }
 
-interface RawSettings {
-  quietStartup?: unknown;
-  packages?: unknown;
-  extensions?: unknown;
-}
 
 interface SnapshotResource {
   path: string;
@@ -100,33 +95,41 @@ function resolvePiPath(input: string, baseDir: string, trim = false): string {
 
 /** Pi's public agent-directory resolution, including PI_CODING_AGENT_DIR expansion. */
 export function getAgentDir(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.PI_CODING_AGENT_DIR;
+  const configured = env["PI_CODING_AGENT_DIR"];
   return configured ? normalizePiPath(configured) : path.join(os.homedir(), ".pi", "agent");
 }
 
 function cleanSettings(settings: Record<string, unknown>): PiSettings {
-  const packages = Array.isArray(settings.packages)
-    ? settings.packages.reduce<Array<string | PackageSource>>((result, entry) => {
-      if (typeof entry === "string") {
-        result.push(entry);
+  const rawPackages = settings["packages"];
+  const packages = Array.isArray(rawPackages)
+    ? rawPackages.reduce<Array<string | PackageSource>>((result, entry) => {
+        if (typeof entry === "string") {
+          result.push(entry);
+          return result;
+        }
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return result;
+        const source = "source" in entry ? entry["source"] : undefined;
+        if (typeof source !== "string") return result;
+        const packageSource: PackageSource = { source };
+        const autoload = "autoload" in entry ? entry["autoload"] : undefined;
+        if (typeof autoload === "boolean") packageSource.autoload = autoload;
+        const extensions = "extensions" in entry ? entry["extensions"] : undefined;
+        if (Array.isArray(extensions)) {
+          packageSource.extensions = extensions.filter((value: unknown): value is string => typeof value === "string");
+        }
+        result.push(packageSource);
         return result;
-      }
-      if (entry === null || typeof entry !== "object" || Array.isArray(entry) || !("source" in entry) || typeof entry.source !== "string") return result;
-      result.push({
-        source: entry.source,
-        autoload: "autoload" in entry && typeof entry.autoload === "boolean" ? entry.autoload : undefined,
-        extensions: "extensions" in entry && Array.isArray(entry.extensions)
-          ? entry.extensions.filter((value): value is string => typeof value === "string")
-          : undefined,
-      });
-      return result;
-    }, [])
+      }, [])
     : undefined;
-  return {
-    quietStartup: typeof settings.quietStartup === "boolean" ? settings.quietStartup : undefined,
-    packages,
-    extensions: Array.isArray(settings.extensions) ? settings.extensions.filter((entry): entry is string => typeof entry === "string") : undefined,
-  };
+  const cleaned: PiSettings = {};
+  const quietStartup = settings["quietStartup"];
+  if (typeof quietStartup === "boolean") cleaned.quietStartup = quietStartup;
+  if (packages !== undefined) cleaned.packages = packages;
+  const extensions = settings["extensions"];
+  if (Array.isArray(extensions)) {
+    cleaned.extensions = extensions.filter((entry: unknown): entry is string => typeof entry === "string");
+  }
+  return cleaned;
 }
 
 function scopedSettings(cwd: string, agentDir: string, projectTrusted: boolean): { user: PiSettings; project: PiSettings } {
@@ -235,7 +238,7 @@ function discoveryIgnored(directory: string): (relativePath: string) => boolean 
 
 function manifestExtensionEntries(directory: string): string[] | undefined {
   const manifest = readJson(path.join(directory, "package.json"));
-  const pi = manifest.pi;
+  const pi = manifest["pi"];
   if (pi === null || typeof pi !== "object" || Array.isArray(pi) || !("extensions" in pi) || !Array.isArray(pi.extensions)) return undefined;
   const entries = pi.extensions
     .filter((entry): entry is string => typeof entry === "string")
@@ -416,8 +419,12 @@ function packageIdentity(source: string, scope: ExtensionScope, agentDir: string
 
 function dedupePackages(user: readonly (string | PackageSource)[] | undefined, project: readonly (string | PackageSource)[] | undefined, agentDir: string, projectDir: string): PackageEntry[] {
   const entries: PackageEntry[] = [
-    ...(project ?? []).map(value => ({ source: packageSourceString(value), filter: typeof value === "string" ? undefined : value, scope: "project" as const })),
-    ...(user ?? []).map(value => ({ source: packageSourceString(value), filter: typeof value === "string" ? undefined : value, scope: "user" as const })),
+    ...(project ?? []).map(value => typeof value === "string"
+      ? { source: packageSourceString(value), scope: "project" as const }
+      : { source: packageSourceString(value), filter: value, scope: "project" as const }),
+    ...(user ?? []).map(value => typeof value === "string"
+      ? { source: packageSourceString(value), scope: "user" as const }
+      : { source: packageSourceString(value), filter: value, scope: "user" as const }),
   ];
   const result: PackageEntry[] = [];
   const seen = new Map<string, number>();
@@ -515,7 +522,7 @@ type PackageCollectionMode = "package" | "default" | "filter";
 
 function packageFiles(root: string, mode: PackageCollectionMode): { files: string[]; hasPackageResources: boolean } {
   const manifest = readJson(path.join(root, "package.json"));
-  const pi = manifest.pi;
+  const pi = manifest["pi"];
   const hasPiManifest = pi !== null && typeof pi === "object" && !Array.isArray(pi);
   const extensions = hasPiManifest && "extensions" in pi && Array.isArray(pi.extensions)
     ? pi.extensions.filter((entry): entry is string => typeof entry === "string")
@@ -698,12 +705,15 @@ export function collectWelcomeExtensions(options: WelcomeSnapshotOptions): Welco
     })
     .filter(resource => resource.enabled);
   const names = extensionNames(resolved);
-  const items: WelcomeExtension[] = resolved.map(resource => ({
-    name: names.get(resource) ?? extensionNameFromPath(resource.path),
-    scope: resource.scope,
-    path: resource.path,
-    packageSource: resource.origin === "package" ? resource.source : undefined,
-  }));
+  const items: WelcomeExtension[] = resolved.map(resource => {
+    const item: WelcomeExtension = {
+      name: names.get(resource) ?? extensionNameFromPath(resource.path),
+      scope: resource.scope,
+      path: resource.path,
+    };
+    if (resource.origin === "package") item.packageSource = resource.source;
+    return item;
+  });
 
   if (options.welcomePath && !seen.has(canonicalPath(options.welcomePath))) {
     items.push({ name: extensionNameFromPath(options.welcomePath), scope: "user", path: options.welcomePath });
