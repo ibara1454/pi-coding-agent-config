@@ -29,6 +29,7 @@
     "typescript": "^7.0.2"
   },
   "scripts": {
+    "check": "turbo run lint typecheck",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "test": "turbo run test",

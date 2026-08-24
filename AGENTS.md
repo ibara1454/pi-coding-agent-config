@@ -26,11 +26,14 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 
 ## Development Commands
 
-Run commands from the repository root unless stated otherwise. There is no root build, lint, or typecheck command.
+Run commands from the repository root unless stated otherwise. There is no root build command.
 
 ```bash
 # Install every workspace dependency from the root lockfile.
 bun install --frozen-lockfile
+
+# Run lint and type checking across every workspace.
+bun run check
 
 # Run every extension test.
 bun test
@@ -79,7 +82,7 @@ bun test packages/omp-welcome
 
 ## Testing & QA
 
-- Tests use `bun:test`; there is no Jest, Vitest, coverage configuration, root build, root lint, or root typecheck command.
+- Tests use `bun:test`; there is no Jest, Vitest, coverage configuration, or root build command.
 - Run all declared tests with `bun test`.
 - Current coverage is localized: `packages/omp-status-line/index.test.ts` covers responsive status-line behavior; `packages/omp-welcome/*.test.ts` covers rendering, discovery, terminal-cell safety, lifecycle, gradients, and inventory overrides; `packages/provider-base-url-overrides/index.test.ts` covers URL validation, API mapping, provider delegation, Azure precedence, and lifecycle/immutability. `packages/sandbox/` has no test script or test files.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.

@@ -18,6 +18,12 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 
 ## Validation
 
+Run all lint and type-check tasks through Turborepo:
+
+```bash
+bun run check
+```
+
 Check formatting, recommended lint rules, and import organization for every
 workspace:
 
