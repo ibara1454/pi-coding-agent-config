@@ -2,13 +2,28 @@ import type { PresetDef, StatusLinePreset } from "./types.ts";
 
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
   default: {
-    leftSegments: ["pi", "model", "mode", "collab", "path", "git", "pr", "context_pct", "cost"],
+    leftSegments: [
+      "pi",
+      "model",
+      "mode",
+      "collab",
+      "path",
+      "git",
+      "pr",
+      "context_pct",
+      "cost",
+    ],
     rightSegments: ["session_name"],
     separator: "powerline-thin",
     segmentOptions: {
       model: { showThinkingLevel: true },
       path: { abbreviate: true, maxLength: 40, stripWorkPrefix: true },
-      git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
+      git: {
+        showBranch: true,
+        showStaged: true,
+        showUnstaged: true,
+        showUntracked: true,
+      },
     },
   },
   minimal: {
@@ -17,7 +32,12 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
     separator: "slash",
     segmentOptions: {
       path: { abbreviate: true, maxLength: 30 },
-      git: { showBranch: true, showStaged: false, showUnstaged: false, showUntracked: false },
+      git: {
+        showBranch: true,
+        showStaged: false,
+        showUnstaged: false,
+        showUntracked: false,
+      },
     },
   },
   compact: {
@@ -26,11 +46,25 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
     separator: "powerline-thin",
     segmentOptions: {
       model: { showThinkingLevel: false },
-      git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: false },
+      git: {
+        showBranch: true,
+        showStaged: true,
+        showUnstaged: true,
+        showUntracked: false,
+      },
     },
   },
   full: {
-    leftSegments: ["pi", "hostname", "model", "mode", "path", "git", "pr", "subagents"],
+    leftSegments: [
+      "pi",
+      "hostname",
+      "model",
+      "mode",
+      "path",
+      "git",
+      "pr",
+      "subagents",
+    ],
     rightSegments: [
       "session_name",
       "cache_hit",
@@ -47,12 +81,27 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
     segmentOptions: {
       model: { showThinkingLevel: true },
       path: { abbreviate: true, maxLength: 50 },
-      git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
+      git: {
+        showBranch: true,
+        showStaged: true,
+        showUnstaged: true,
+        showUntracked: true,
+      },
       time: { format: "24h", showSeconds: false },
     },
   },
   nerd: {
-    leftSegments: ["pi", "hostname", "model", "mode", "path", "git", "pr", "session", "subagents"],
+    leftSegments: [
+      "pi",
+      "hostname",
+      "model",
+      "mode",
+      "path",
+      "git",
+      "pr",
+      "session",
+      "subagents",
+    ],
     rightSegments: [
       "session_name",
       "token_in",
@@ -70,7 +119,12 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
     segmentOptions: {
       model: { showThinkingLevel: true },
       path: { abbreviate: true, maxLength: 60 },
-      git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
+      git: {
+        showBranch: true,
+        showStaged: true,
+        showUnstaged: true,
+        showUntracked: true,
+      },
       time: { format: "24h", showSeconds: true },
     },
   },
@@ -81,7 +135,12 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
     segmentOptions: {
       model: { showThinkingLevel: true },
       path: { abbreviate: true, maxLength: 40 },
-      git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
+      git: {
+        showBranch: true,
+        showStaged: true,
+        showUnstaged: true,
+        showUntracked: true,
+      },
     },
   },
   custom: {

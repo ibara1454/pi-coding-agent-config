@@ -1,8 +1,19 @@
 import { fileURLToPath } from "node:url";
-import { InteractiveMode, SessionManager, VERSION, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { collectWelcomeExtensions, effectiveQuietStartup, getAgentDir, welcomeSessions } from "./data.ts";
-import { pickStartupTip, WelcomeHeader } from "./welcome.ts";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  InteractiveMode,
+  SessionManager,
+  VERSION,
+} from "@earendil-works/pi-coding-agent";
+import {
+  collectWelcomeExtensions,
+  effectiveQuietStartup,
+  getAgentDir,
+  welcomeSessions,
+} from "./data.ts";
 import { installResourceInventoryOverride } from "./resource-inventory.ts";
+import { pickStartupTip, WelcomeHeader } from "./welcome.ts";
 
 interface WelcomeProcessState {
   introPlayed: boolean;
@@ -13,14 +24,19 @@ interface WelcomeProcessState {
 const PROCESS_STATE = Symbol.for("pi-agent.extensions.omp-welcome.state");
 
 function processState(): WelcomeProcessState {
-  const root = globalThis as typeof globalThis & { [PROCESS_STATE]?: WelcomeProcessState };
+  const root = globalThis as typeof globalThis & {
+    [PROCESS_STATE]?: WelcomeProcessState;
+  };
   root[PROCESS_STATE] ??= { introPlayed: false };
   return root[PROCESS_STATE];
 }
 
 async function startupSessions(ctx: ExtensionContext) {
   try {
-    const sessions = await SessionManager.list(ctx.cwd, ctx.sessionManager.getSessionDir());
+    const sessions = await SessionManager.list(
+      ctx.cwd,
+      ctx.sessionManager.getSessionDir(),
+    );
     return welcomeSessions(sessions);
   } catch {
     return [];
@@ -30,7 +46,10 @@ async function startupSessions(ctx: ExtensionContext) {
 export default function welcome(pi: ExtensionAPI): void {
   let header: WelcomeHeader | undefined;
   let lifecycle = 0;
-  const inventoryOverride = installResourceInventoryOverride(VERSION, InteractiveMode);
+  const inventoryOverride = installResourceInventoryOverride(
+    VERSION,
+    InteractiveMode,
+  );
 
   pi.on("session_start", async (event, ctx) => {
     const start = ++lifecycle;
@@ -52,7 +71,6 @@ export default function welcome(pi: ExtensionAPI): void {
       );
     }
 
-
     const [extensions, sessions] = await Promise.all([
       collectWelcomeExtensions({
         cwd: ctx.cwd,
@@ -64,8 +82,8 @@ export default function welcome(pi: ExtensionAPI): void {
     ]);
     if (start !== lifecycle) return;
 
-
     state.selectedTip ??= pickStartupTip();
+    const selectedTip = state.selectedTip;
     const playIntro = event.reason === "startup" && !state.introPlayed;
     if (playIntro) state.introPlayed = true;
 
@@ -76,7 +94,7 @@ export default function welcome(pi: ExtensionAPI): void {
         version: VERSION,
         extensions,
         recentSessions: sessions,
-        selectedTip: state.selectedTip!,
+        selectedTip,
         theme,
         requestRender: () => tui.requestRender(),
         terminalRows: () => tui.terminal.rows,

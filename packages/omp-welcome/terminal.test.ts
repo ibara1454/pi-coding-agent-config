@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { stripTerminalSequences, truncateToWidth, visibleWidth } from "./terminal.ts";
+import {
+  stripTerminalSequences,
+  truncateToWidth,
+  visibleWidth,
+} from "./terminal.ts";
 
 describe("terminal-cell helpers", () => {
   test("truncates styled wide graphemes without splitting clusters", () => {

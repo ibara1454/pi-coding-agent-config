@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "lint": "biome check --config-path=../.. --error-on-warnings .",
+    "lint:fix": "biome check --write --config-path=../.. --error-on-warnings .",
     "test": "bun test",
     "typecheck": "tsc --project tsconfig.json"
   },

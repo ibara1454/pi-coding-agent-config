@@ -1,6 +1,8 @@
 const ESC = "\x1b";
 const BEL = "\x07";
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
 
 interface TerminalToken {
   ansi?: string;
@@ -17,7 +19,13 @@ function ansiSequenceEnd(value: string, start: number): number {
     return value.length;
   }
 
-  if (kind === "]" || kind === "P" || kind === "_" || kind === "^" || kind === "X") {
+  if (
+    kind === "]" ||
+    kind === "P" ||
+    kind === "_" ||
+    kind === "^" ||
+    kind === "X"
+  ) {
     for (let index = start + 2; index < value.length; index++) {
       if (value[index] === BEL) return index + 1;
       if (value[index] === ESC && value[index + 1] === "\\") return index + 2;
@@ -39,9 +47,12 @@ function terminalTokens(value: string): TerminalToken[] {
       continue;
     }
 
-    const escape = value.indexOf(ESC, index);
-    const end = escape < 0 ? value.length : escape;
-    for (const { segment } of graphemeSegmenter.segment(value.slice(index, end))) tokens.push({ grapheme: segment });
+    const escapeIndex = value.indexOf(ESC, index);
+    const end = escapeIndex < 0 ? value.length : escapeIndex;
+    for (const { segment } of graphemeSegmenter.segment(
+      value.slice(index, end),
+    ))
+      tokens.push({ grapheme: segment });
     index = end;
   }
   return tokens;
@@ -67,8 +78,17 @@ function isWideCodePoint(codePoint: number): boolean {
 
 function graphemeWidth(grapheme: string): number {
   if (grapheme === "\t") return 3;
-  if (/^[\p{Control}\p{Mark}\p{Default_Ignorable_Code_Point}\p{Format}]+$/u.test(grapheme)) return 0;
-  if (/[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(grapheme) || grapheme.includes("\u20e3")) return 2;
+  if (
+    /^[\p{Control}\p{Mark}\p{Default_Ignorable_Code_Point}\p{Format}]+$/u.test(
+      grapheme,
+    )
+  )
+    return 0;
+  if (
+    /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(grapheme) ||
+    grapheme.includes("\u20e3")
+  )
+    return 2;
 
   for (const character of grapheme) {
     const codePoint = character.codePointAt(0);
@@ -81,7 +101,8 @@ function osc8Terminator(sequence: string): string | undefined {
   if (!sequence.startsWith("\x1b]8;")) return undefined;
   const content = sequence.slice(4, sequence.endsWith("\x1b\\") ? -2 : -1);
   const separator = content.indexOf(";");
-  if (separator < 0 || content.slice(separator + 1).length === 0) return undefined;
+  if (separator < 0 || content.slice(separator + 1).length === 0)
+    return undefined;
   return sequence.endsWith("\x1b\\") ? "\x1b\\" : BEL;
 }
 
@@ -108,7 +129,11 @@ export function visibleWidth(value: string): number {
  * A reset and any open OSC 8 hyperlink closure precede the ellipsis, so color
  * and hyperlink state cannot leak into the rest of the terminal frame.
  */
-export function truncateToWidth(value: string, width: number, ellipsis = "…"): string {
+export function truncateToWidth(
+  value: string,
+  width: number,
+  ellipsis = "…",
+): string {
   if (width <= 0) return "";
   if (visibleWidth(value) <= width) return value;
 
@@ -131,10 +156,12 @@ export function truncateToWidth(value: string, width: number, ellipsis = "…"):
   for (const token of terminalTokens(value)) {
     if (token.ansi) {
       pendingAnsi += token.ansi;
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI SGR detection requires ESC.
       if (/^\x1b\[[0-?]*[ -/]*m$/.test(token.ansi)) hasSgr = true;
       const terminator = osc8Terminator(token.ansi);
       if (terminator) hyperlinkTerminator = terminator;
-      else if (token.ansi.startsWith("\x1b]8;;")) hyperlinkTerminator = undefined;
+      else if (token.ansi.startsWith("\x1b]8;;"))
+        hyperlinkTerminator = undefined;
       continue;
     }
     if (!token.grapheme) continue;
@@ -146,9 +173,12 @@ export function truncateToWidth(value: string, width: number, ellipsis = "…"):
     cells += graphemeCells;
   }
 
-  if (result.length > 0 && hyperlinkTerminator) result += `\x1b]8;;${hyperlinkTerminator}`;
+  if (result.length > 0 && hyperlinkTerminator)
+    result += `\x1b]8;;${hyperlinkTerminator}`;
   if (result.length > 0 && hasSgr) result += "\x1b[0m";
-  return hasSgr ? `${result}${clippedEllipsis}\x1b[0m` : `${result}${clippedEllipsis}`;
+  return hasSgr
+    ? `${result}${clippedEllipsis}\x1b[0m`
+    : `${result}${clippedEllipsis}`;
 }
 
 /** Wrap plain welcome-tip text by terminal cells. ANSI-aware truncation handles long words. */

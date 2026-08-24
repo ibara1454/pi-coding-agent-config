@@ -1,6 +1,17 @@
-import type { ExtensionContext, ReadonlyFooterDataProvider, Theme } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionContext,
+  ReadonlyFooterDataProvider,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
 
-export type StatusLinePreset = "default" | "minimal" | "compact" | "full" | "nerd" | "ascii" | "custom";
+export type StatusLinePreset =
+  | "default"
+  | "minimal"
+  | "compact"
+  | "full"
+  | "nerd"
+  | "ascii"
+  | "custom";
 
 export type StatusLineSegmentId =
   | "pi"
@@ -39,8 +50,17 @@ export type StatusLineSeparatorStyle =
 
 export interface StatusLineSegmentOptions {
   model?: { showThinkingLevel?: boolean };
-  path?: { abbreviate?: boolean; maxLength?: number; stripWorkPrefix?: boolean };
-  git?: { showBranch?: boolean; showStaged?: boolean; showUnstaged?: boolean; showUntracked?: boolean };
+  path?: {
+    abbreviate?: boolean;
+    maxLength?: number;
+    stripWorkPrefix?: boolean;
+  };
+  git?: {
+    showBranch?: boolean;
+    showStaged?: boolean;
+    showUnstaged?: boolean;
+    showUntracked?: boolean;
+  };
   time?: { format?: "12h" | "24h"; showSeconds?: boolean };
 }
 

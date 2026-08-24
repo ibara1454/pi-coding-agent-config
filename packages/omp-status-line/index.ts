@@ -4,9 +4,9 @@ import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
   CustomEditor,
-  estimateTokens,
   type ExtensionAPI,
   type ExtensionContext,
+  estimateTokens,
   type ReadonlyFooterDataProvider,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -16,12 +16,12 @@ import { getPreset } from "./presets.ts";
 import { renderSegment } from "./segments.ts";
 import {
   DEFAULT_STATUS_BG,
+  getSeparator,
   RESET,
   STATUS_BG_AS_FG,
   STATUS_SEPARATOR_FG,
-  TRANSPARENT_BG,
-  getSeparator,
   sessionAccentAnsi,
+  TRANSPARENT_BG,
 } from "./theme.ts";
 import type {
   GitState,
@@ -78,7 +78,12 @@ const SEPARATORS: Record<StatusLineSeparatorStyle, true> = {
   none: true,
   ascii: true,
 };
-const STATUS_KEYS: Record<string, true> = { mode: true, collab: true, subagents: true, usage: true };
+const STATUS_KEYS: Record<string, true> = {
+  mode: true,
+  collab: true,
+  subagents: true,
+  usage: true,
+};
 const GIT_TTL_MS = 1_000;
 
 function readJsonObject(filePath: string): Record<string, unknown> {
@@ -95,7 +100,10 @@ function agentDir(): string {
   return configured || path.join(os.homedir(), ".pi", "agent");
 }
 
-function mergeOptions(base: StatusLineSegmentOptions | undefined, override: StatusLineSegmentOptions | undefined): StatusLineSegmentOptions {
+function mergeOptions(
+  base: StatusLineSegmentOptions | undefined,
+  override: StatusLineSegmentOptions | undefined,
+): StatusLineSegmentOptions {
   return {
     model: { ...base?.model, ...override?.model },
     path: { ...base?.path, ...override?.path },
@@ -106,14 +114,20 @@ function mergeOptions(base: StatusLineSegmentOptions | undefined, override: Stat
 
 function parseSegmentIds(value: unknown): StatusLineSegmentId[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.filter((item): item is StatusLineSegmentId => typeof item === "string" && SEGMENT_IDS[item as StatusLineSegmentId] === true);
+  return value.filter(
+    (item): item is StatusLineSegmentId =>
+      typeof item === "string" &&
+      SEGMENT_IDS[item as StatusLineSegmentId] === true,
+  );
 }
 
 type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
   [K in keyof T]?: NonNullable<T[K]>;
 };
 
-function toNonNullRecord<T extends Record<PropertyKey, unknown>>(record: T): NonNullRecord<T> {
+function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
+  record: T,
+): NonNullRecord<T> {
   const result: NonNullRecord<T> = {};
   for (const key of Reflect.ownKeys(record) as Array<keyof T>) {
     const value = record[key];
@@ -125,21 +139,35 @@ function toNonNullRecord<T extends Record<PropertyKey, unknown>>(record: T): Non
 function readSettings(cwd: string): StatusLineSettings {
   const global = readJsonObject(path.join(agentDir(), "settings.json"));
   const project = readJsonObject(path.join(cwd, ".pi", "settings.json"));
-  const globalStatus = isObjectRecord(global["statusLine"]) ? global["statusLine"] : {};
-  const projectStatus = isObjectRecord(project["statusLine"]) ? project["statusLine"] : {};
+  const globalStatus = isObjectRecord(global["statusLine"])
+    ? global["statusLine"]
+    : {};
+  const projectStatus = isObjectRecord(project["statusLine"])
+    ? project["statusLine"]
+    : {};
   const raw = { ...globalStatus, ...projectStatus };
-  const preset = typeof raw["preset"] === "string" && PRESETS[raw["preset"] as StatusLineSettings["preset"]] === true
-    ? raw["preset"] as StatusLineSettings["preset"]
-    : "default";
-  const separator = typeof raw["separator"] === "string" && SEPARATORS[raw["separator"] as StatusLineSeparatorStyle] === true
-    ? raw["separator"] as StatusLineSeparatorStyle
-    : undefined;
-  const segmentOptions = isObjectRecord(globalStatus["segmentOptions"]) || isObjectRecord(projectStatus["segmentOptions"])
-    ? mergeOptions(
-        isObjectRecord(globalStatus["segmentOptions"]) ? globalStatus["segmentOptions"] as StatusLineSegmentOptions : undefined,
-        isObjectRecord(projectStatus["segmentOptions"]) ? projectStatus["segmentOptions"] as StatusLineSegmentOptions : undefined,
-      )
-    : undefined;
+  const preset =
+    typeof raw["preset"] === "string" &&
+    PRESETS[raw["preset"] as StatusLineSettings["preset"]] === true
+      ? (raw["preset"] as StatusLineSettings["preset"])
+      : "default";
+  const separator =
+    typeof raw["separator"] === "string" &&
+    SEPARATORS[raw["separator"] as StatusLineSeparatorStyle] === true
+      ? (raw["separator"] as StatusLineSeparatorStyle)
+      : undefined;
+  const segmentOptions =
+    isObjectRecord(globalStatus["segmentOptions"]) ||
+    isObjectRecord(projectStatus["segmentOptions"])
+      ? mergeOptions(
+          isObjectRecord(globalStatus["segmentOptions"])
+            ? (globalStatus["segmentOptions"] as StatusLineSegmentOptions)
+            : undefined,
+          isObjectRecord(projectStatus["segmentOptions"])
+            ? (projectStatus["segmentOptions"] as StatusLineSegmentOptions)
+            : undefined,
+        )
+      : undefined;
   return {
     preset,
     ...toNonNullRecord({
@@ -158,15 +186,29 @@ function readSettings(cwd: string): StatusLineSettings {
 function effectivePreset(settings: StatusLineSettings): PresetDef {
   const preset = getPreset(settings.preset);
   return {
-    leftSegments: settings.preset === "custom" && settings.leftSegments ? settings.leftSegments : preset.leftSegments,
-    rightSegments: settings.preset === "custom" && settings.rightSegments ? settings.rightSegments : preset.rightSegments,
+    leftSegments:
+      settings.preset === "custom" && settings.leftSegments
+        ? settings.leftSegments
+        : preset.leftSegments,
+    rightSegments:
+      settings.preset === "custom" && settings.rightSegments
+        ? settings.rightSegments
+        : preset.rightSegments,
     separator: settings.separator ?? preset.separator,
-    segmentOptions: mergeOptions(preset.segmentOptions, settings.segmentOptions),
+    segmentOptions: mergeOptions(
+      preset.segmentOptions,
+      settings.segmentOptions,
+    ),
   };
 }
 
 function messageUsage(message: unknown): Record<string, unknown> | undefined {
-  if (!isObjectRecord(message) || message["role"] !== "assistant" || !isObjectRecord(message["usage"])) return undefined;
+  if (
+    !isObjectRecord(message) ||
+    message["role"] !== "assistant" ||
+    !isObjectRecord(message["usage"])
+  )
+    return undefined;
   return message["usage"];
 }
 
@@ -174,8 +216,19 @@ function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function aggregateUsage(ctx: ExtensionContext, tokensPerSecond: number | null): UsageStats {
-  const stats: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, premiumRequests: 0, cost: 0, tokensPerSecond };
+function aggregateUsage(
+  ctx: ExtensionContext,
+  tokensPerSecond: number | null,
+): UsageStats {
+  const stats: UsageStats = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    premiumRequests: 0,
+    cost: 0,
+    tokensPerSecond,
+  };
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "message") continue;
     const usage = messageUsage(entry.message);
@@ -211,13 +264,22 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   let gitInFlight = false;
   let prBranchKey: string | null = null;
   let prInFlight = false;
-  let gitState: GitState = { branch: null, staged: 0, unstaged: 0, untracked: 0, pr: null };
+  let gitState: GitState = {
+    branch: null,
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+    pr: null,
+  };
 
   const requestRender = (): void => {
     tui?.requestRender();
   };
 
-  const refreshPr = async (branch: string | null, force = false): Promise<void> => {
+  const refreshPr = async (
+    branch: string | null,
+    force = false,
+  ): Promise<void> => {
     if (!currentCtx || !branch || branch === "detached" || prInFlight) {
       if (!branch || branch === "detached") gitState.pr = null;
       return;
@@ -227,14 +289,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     prBranchKey = key;
     prInFlight = true;
     try {
-      const result = await pi.exec("gh", ["pr", "view", "--json", "number,url"], { cwd: currentCtx.cwd, timeout: 2_000 });
+      const result = await pi.exec(
+        "gh",
+        ["pr", "view", "--json", "number,url"],
+        { cwd: currentCtx.cwd, timeout: 2_000 },
+      );
       if (result.code !== 0) {
         gitState.pr = null;
       } else {
         const parsed: unknown = JSON.parse(result.stdout);
-        gitState.pr = isObjectRecord(parsed) && typeof parsed["number"] === "number" && typeof parsed["url"] === "string"
-          ? { number: parsed["number"], url: parsed["url"] }
-          : null;
+        gitState.pr =
+          isObjectRecord(parsed) &&
+          typeof parsed["number"] === "number" &&
+          typeof parsed["url"] === "string"
+            ? { number: parsed["number"], url: parsed["url"] }
+            : null;
       }
     } catch {
       gitState.pr = null;
@@ -245,13 +314,28 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   const refreshGit = async (force = false): Promise<void> => {
-    if (!currentCtx || gitInFlight || (!force && Date.now() - gitLastFetch < GIT_TTL_MS)) return;
+    if (
+      !currentCtx ||
+      gitInFlight ||
+      (!force && Date.now() - gitLastFetch < GIT_TTL_MS)
+    )
+      return;
     gitInFlight = true;
     const cwd = currentCtx.cwd;
     try {
-      const result = await pi.exec("git", ["status", "--porcelain=v1", "--untracked-files=normal"], { cwd, timeout: 2_000 });
+      const result = await pi.exec(
+        "git",
+        ["status", "--porcelain=v1", "--untracked-files=normal"],
+        { cwd, timeout: 2_000 },
+      );
       if (result.code !== 0) {
-        gitState = { branch: null, staged: 0, unstaged: 0, untracked: 0, pr: null };
+        gitState = {
+          branch: null,
+          staged: 0,
+          unstaged: 0,
+          untracked: 0,
+          pr: null,
+        };
         prBranchKey = null;
       } else {
         let staged = 0;
@@ -270,7 +354,14 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         }
         const branch = footerData?.getGitBranch() ?? gitState.branch;
         const branchChanged = branch !== gitState.branch;
-        gitState = { ...gitState, branch, staged, unstaged, untracked, pr: branchChanged ? null : gitState.pr };
+        gitState = {
+          ...gitState,
+          branch,
+          staged,
+          unstaged,
+          untracked,
+          pr: branchChanged ? null : gitState.pr,
+        };
         if (branchChanged) prBranchKey = null;
         void refreshPr(branch);
       }
@@ -283,7 +374,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
   };
 
-  const estimateTextTokens = (text: string): number => (Buffer.byteLength(text, "utf8") + 3) >> 2;
+  const estimateTextTokens = (text: string): number =>
+    (Buffer.byteLength(text, "utf8") + 3) >> 2;
 
   const estimateNonMessageTokens = (ctx: ExtensionContext): number => {
     let tokens = estimateTextTokens(ctx.getSystemPrompt());
@@ -306,10 +398,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     for (const entry of ctx.sessionManager.buildContextEntries()) {
       if (entry.type === "message") {
         tokens += estimateTokens(entry.message);
-      } else if (entry.type === "compaction" || entry.type === "branch_summary") {
+      } else if (
+        entry.type === "compaction" ||
+        entry.type === "branch_summary"
+      ) {
         tokens += estimateTextTokens(entry.summary);
       } else if (entry.type === "custom_message") {
-        tokens += estimateTextTokens(typeof entry.content === "string" ? entry.content : JSON.stringify(entry.content));
+        tokens += estimateTextTokens(
+          typeof entry.content === "string"
+            ? entry.content
+            : JSON.stringify(entry.content),
+        );
       }
     }
     return tokens;
@@ -326,26 +425,43 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
     for (let index = branch.length - 1; index > boundary; index--) {
       const entry = branch[index];
-      if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
-      if (entry.message.stopReason === "aborted" || entry.message.stopReason === "error") continue;
+      if (entry?.type !== "message" || entry.message.role !== "assistant")
+        continue;
+      if (
+        entry.message.stopReason === "aborted" ||
+        entry.message.stopReason === "error"
+      )
+        continue;
       const usage = messageUsage(entry.message);
       if (!usage) continue;
-      const contextTokens = numeric(usage["totalTokens"])
-        || numeric(usage["input"]) + numeric(usage["output"]) + numeric(usage["cacheRead"]) + numeric(usage["cacheWrite"]);
+      const contextTokens =
+        numeric(usage["totalTokens"]) ||
+        numeric(usage["input"]) +
+          numeric(usage["output"]) +
+          numeric(usage["cacheRead"]) +
+          numeric(usage["cacheWrite"]);
       if (contextTokens > 0) return true;
     }
     return false;
   };
 
-  const buildSegmentContext = (theme: Theme, options: StatusLineSegmentOptions): SegmentContext | null => {
+  const buildSegmentContext = (
+    theme: Theme,
+    options: StatusLineSegmentOptions,
+  ): SegmentContext | null => {
     if (!currentCtx) return null;
     const context = currentCtx.getContextUsage();
-    const contextWindow = context?.contextWindow ?? currentCtx.model?.contextWindow ?? 0;
+    const contextWindow =
+      context?.contextWindow ?? currentCtx.model?.contextWindow ?? 0;
     const providerAnchored = hasProviderContextAnchor(currentCtx);
-    const estimatedMessages = context?.tokens ?? estimateContextEntryTokens(currentCtx);
-    const contextTokens = providerAnchored && context?.tokens !== null && context?.tokens !== undefined
-      ? context.tokens
-      : estimateNonMessageTokens(currentCtx) + estimatedMessages;
+    const estimatedMessages =
+      context?.tokens ?? estimateContextEntryTokens(currentCtx);
+    const contextTokens =
+      providerAnchored &&
+      context?.tokens !== null &&
+      context?.tokens !== undefined
+        ? context.tokens
+        : estimateNonMessageTokens(currentCtx) + estimatedMessages;
     const now = Date.now();
     return {
       extensionContext: currentCtx,
@@ -355,11 +471,16 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       options,
       usage: aggregateUsage(currentCtx, tokensPerSecond),
       contextTokens,
-      contextPercent: contextWindow > 0 ? (contextTokens / contextWindow) * 100 : null,
+      contextPercent:
+        contextWindow > 0 ? (contextTokens / contextWindow) * 100 : null,
       contextWindow,
       autoCompactEnabled: true,
-      activeMs: activeMs + (activeStartedAt === null ? 0 : now - activeStartedAt),
-      git: { ...gitState, branch: footerData?.getGitBranch() ?? gitState.branch },
+      activeMs:
+        activeMs + (activeStartedAt === null ? 0 : now - activeStartedAt),
+      git: {
+        ...gitState,
+        branch: footerData?.getGitBranch() ?? gitState.branch,
+      },
     };
   };
 
@@ -369,7 +490,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const preset = effectivePreset(settings);
     const segmentCtx = buildSegmentContext(theme, preset.segmentOptions);
     if (!segmentCtx) return "";
-    const separator = getSeparator(preset.separator, settings.preset === "ascii");
+    const separator = getSeparator(
+      preset.separator,
+      settings.preset === "ascii",
+    );
     const bg = settings.transparent ? TRANSPARENT_BG : DEFAULT_STATUS_BG;
     const transparent = settings.transparent;
     const foreground = theme.getFgAnsi("text");
@@ -391,19 +515,32 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const leftSeparatorWidth = visibleWidth(separator.left);
     const rightSeparatorWidth = visibleWidth(separator.right);
-    const leftCapWidth = separator.endCaps && !transparent ? visibleWidth(separator.endCaps.right) : 0;
-    const rightCapWidth = separator.endCaps && !transparent ? visibleWidth(separator.endCaps.left) : 0;
-    const groupWidth = (parts: string[], capWidth: number, separatorWidth: number): number => {
+    const leftCapWidth =
+      separator.endCaps && !transparent
+        ? visibleWidth(separator.endCaps.right)
+        : 0;
+    const rightCapWidth =
+      separator.endCaps && !transparent
+        ? visibleWidth(separator.endCaps.left)
+        : 0;
+    const groupWidth = (
+      parts: string[],
+      capWidth: number,
+      separatorWidth: number,
+    ): number => {
       if (parts.length === 0) return 0;
-      return parts.reduce((sum, part) => sum + visibleWidth(part), 0)
-        + Math.max(0, parts.length - 1) * (separatorWidth + 2)
-        + 2
-        + capWidth;
+      return (
+        parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
+        Math.max(0, parts.length - 1) * (separatorWidth + 2) +
+        2 +
+        capWidth
+      );
     };
 
     let leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
     let rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
-    const totalWidth = (): number => leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
+    const totalWidth = (): number =>
+      leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
 
     while (totalWidth() > width && right.length > 0) {
       right.pop();
@@ -419,10 +556,16 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       if (shrinkable > 0) {
         const shrinkBy = Math.min(shrinkable, overflow);
         const currentMaxLength = preset.segmentOptions.path?.maxLength ?? 40;
-        let nextMaxLength = Math.max(4, Math.min(currentMaxLength, currentWidth) - shrinkBy);
+        let nextMaxLength = Math.max(
+          4,
+          Math.min(currentMaxLength, currentWidth) - shrinkBy,
+        );
         const pathCtx = (maxLength: number): SegmentContext => ({
           ...segmentCtx,
-          options: { ...segmentCtx.options, path: { ...segmentCtx.options.path, maxLength } },
+          options: {
+            ...segmentCtx.options,
+            path: { ...segmentCtx.options.path, maxLength },
+          },
         });
         let adjusted = renderSegment("path", pathCtx(nextMaxLength));
         if (adjusted.visible && adjusted.content) {
@@ -430,7 +573,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           for (let attempt = 0; attempt < 8; attempt++) {
             const saved = currentWidth - visibleWidth(adjusted.content);
             if (saved >= shrinkBy) break;
-            const correctedMaxLength = Math.max(4, nextMaxLength - (shrinkBy - saved));
+            const correctedMaxLength = Math.max(
+              4,
+              nextMaxLength - (shrinkBy - saved),
+            );
             if (correctedMaxLength >= nextMaxLength) break;
             nextMaxLength = correctedMaxLength;
             const rerendered = renderSegment("path", pathCtx(nextMaxLength));
@@ -452,15 +598,24 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
     }
 
-    const renderGroup = (parts: string[], direction: "left" | "right"): string => {
+    const renderGroup = (
+      parts: string[],
+      direction: "left" | "right",
+    ): string => {
       if (parts.length === 0) return "";
-      const separatorText = direction === "left" ? separator.left : separator.right;
-      const cap = separator.endCaps && !transparent
-        ? direction === "left" ? separator.endCaps.right : separator.endCaps.left
-        : "";
+      const separatorText =
+        direction === "left" ? separator.left : separator.right;
+      const cap =
+        separator.endCaps && !transparent
+          ? direction === "left"
+            ? separator.endCaps.right
+            : separator.endCaps.left
+          : "";
       const capText = cap ? `${STATUS_BG_AS_FG}${cap}${RESET}` : "";
       const content = `${bg}${foreground} ${parts.join(` ${STATUS_SEPARATOR_FG}${separatorText}${foreground} `)} ${RESET}`;
-      return direction === "right" ? `${capText}${content}` : `${content}${capText}`;
+      return direction === "right"
+        ? `${capText}${content}`
+        : `${content}${capText}`;
     };
 
     const leftGroup = renderGroup(left, "left");
@@ -470,7 +625,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const gapWidth = Math.max(1, width - leftWidth - rightWidth);
     const sessionName = currentCtx?.sessionManager.getSessionName();
-    const gapColor = settings.sessionAccent && sessionName ? sessionAccentAnsi(sessionName) : theme.getFgAnsi("border");
+    const gapColor =
+      settings.sessionAccent && sessionName
+        ? sessionAccentAnsi(sessionName)
+        : theme.getFgAnsi("border");
     return `${leftGroup}${gapColor}${"─".repeat(gapWidth)}\x1b[39m${rightGroup}`;
   };
 
@@ -478,8 +636,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     if (!editorInstalled) {
       const previousEditorFactory = ctx.ui.getEditorComponent();
       ctx.ui.setEditorComponent((editorTui, editorTheme, keybindings) => {
-        const editor = previousEditorFactory?.(editorTui, editorTheme, keybindings)
-          ?? new CustomEditor(editorTui, editorTheme, keybindings);
+        const editor =
+          previousEditorFactory?.(editorTui, editorTheme, keybindings) ??
+          new CustomEditor(editorTui, editorTheme, keybindings);
         const originalRender = editor.render.bind(editor);
         editor.render = (width: number): string[] => {
           if (width < 10 || !currentCtx) return [...originalRender(width)];
@@ -498,7 +657,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
           const theme = currentCtx.ui.theme;
           const border = theme.getFgAnsi("border");
-          const paintBorder = (text: string): string => `${border}${text}\x1b[39m`;
+          const paintBorder = (text: string): string =>
+            `${border}${text}\x1b[39m`;
           const status = buildStatusLine(contentWidth, theme);
           const statusFill = Math.max(0, contentWidth - visibleWidth(status));
           const result: string[] = [
@@ -507,11 +667,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           const contentLines = lines.slice(1, bottomBorderIndex);
           for (let index = 0; index < contentLines.length; index++) {
             const line = contentLines[index] ?? "";
-            const lineFill = " ".repeat(Math.max(0, contentWidth - visibleWidth(line)));
+            const lineFill = " ".repeat(
+              Math.max(0, contentWidth - visibleWidth(line)),
+            );
             if (index === contentLines.length - 1) {
-              result.push(`${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`);
+              result.push(
+                `${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`,
+              );
             } else {
-              result.push(`${paintBorder("│  ")}${line}${lineFill}${paintBorder("  │")}`);
+              result.push(
+                `${paintBorder("│  ")}${line}${lineFill}${paintBorder("  │")}`,
+              );
             }
           }
           for (const line of lines.slice(bottomBorderIndex + 1)) {
@@ -545,9 +711,18 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         render(width: number): string[] {
           if (!settings.showHookStatus) return [];
           const preset = effectivePreset(settings);
-          const usedSegments = new Set([...preset.leftSegments, ...preset.rightSegments]);
+          const usedSegments = new Set([
+            ...preset.leftSegments,
+            ...preset.rightSegments,
+          ]);
           const statuses = Array.from(data.getExtensionStatuses().entries())
-            .filter(([key]) => !(STATUS_KEYS[key] === true && usedSegments.has(key as StatusLineSegmentId)))
+            .filter(
+              ([key]) =>
+                !(
+                  STATUS_KEYS[key] === true &&
+                  usedSegments.has(key as StatusLineSegmentId)
+                ),
+            )
             .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
             .map(([, text]) => truncateToWidth(sanitizeStatus(text), width));
           return statuses;
@@ -635,8 +810,14 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       void refreshGit(true);
       return;
     }
-    if (event.toolName === "bash" && isObjectRecord(event.input) && typeof event.input["command"] === "string"
-      && /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(event.input["command"])) {
+    if (
+      event.toolName === "bash" &&
+      isObjectRecord(event.input) &&
+      typeof event.input["command"] === "string" &&
+      /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(
+        event.input["command"],
+      )
+    ) {
       gitLastFetch = 0;
       prBranchKey = null;
       void refreshGit(true);
@@ -644,7 +825,11 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   });
   pi.on("user_bash", async (event, ctx) => {
     currentCtx = ctx;
-    if (/\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(event.command)) {
+    if (
+      /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(
+        event.command,
+      )
+    ) {
       gitLastFetch = 0;
       prBranchKey = null;
       setTimeout(() => void refreshGit(true), 150);

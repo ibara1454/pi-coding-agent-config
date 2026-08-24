@@ -1,20 +1,22 @@
 {
-	"name": "sandbox",
-	"private": true,
-	"version": "1.14.1",
-	"type": "module",
-	"scripts": {
-		"clean": "echo 'nothing to clean'",
-		"build": "echo 'nothing to build'",
-		"check": "echo 'nothing to check'",
-		"typecheck": "tsc --project tsconfig.json"
-	},
-	"pi": {
-		"extensions": [
-			"./index.ts"
-		]
-	},
-	"dependencies": {
-		"@anthropic-ai/sandbox-runtime": "0.0.71"
-	}
+  "name": "sandbox",
+  "private": true,
+  "version": "1.14.1",
+  "type": "module",
+  "scripts": {
+    "lint": "biome check --config-path=../.. --error-on-warnings .",
+    "lint:fix": "biome check --write --config-path=../.. --error-on-warnings .",
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "check": "echo 'nothing to check'",
+    "typecheck": "tsc --project tsconfig.json"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.71"
+  }
 }

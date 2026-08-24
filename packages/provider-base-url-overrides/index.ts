@@ -1,6 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Provider URLs must reject ASCII control bytes.
 const ASCII_CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/u;
 const HTTP_URL_PREFIX = /^https?:\/\/[^/?#]+(?:\/|$)/iu;
 const AZURE_API = "azure-openai-responses";
@@ -15,7 +16,9 @@ type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
   [K in keyof T]?: NonNullable<T[K]>;
 };
 
-function toNonNullRecord<T extends Record<PropertyKey, unknown>>(record: T): NonNullRecord<T> {
+function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
+  record: T,
+): NonNullRecord<T> {
   const result: NonNullRecord<T> = {};
   for (const key of Reflect.ownKeys(record) as Array<keyof T>) {
     const value = record[key];
@@ -115,11 +118,21 @@ function routeRequest<TApi extends Api, TOptions>(
 function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const stream: Provider["stream"] = (model, context, options) => {
     const request = routeRequest(model, providerBaseUrl, options);
-    return provider.stream.call(provider, request.model, context, request.options);
+    return provider.stream.call(
+      provider,
+      request.model,
+      context,
+      request.options,
+    );
   };
   const streamSimple: Provider["streamSimple"] = (model, context, options) => {
     const request = routeRequest(model, providerBaseUrl, options);
-    return provider.streamSimple.call(provider, request.model, context, request.options);
+    return provider.streamSimple.call(
+      provider,
+      request.model,
+      context,
+      request.options,
+    );
   };
 
   const refreshModels = provider.refreshModels;
@@ -130,9 +143,17 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const filterModels = provider.filterModels;
   const wrappedFilterModels: Provider["filterModels"] = filterModels
     ? (models, credential) => {
-        const routedModels = models.map((model) => routeModel(model, providerBaseUrl));
-        const filteredModels = filterModels.call(provider, routedModels, credential);
-        return filteredModels.map((model) => routeModel(model, providerBaseUrl));
+        const routedModels = models.map((model) =>
+          routeModel(model, providerBaseUrl),
+        );
+        const filteredModels = filterModels.call(
+          provider,
+          routedModels,
+          credential,
+        );
+        return filteredModels.map((model) =>
+          routeModel(model, providerBaseUrl),
+        );
       }
     : undefined;
 
@@ -140,7 +161,12 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const wrappedFetchDeferred: Provider["fetchDeferred"] = fetchDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, providerBaseUrl, options);
-        return fetchDeferred.call(provider, request.model, handle, request.options);
+        return fetchDeferred.call(
+          provider,
+          request.model,
+          handle,
+          request.options,
+        );
       }
     : undefined;
 
@@ -148,7 +174,12 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const wrappedCancelDeferred: Provider["cancelDeferred"] = cancelDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, providerBaseUrl, options);
-        return cancelDeferred.call(provider, request.model, handle, request.options);
+        return cancelDeferred.call(
+          provider,
+          request.model,
+          handle,
+          request.options,
+        );
       }
     : undefined;
 
@@ -158,8 +189,8 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
     baseUrl: providerBaseUrl,
     auth: provider.auth,
     getModels() {
-      return provider
-        .getModels.call(provider)
+      return provider.getModels
+        .call(provider)
         .map((model) => routeModel(model, providerBaseUrl));
     },
     stream,

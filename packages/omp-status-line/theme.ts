@@ -45,7 +45,6 @@ export interface StatusIcons {
   auto: string;
 }
 
-
 const UNICODE_ICONS: StatusIcons = {
   pi: "π",
   model: "⬢",
@@ -96,7 +95,10 @@ export interface SeparatorDef {
   endCaps?: { left: string; right: string };
 }
 
-export function getSeparator(style: StatusLineSeparatorStyle, ascii: boolean): SeparatorDef {
+export function getSeparator(
+  style: StatusLineSeparatorStyle,
+  ascii: boolean,
+): SeparatorDef {
   if (ascii || style === "ascii") return { left: ">", right: "<" };
   switch (style) {
     case "powerline":
@@ -130,7 +132,18 @@ export function sessionAccentAnsi(name: string): string {
   const chroma = (1 - Math.abs((2 * lightness) / 100 - 1)) * (saturation / 100);
   const section = hue / 60;
   const x = chroma * (1 - Math.abs((section % 2) - 1));
-  const [r1, g1, b1] = section < 1 ? [chroma, x, 0] : section < 2 ? [x, chroma, 0] : section < 3 ? [0, chroma, x] : section < 4 ? [0, x, chroma] : section < 5 ? [x, 0, chroma] : [chroma, 0, x];
+  const [r1, g1, b1] =
+    section < 1
+      ? [chroma, x, 0]
+      : section < 2
+        ? [x, chroma, 0]
+        : section < 3
+          ? [0, chroma, x]
+          : section < 4
+            ? [0, x, chroma]
+            : section < 5
+              ? [x, 0, chroma]
+              : [chroma, 0, x];
   const m = lightness / 100 - chroma / 2;
   const r = Math.round((r1 + m) * 255);
   const g = Math.round((g1 + m) * 255);

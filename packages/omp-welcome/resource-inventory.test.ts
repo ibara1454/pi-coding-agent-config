@@ -20,8 +20,12 @@ function host() {
 
     showLoadedResources(options?: HostOptions) {
       this.loadedResourcesContainer.clear();
-      const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
-      const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
+      const showListing =
+        options?.force ||
+        this.options.verbose ||
+        !this.settingsManager.getQuietStartup();
+      const showDiagnostics =
+        showListing || options?.showDiagnosticsWhenQuiet === true;
       calls.push({ showListing: Boolean(showListing), showDiagnostics });
     }
 
@@ -36,7 +40,10 @@ describe("native resource inventory override", () => {
   test("suppresses routine startup and reload inventory but preserves diagnostics", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
-    const override = installResourceInventoryOverride("0.84.9", InteractiveMode);
+    const override = installResourceInventoryOverride(
+      "0.84.9",
+      InteractiveMode,
+    );
     const mode = new InteractiveMode();
 
     expect(override.supported).toBe(true);
@@ -57,17 +64,30 @@ describe("native resource inventory override", () => {
 
   test("retains explicit forced and verbose listings", () => {
     const forced = host();
-    const forcedOverride = installResourceInventoryOverride("0.84.1", forced.InteractiveMode);
-    new forced.InteractiveMode().showLoadedResources({ force: true, showDiagnosticsWhenQuiet: true });
-    expect(forced.calls).toEqual([{ showListing: true, showDiagnostics: true }]);
+    const forcedOverride = installResourceInventoryOverride(
+      "0.84.1",
+      forced.InteractiveMode,
+    );
+    new forced.InteractiveMode().showLoadedResources({
+      force: true,
+      showDiagnosticsWhenQuiet: true,
+    });
+    expect(forced.calls).toEqual([
+      { showListing: true, showDiagnostics: true },
+    ]);
     forcedOverride.release();
 
     const verbose = host();
     const mode = new verbose.InteractiveMode();
     mode.options.verbose = true;
-    const verboseOverride = installResourceInventoryOverride("0.84.1", verbose.InteractiveMode);
+    const verboseOverride = installResourceInventoryOverride(
+      "0.84.1",
+      verbose.InteractiveMode,
+    );
     mode.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
-    expect(verbose.calls).toEqual([{ showListing: true, showDiagnostics: true }]);
+    expect(verbose.calls).toEqual([
+      { showListing: true, showDiagnostics: true },
+    ]);
     verboseOverride.release();
   });
 
@@ -84,7 +104,9 @@ describe("native resource inventory override", () => {
 
     first.release();
     expect(InteractiveMode.prototype.showLoadedResources).toBe(wrapper);
-    new InteractiveMode().showLoadedResources({ showDiagnosticsWhenQuiet: true });
+    new InteractiveMode().showLoadedResources({
+      showDiagnosticsWhenQuiet: true,
+    });
     expect(calls.at(-1)).toEqual({ showListing: false, showDiagnostics: true });
 
     second.release();
@@ -93,15 +115,24 @@ describe("native resource inventory override", () => {
 
   test("fails open for unsupported versions and changed method structure", () => {
     const unsupportedVersion = host();
-    const original = unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
-    const versionResult = installResourceInventoryOverride("0.85.0", unsupportedVersion.InteractiveMode);
+    const original =
+      unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
+    const versionResult = installResourceInventoryOverride(
+      "0.85.0",
+      unsupportedVersion.InteractiveMode,
+    );
     expect(versionResult.supported).toBe(false);
-    expect(unsupportedVersion.InteractiveMode.prototype.showLoadedResources).toBe(original);
+    expect(
+      unsupportedVersion.InteractiveMode.prototype.showLoadedResources,
+    ).toBe(original);
 
     class ChangedHost {
       showLoadedResources() {}
     }
-    const structureResult = installResourceInventoryOverride("0.84.1", ChangedHost);
+    const structureResult = installResourceInventoryOverride(
+      "0.84.1",
+      ChangedHost,
+    );
     expect(structureResult.supported).toBe(false);
     expect(structureResult.reason).toContain("no longer matches");
   });
@@ -112,7 +143,8 @@ describe("native resource inventory override", () => {
       showLoadedResources(options?: HostOptions) {
         this.loadedResourcesContainer.clear();
         const quiet = this.settingsManager.getQuietStartup();
-        if (options?.showDiagnosticsWhenQuiet === true || !quiet) calls.push(options ?? {});
+        if (options?.showDiagnosticsWhenQuiet === true || !quiet)
+          calls.push(options ?? {});
       }
       loadedResourcesContainer = { clear() {} };
       // Declaration-only by design: this fixture exercises an unavailable runtime settings-manager seam.
@@ -121,7 +153,11 @@ describe("native resource inventory override", () => {
 
     const override = installResourceInventoryOverride("0.84.1", MissingManager);
     expect(override.supported).toBe(true);
-    expect(() => new MissingManager().showLoadedResources({ showDiagnosticsWhenQuiet: true })).toThrow();
+    expect(() =>
+      new MissingManager().showLoadedResources({
+        showDiagnosticsWhenQuiet: true,
+      }),
+    ).toThrow();
     override.release();
   });
 });

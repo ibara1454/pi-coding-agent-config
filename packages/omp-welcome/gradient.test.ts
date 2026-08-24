@@ -1,9 +1,21 @@
 import { describe, expect, test } from "bun:test";
-import { gradientEscape, gradientLogo, IntroAnimation, INTRO_MS, PI_LOGO } from "./gradient.ts";
+import {
+  gradientEscape,
+  gradientLogo,
+  INTRO_MS,
+  IntroAnimation,
+  PI_LOGO,
+} from "./gradient.ts";
 
 describe("Pi logo gradient", () => {
   test("uses the exact five-row block logo and truecolor palette endpoints", () => {
-    expect(PI_LOGO).toEqual(["▀██████████▀", " ╘██    ██  ", "  ██    ██  ", "  ██    ██  ", " ▄██▄  ▄██▄ "]);
+    expect(PI_LOGO).toEqual([
+      "▀██████████▀",
+      " ╘██    ██  ",
+      "  ██    ██  ",
+      "  ██    ██  ",
+      " ▄██▄  ▄██▄ ",
+    ]);
     expect(gradientEscape(0, "truecolor")).toBe("\x1b[38;2;255;92;200m");
     expect(gradientEscape(1, "truecolor")).toBe("\x1b[38;2;120;255;220m");
     expect(gradientLogo(PI_LOGO, "truecolor")).toHaveLength(5);
@@ -22,14 +34,21 @@ describe("welcome intro lifecycle", () => {
     let timer: (() => void) | undefined;
     let cleared = 0;
     let renders = 0;
-    const animation = new IntroAnimation(() => { renders++; }, {
-      now: () => now,
-      setInterval: handler => {
-        timer = handler;
-        return 1 as unknown as NodeJS.Timeout;
+    const animation = new IntroAnimation(
+      () => {
+        renders++;
       },
-      clearInterval: () => { cleared++; },
-    });
+      {
+        now: () => now,
+        setInterval: (handler) => {
+          timer = handler;
+          return 1 as unknown as NodeJS.Timeout;
+        },
+        clearInterval: () => {
+          cleared++;
+        },
+      },
+    );
 
     animation.start();
     expect(animation.isActive()).toBe(true);

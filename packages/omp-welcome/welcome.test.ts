@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type { WelcomeExtension, WelcomeSession } from "./data.ts";
-import { stripAnsi, truncateToWidth, visibleWidth, WelcomeHeader } from "./welcome.ts";
+import {
+  stripAnsi,
+  truncateToWidth,
+  visibleWidth,
+  WelcomeHeader,
+} from "./welcome.ts";
+
+function required<T>(value: T): NonNullable<T> {
+  expect(value).toBeDefined();
+  expect(value).not.toBeNull();
+  return value as NonNullable<T>;
+}
 
 function identityTheme(colorMode: "truecolor" | "256color" = "truecolor") {
   return {
@@ -11,7 +22,9 @@ function identityTheme(colorMode: "truecolor" | "256color" = "truecolor") {
   } as const;
 }
 
-function header(overrides: Partial<ConstructorParameters<typeof WelcomeHeader>[0]> = {}) {
+function header(
+  overrides: Partial<ConstructorParameters<typeof WelcomeHeader>[0]> = {},
+) {
   return new WelcomeHeader({
     version: "0.84.1",
     extensions: [],
@@ -29,7 +42,7 @@ function rawLines(component: WelcomeHeader, width: number): string[] {
 }
 
 function sectionIndex(lines: readonly string[], heading: string): number {
-  const index = lines.findIndex(line => line.includes(heading));
+  const index = lines.findIndex((line) => line.includes(heading));
   expect(index).toBeGreaterThanOrEqual(0);
   return index;
 }
@@ -50,19 +63,40 @@ describe("wide welcome box", () => {
     const component = header({ extensions, recentSessions: sessions });
     const rendered = component.render(102);
     const lines = rendered.map(stripAnsi);
-    const first = lines[0]!;
-    const bottom = lines.find(line => line.startsWith("╰"))!;
+    const first = required(lines[0]);
+    const bottom = required(lines.find((line) => line.startsWith("╰")));
 
     expect(first).toBe(`╭─── pi v0.84.1 ${"─".repeat(83)}╮`);
     expect(visibleWidth(first)).toBe(100);
     expect(bottom).toMatch(/^╰─+┴─+╯$/);
     expect(visibleWidth(bottom)).toBe(100);
-    expect(rendered.filter(line => line.includes("\x1b[38;2;"))).not.toHaveLength(0);
-    expect(sectionIndex(lines, "Tips")).toBeLessThan(sectionIndex(lines, "Extensions"));
-    expect(sectionIndex(lines, "Extensions")).toBeLessThan(sectionIndex(lines, "Recent sessions"));
-    expect(lines.filter(line => line.includes("for commands") || line.includes("to run bash") || line.includes("drop files to attach"))).toHaveLength(4);
-    expect(lines.filter(line => line.includes("just now") || line.includes("2m ago") || line.includes("1h ago") || line.includes("3d ago"))).toHaveLength(4);
-    expect(lines.some(line => line.includes("Welcome back!"))).toBe(true);
+    expect(
+      rendered.filter((line) => line.includes("\x1b[38;2;")),
+    ).not.toHaveLength(0);
+    expect(sectionIndex(lines, "Tips")).toBeLessThan(
+      sectionIndex(lines, "Extensions"),
+    );
+    expect(sectionIndex(lines, "Extensions")).toBeLessThan(
+      sectionIndex(lines, "Recent sessions"),
+    );
+    expect(
+      lines.filter(
+        (line) =>
+          line.includes("for commands") ||
+          line.includes("to run bash") ||
+          line.includes("drop files to attach"),
+      ),
+    ).toHaveLength(4);
+    expect(
+      lines.filter(
+        (line) =>
+          line.includes("just now") ||
+          line.includes("2m ago") ||
+          line.includes("1h ago") ||
+          line.includes("3d ago"),
+      ),
+    ).toHaveLength(4);
+    expect(lines.some((line) => line.includes("Welcome back!"))).toBe(true);
     expect(lines.at(-1)).toContain("active model.");
     component.dispose();
   });
@@ -78,75 +112,133 @@ describe("wide welcome box", () => {
       { name: "Session two", timeAgo: "2m ago" },
       { name: "Session three", timeAgo: "1h ago" },
     ];
-    const lines = rawLines(header({ extensions, recentSessions: sessions }), 102);
-    const bottomIndex = lines.findIndex(line => line.startsWith("╰"));
+    const lines = rawLines(
+      header({ extensions, recentSessions: sessions }),
+      102,
+    );
+    const bottomIndex = lines.findIndex((line) => line.startsWith("╰"));
     const boxRows = lines.slice(1, bottomIndex);
-    expect(lines.some(line => line.includes("Claude Sonnet") || line.includes("Anthropic"))).toBe(false);
-    expect(boxRows.filter(line => extensions.some(extension => line.includes(extension.name)))).toHaveLength(extensions.length);
-    expect(boxRows.filter(line => sessions.some(session => line.includes(session.name)))).toHaveLength(sessions.length);
+    expect(
+      lines.some(
+        (line) => line.includes("Claude Sonnet") || line.includes("Anthropic"),
+      ),
+    ).toBe(false);
+    expect(
+      boxRows.filter((line) =>
+        extensions.some((extension) => line.includes(extension.name)),
+      ),
+    ).toHaveLength(extensions.length);
+    expect(
+      boxRows.filter((line) =>
+        sessions.some((session) => line.includes(session.name)),
+      ),
+    ).toHaveLength(sessions.length);
     expect(boxRows[0]?.replace(/[│ ]/g, "") ?? "").toBe("");
     expect(boxRows.at(-1)?.replace(/[│ ]/g, "") ?? "").toBe("");
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
   test("preserves three extension names and overflow when the wide header must scroll", () => {
-    const extensions = Array.from({ length: 6 }, (_, index) => ({ name: `extension-${index + 1}.ts`, scope: "user" as const }));
+    const extensions = Array.from({ length: 6 }, (_, index) => ({
+      name: `extension-${index + 1}.ts`,
+      scope: "user" as const,
+    }));
     const lines = rawLines(header({ extensions, terminalRows: () => 17 }), 102);
 
     expect(lines).toHaveLength(19);
-    expect(lines.filter(line => line.includes("extension-")).map(line => line.match(/extension-\d+\.ts/)?.[0])).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
-    expect(lines.some(line => line.includes("… +3 more"))).toBe(true);
+    expect(
+      lines
+        .filter((line) => line.includes("extension-"))
+        .map((line) => line.match(/extension-\d+\.ts/)?.[0]),
+    ).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
+    expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });
-
 });
 
 describe("narrow welcome box", () => {
   test("stacks left content then all named sections in one rounded box", () => {
-    const lines = rawLines(header({
-      extensions: [{ name: "local.ts", scope: "project" }],
-      recentSessions: [{ name: "Saved work", timeAgo: "just now" }],
-    }), 32);
-    const first = lines[0]!;
-    const bottom = lines.find(line => line.startsWith("╰"))!;
+    const lines = rawLines(
+      header({
+        extensions: [{ name: "local.ts", scope: "project" }],
+        recentSessions: [{ name: "Saved work", timeAgo: "just now" }],
+      }),
+      32,
+    );
+    const first = required(lines[0]);
+    const bottom = required(lines.find((line) => line.startsWith("╰")));
     const bottomIndex = lines.indexOf(bottom);
     const boxRows = lines.slice(1, bottomIndex);
 
     expect(first.startsWith("╭")).toBe(true);
     expect(bottom.includes("┴")).toBe(false);
-    expect(sectionIndex(lines, "Welcome back!")).toBeLessThan(sectionIndex(lines, "Tips"));
-    expect(sectionIndex(lines, "Tips")).toBeLessThan(sectionIndex(lines, "Extensions"));
-    expect(sectionIndex(lines, "Extensions")).toBeLessThan(sectionIndex(lines, "Recent sessions"));
-    expect(lines.some(line => line.includes("local.ts"))).toBe(true);
-    expect(lines.some(line => line.includes("Saved work"))).toBe(true);
+    expect(sectionIndex(lines, "Welcome back!")).toBeLessThan(
+      sectionIndex(lines, "Tips"),
+    );
+    expect(sectionIndex(lines, "Tips")).toBeLessThan(
+      sectionIndex(lines, "Extensions"),
+    );
+    expect(sectionIndex(lines, "Extensions")).toBeLessThan(
+      sectionIndex(lines, "Recent sessions"),
+    );
+    expect(lines.some((line) => line.includes("local.ts"))).toBe(true);
+    expect(lines.some((line) => line.includes("Saved work"))).toBe(true);
     expect(boxRows[0]?.replace(/[│ ]/g, "") ?? "").toBe("");
     expect(boxRows.at(-1)?.replace(/[│ ]/g, "") ?? "").toBe("");
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
   test("preserves three extension names and overflow when the stacked header must scroll", () => {
-    const extensions = Array.from({ length: 6 }, (_, index) => ({ name: `extension-${index + 1}.ts`, scope: "user" as const }));
+    const extensions = Array.from({ length: 6 }, (_, index) => ({
+      name: `extension-${index + 1}.ts`,
+      scope: "user" as const,
+    }));
     const lines = rawLines(header({ extensions, terminalRows: () => 27 }), 32);
 
     expect(lines).toHaveLength(29);
-    expect(lines.filter(line => line.includes("extension-")).map(line => line.match(/extension-\d+\.ts/)?.[0])).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
-    expect(lines.some(line => line.includes("… +3 more"))).toBe(true);
+    expect(
+      lines
+        .filter((line) => line.includes("extension-"))
+        .map((line) => line.match(/extension-\d+\.ts/)?.[0]),
+    ).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
+    expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });
 
   test("shows empty section rows and truncates values before trailing metadata", () => {
-    const lines = rawLines(header({
-      extensions: [{ name: "an-exceptionally-long-extension-name-that-needs-truncation.ts", scope: "user" }],
-      recentSessions: [{ name: "A session name that is intentionally too long to fit in this narrow row", timeAgo: "6d ago" }],
-    }), 32);
+    const lines = rawLines(
+      header({
+        extensions: [
+          {
+            name: "an-exceptionally-long-extension-name-that-needs-truncation.ts",
+            scope: "user",
+          },
+        ],
+        recentSessions: [
+          {
+            name: "A session name that is intentionally too long to fit in this narrow row",
+            timeAgo: "6d ago",
+          },
+        ],
+      }),
+      32,
+    );
 
-    expect(lines.some(line => line.includes("… user"))).toBe(true);
-    expect(lines.some(line => line.includes("… (6d ago)"))).toBe(true);
-    expect(lines.some(line => line.includes("No extensions"))).toBe(false);
-    expect(lines.some(line => line.includes("No recent sessions"))).toBe(false);
-    expect(lines.filter(line => line.startsWith("│")).every(line => visibleWidth(line) === 30)).toBe(true);
+    expect(lines.some((line) => line.includes("… user"))).toBe(true);
+    expect(lines.some((line) => line.includes("… (6d ago)"))).toBe(true);
+    expect(lines.some((line) => line.includes("No extensions"))).toBe(false);
+    expect(lines.some((line) => line.includes("No recent sessions"))).toBe(
+      false,
+    );
+    expect(
+      lines
+        .filter((line) => line.startsWith("│"))
+        .every((line) => visibleWidth(line) === 30),
+    ).toBe(true);
 
     const empty = rawLines(header(), 32);
-    expect(empty.some(line => line.includes("No extensions"))).toBe(true);
-    expect(empty.some(line => line.includes("No recent sessions"))).toBe(true);
+    expect(empty.some((line) => line.includes("No extensions"))).toBe(true);
+    expect(empty.some((line) => line.includes("No recent sessions"))).toBe(
+      true,
+    );
   });
 });
 
@@ -164,14 +256,21 @@ describe("terminal-cell-safe rendering", () => {
   test("keeps every box row within its terminal-cell budget for wide Unicode", () => {
     const component = header({
       extensions: [{ name: "拡張👩‍💻-長い名前.ts", scope: "user" }],
-      recentSessions: [{ name: "会話e\u0301👩‍💻-長い名前", timeAgo: "just now" }],
+      recentSessions: [
+        { name: "会話e\u0301👩‍💻-長い名前", timeAgo: "just now" },
+      ],
       selectedTip: "Use 👩‍💻 and 界界 safely in a terminal-cell-aware tip.",
     });
     const lines = component.render(102);
-    const box = lines.slice(0, lines.findIndex(line => stripAnsi(line).startsWith("╰")) + 1);
+    const box = lines.slice(
+      0,
+      lines.findIndex((line) => stripAnsi(line).startsWith("╰")) + 1,
+    );
 
-    expect(box.every(line => visibleWidth(line) === 100)).toBe(true);
-    expect(lines.slice(box.length).every(line => visibleWidth(line) <= 100)).toBe(true);
+    expect(box.every((line) => visibleWidth(line) === 100)).toBe(true);
+    expect(
+      lines.slice(box.length).every((line) => visibleWidth(line) <= 100),
+    ).toBe(true);
     component.dispose();
   });
 });

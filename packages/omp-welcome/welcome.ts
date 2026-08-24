@@ -1,13 +1,43 @@
-import { stripTerminalSequences, truncateToWidth as truncateTerminalWidth, visibleWidth, wrapTextWithAnsi } from "./terminal.ts";
-import { IntroAnimation, introFrame, RESTING_FRAMES, type ColorMode } from "./gradient.ts";
-import { STARTUP_TIPS, type WelcomeExtension, type WelcomeSession } from "./data.ts";
+import {
+  STARTUP_TIPS,
+  type WelcomeExtension,
+  type WelcomeSession,
+} from "./data.ts";
+import {
+  type ColorMode,
+  IntroAnimation,
+  introFrame,
+  RESTING_FRAMES,
+} from "./gradient.ts";
+import {
+  stripTerminalSequences,
+  truncateToWidth as truncateTerminalWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from "./terminal.ts";
 
-const BOX = { horizontal: "─", vertical: "│", topLeft: "╭", topRight: "╮", bottomLeft: "╰", bottomRight: "╯", teeUp: "┴" } as const;
+const BOX = {
+  horizontal: "─",
+  vertical: "│",
+  topLeft: "╭",
+  topRight: "╮",
+  bottomLeft: "╰",
+  bottomRight: "╯",
+  teeUp: "┴",
+} as const;
 const MAX_BOX_WIDTH = 100;
-const FIXED_TIP_ROWS = ["/ for commands", "! to run bash", "!! to run bash (no context)", "drop files to attach"] as const;
+const FIXED_TIP_ROWS = [
+  "/ for commands",
+  "! to run bash",
+  "!! to run bash (no context)",
+  "drop files to attach",
+] as const;
 
 export interface WelcomeTheme {
-  fg(color: "accent" | "customMessageLabel" | "dim" | "muted", text: string): string;
+  fg(
+    color: "accent" | "customMessageLabel" | "dim" | "muted",
+    text: string,
+  ): string;
   bold(text: string): string;
   italic(text: string): string;
   getColorMode(): "truecolor" | "256color";
@@ -37,7 +67,9 @@ export function truncateToWidth(value: string, width: number): string {
 
 function pad(value: string, width: number): string {
   const available = width - visibleWidth(value);
-  return available > 0 ? `${value}${" ".repeat(available)}` : truncateToWidth(value, width);
+  return available > 0
+    ? `${value}${" ".repeat(available)}`
+    : truncateToWidth(value, width);
 }
 
 function center(value: string, width: number): string {
@@ -89,9 +121,15 @@ export class WelcomeHeader {
 
   render(terminalWidth: number): string[] {
     const terminalRows = this.options.terminalRows();
-    if (!this.animation.isActive() && this.cache?.width === terminalWidth && this.cache.rows === terminalRows) return this.cache.lines;
+    if (
+      !this.animation.isActive() &&
+      this.cache?.width === terminalWidth &&
+      this.cache.rows === terminalRows
+    )
+      return this.cache.lines;
     const lines = this.renderLines(terminalWidth, terminalRows);
-    if (!this.animation.isActive()) this.cache = { width: terminalWidth, rows: terminalRows, lines };
+    if (!this.animation.isActive())
+      this.cache = { width: terminalWidth, rows: terminalRows, lines };
     return lines;
   }
 
@@ -103,9 +141,18 @@ export class WelcomeHeader {
     const preferredLeft = 26;
     const minimumLeft = 12;
     const minimumRight = 20;
-    const minimumLeftContent = Math.max(minimumLeft, visibleWidth("Welcome back!"));
-    const desiredLeft = Math.min(preferredLeft, Math.max(minimumLeft, Math.floor(contentWidth * 0.35)));
-    const dualLeft = contentWidth >= minimumRight + 1 ? Math.min(desiredLeft, contentWidth - minimumRight) : Math.max(1, contentWidth - 1);
+    const minimumLeftContent = Math.max(
+      minimumLeft,
+      visibleWidth("Welcome back!"),
+    );
+    const desiredLeft = Math.min(
+      preferredLeft,
+      Math.max(minimumLeft, Math.floor(contentWidth * 0.35)),
+    );
+    const dualLeft =
+      contentWidth >= minimumRight + 1
+        ? Math.min(desiredLeft, contentWidth - minimumRight)
+        : Math.max(1, contentWidth - 1);
     const dualRight = Math.max(1, contentWidth - dualLeft);
     const isWide = dualLeft >= minimumLeftContent && dualRight >= minimumRight;
     const leftWidth = isWide ? dualLeft : boxWidth - 2;
@@ -115,30 +162,65 @@ export class WelcomeHeader {
       "",
       center(this.options.theme.bold("Welcome back!"), leftWidth),
       "",
-      ...logo.map(line => center(line, leftWidth)),
+      ...logo.map((line) => center(line, leftWidth)),
       "",
     ];
     const tipLines = this.tipLines(boxWidth);
-    const sections = this.sections(isWide ? rightWidth : leftWidth, isWide, terminalRows, tipLines.length);
-    const content = isWide ? this.wideRows(left, sections, leftWidth, rightWidth) : this.narrowRows(left, sections, leftWidth);
-    return this.box(boxWidth, content, tipLines, isWide ? leftWidth : undefined, isWide ? rightWidth : undefined);
+    const sections = this.sections(
+      isWide ? rightWidth : leftWidth,
+      isWide,
+      terminalRows,
+      tipLines.length,
+    );
+    const content = isWide
+      ? this.wideRows(left, sections, leftWidth, rightWidth)
+      : this.narrowRows(left, sections, leftWidth);
+    return this.box(
+      boxWidth,
+      content,
+      tipLines,
+      isWide ? leftWidth : undefined,
+      isWide ? rightWidth : undefined,
+    );
   }
 
   private logoFrame(): readonly string[] {
     const mode = colorMode(this.options.theme);
     const progress = this.animation.progress();
-    return progress === undefined ? RESTING_FRAMES[mode] : introFrame(progress, mode);
+    return progress === undefined
+      ? RESTING_FRAMES[mode]
+      : introFrame(progress, mode);
   }
 
-  private sections(width: number, isWide: boolean, terminalRows: number, tipRows: number): { tips: string[]; extensions: string[]; sessions: string[]; separator: string } {
+  private sections(
+    width: number,
+    isWide: boolean,
+    terminalRows: number,
+    tipRows: number,
+  ): {
+    tips: string[];
+    extensions: string[];
+    sessions: string[];
+    separator: string;
+  } {
     const separator = ` ${this.options.theme.fg("dim", BOX.horizontal.repeat(Math.max(0, width - 2)))}`;
-    const tips = FIXED_TIP_ROWS.map(row => ` ${this.options.theme.fg("muted", row)}`);
+    const tips = FIXED_TIP_ROWS.map(
+      (row) => ` ${this.options.theme.fg("muted", row)}`,
+    );
     const sessions = this.sessionRows(width);
-    const extensions = this.extensionRows(width, this.extensionCapacity(isWide, terminalRows, tipRows, sessions.length));
+    const extensions = this.extensionRows(
+      width,
+      this.extensionCapacity(isWide, terminalRows, tipRows, sessions.length),
+    );
     return { tips, extensions, sessions, separator };
   }
 
-  private extensionCapacity(isWide: boolean, terminalRows: number, tipRows: number, sessionRows: number): number {
+  private extensionCapacity(
+    isWide: boolean,
+    terminalRows: number,
+    tipRows: number,
+    sessionRows: number,
+  ): number {
     // Fixed rows include borders, one-row top/bottom padding, headings,
     // separators, tips, and the rendered session rows.
     const fixedRows = (isWide ? 13 : 22) + sessionRows;
@@ -146,12 +228,20 @@ export class WelcomeHeader {
   }
 
   private extensionRows(width: number, capacity: number): string[] {
-    if (this.options.extensions.length === 0) return [` ${this.options.theme.fg("dim", "No extensions")}`];
-    const shownCount = this.options.extensions.length > capacity ? Math.max(0, capacity - 1) : this.options.extensions.length;
+    if (this.options.extensions.length === 0)
+      return [` ${this.options.theme.fg("dim", "No extensions")}`];
+    const shownCount =
+      this.options.extensions.length > capacity
+        ? Math.max(0, capacity - 1)
+        : this.options.extensions.length;
     const displayed = this.options.extensions.slice(0, shownCount);
-    const rows = displayed.map(extension => this.extensionRow(extension, width));
+    const rows = displayed.map((extension) =>
+      this.extensionRow(extension, width),
+    );
     if (displayed.length < this.options.extensions.length) {
-      rows.push(` ${this.options.theme.fg("dim", `… +${this.options.extensions.length - displayed.length} more`)}`);
+      rows.push(
+        ` ${this.options.theme.fg("dim", `… +${this.options.extensions.length - displayed.length} more`)}`,
+      );
     }
     return rows;
   }
@@ -159,7 +249,10 @@ export class WelcomeHeader {
   private extensionRow(extension: WelcomeExtension, width: number): string {
     const prefix = " • ";
     const suffix = ` ${extension.scope}`;
-    const nameWidth = Math.max(1, width - visibleWidth(prefix) - visibleWidth(suffix));
+    const nameWidth = Math.max(
+      1,
+      width - visibleWidth(prefix) - visibleWidth(suffix),
+    );
     const name = truncateToWidth(extension.name, nameWidth);
     return `${this.options.theme.fg("dim", prefix)}${this.options.theme.fg("muted", name)}${this.options.theme.fg("dim", suffix)}`;
   }
@@ -169,14 +262,30 @@ export class WelcomeHeader {
     for (const session of this.options.recentSessions.slice(0, 4)) {
       const prefix = " • ";
       const suffix = ` (${session.timeAgo})`;
-      const name = truncateToWidth(session.name, Math.max(1, width - visibleWidth(prefix) - visibleWidth(suffix)));
-      rows.push(`${this.options.theme.fg("dim", prefix)}${this.options.theme.fg("muted", name)}${this.options.theme.fg("dim", suffix)}`);
+      const name = truncateToWidth(
+        session.name,
+        Math.max(1, width - visibleWidth(prefix) - visibleWidth(suffix)),
+      );
+      rows.push(
+        `${this.options.theme.fg("dim", prefix)}${this.options.theme.fg("muted", name)}${this.options.theme.fg("dim", suffix)}`,
+      );
     }
-    if (rows.length === 0) rows.push(` ${this.options.theme.fg("dim", "No recent sessions")}`);
+    if (rows.length === 0)
+      rows.push(` ${this.options.theme.fg("dim", "No recent sessions")}`);
     return rows;
   }
 
-  private wideRows(left: readonly string[], sections: { tips: string[]; extensions: string[]; sessions: string[]; separator: string }, leftWidth: number, rightWidth: number): string[] {
+  private wideRows(
+    left: readonly string[],
+    sections: {
+      tips: string[];
+      extensions: string[];
+      sessions: string[];
+      separator: string;
+    },
+    leftWidth: number,
+    rightWidth: number,
+  ): string[] {
     const right = [
       "",
       ` ${this.options.theme.bold(this.options.theme.fg("accent", "Tips"))}`,
@@ -191,11 +300,23 @@ export class WelcomeHeader {
     ];
     const rows: string[] = [];
     const count = Math.max(left.length, right.length);
-    for (let index = 0; index < count; index++) rows.push(`${BOX.vertical}${pad(left[index] ?? "", leftWidth)}${BOX.vertical}${pad(right[index] ?? "", rightWidth)}${BOX.vertical}`);
+    for (let index = 0; index < count; index++)
+      rows.push(
+        `${BOX.vertical}${pad(left[index] ?? "", leftWidth)}${BOX.vertical}${pad(right[index] ?? "", rightWidth)}${BOX.vertical}`,
+      );
     return rows;
   }
 
-  private narrowRows(left: readonly string[], sections: { tips: string[]; extensions: string[]; sessions: string[]; separator: string }, width: number): string[] {
+  private narrowRows(
+    left: readonly string[],
+    sections: {
+      tips: string[];
+      extensions: string[];
+      sessions: string[];
+      separator: string;
+    },
+    width: number,
+  ): string[] {
     const content = [
       ...left,
       sections.separator,
@@ -209,24 +330,42 @@ export class WelcomeHeader {
       ...sections.sessions,
       "",
     ];
-    return content.map(line => `${BOX.vertical}${pad(line, width)}${BOX.vertical}`);
+    return content.map(
+      (line) => `${BOX.vertical}${pad(line, width)}${BOX.vertical}`,
+    );
   }
 
-  private box(boxWidth: number, content: readonly string[], tipLines: readonly string[], leftWidth?: number, rightWidth?: number): string[] {
+  private box(
+    boxWidth: number,
+    content: readonly string[],
+    tipLines: readonly string[],
+    leftWidth?: number,
+    rightWidth?: number,
+  ): string[] {
     const dim = (value: string) => this.options.theme.fg("dim", value);
     const title = ` pi v${this.options.version} `;
     const prefix = BOX.horizontal.repeat(3);
     const innerWidth = boxWidth - 2;
     const titleWidth = visibleWidth(prefix) + visibleWidth(title);
-    const topInner = titleWidth >= innerWidth
-      ? truncateToWidth(`${dim(prefix)}${this.options.theme.fg("muted", title)}`, innerWidth)
-      : `${dim(prefix)}${this.options.theme.fg("muted", title)}${dim(BOX.horizontal.repeat(innerWidth - titleWidth))}`;
-    const bottom = leftWidth === undefined || rightWidth === undefined
-      ? `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(boxWidth - 2))}${dim(BOX.bottomRight)}`
-      : `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(leftWidth))}${dim(BOX.teeUp)}${dim(BOX.horizontal.repeat(rightWidth))}${dim(BOX.bottomRight)}`;
+    const topInner =
+      titleWidth >= innerWidth
+        ? truncateToWidth(
+            `${dim(prefix)}${this.options.theme.fg("muted", title)}`,
+            innerWidth,
+          )
+        : `${dim(prefix)}${this.options.theme.fg("muted", title)}${dim(BOX.horizontal.repeat(innerWidth - titleWidth))}`;
+    const bottom =
+      leftWidth === undefined || rightWidth === undefined
+        ? `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(boxWidth - 2))}${dim(BOX.bottomRight)}`
+        : `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(leftWidth))}${dim(BOX.teeUp)}${dim(BOX.horizontal.repeat(rightWidth))}${dim(BOX.bottomRight)}`;
     return [
       `${dim(BOX.topLeft)}${topInner}${dim(BOX.topRight)}`,
-      ...content.map(line => dim(BOX.vertical) + line.slice(1, -1).replaceAll(BOX.vertical, dim(BOX.vertical)) + dim(BOX.vertical)),
+      ...content.map(
+        (line) =>
+          dim(BOX.vertical) +
+          line.slice(1, -1).replaceAll(BOX.vertical, dim(BOX.vertical)) +
+          dim(BOX.vertical),
+      ),
       bottom,
       ...tipLines,
     ];
@@ -239,17 +378,19 @@ export class WelcomeHeader {
     const body = wrapText(this.options.selectedTip, bodyWidth);
     const continuation = " ".repeat(visibleWidth(label));
     return body.map((line, index) => {
-      const content = index === 0
-        ? `${this.options.theme.fg("customMessageLabel", label)}${this.options.theme.fg("muted", line)}`
-        : `${continuation}${this.options.theme.fg("muted", line)}`;
+      const content =
+        index === 0
+          ? `${this.options.theme.fg("customMessageLabel", label)}${this.options.theme.fg("muted", line)}`
+          : `${continuation}${this.options.theme.fg("muted", line)}`;
       return ` ${this.options.theme.italic(content)}`;
     });
   }
 }
 
 export function pickStartupTip(random = Math.random): string {
-  const index = Math.min(STARTUP_TIPS.length - 1, Math.floor(random() * STARTUP_TIPS.length));
+  const index = Math.min(
+    STARTUP_TIPS.length - 1,
+    Math.floor(random() * STARTUP_TIPS.length),
+  );
   return STARTUP_TIPS[index] ?? STARTUP_TIPS[0];
 }
-
-

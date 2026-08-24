@@ -18,6 +18,19 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 
 ## Validation
 
+Check formatting, recommended lint rules, and import organization for every
+workspace:
+
+```bash
+bun run lint
+```
+
+Apply safe Biome fixes:
+
+```bash
+bun run lint:fix
+```
+
 Run strict type checking for every workspace:
 
 ```bash
