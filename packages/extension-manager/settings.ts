@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import { mutateExactPattern, mutatePackagePatterns } from "./resource-paths.ts";
+import {
+  mutateExactPattern,
+  mutatePackagePatterns,
+} from "./resource-filters.ts";
 import type {
   JsonObject,
   PackageLocator,

@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["test/setup.ts", "bunfig.toml"],
   "tasks": {
     "lint": {
       "cache": true,
@@ -10,6 +11,14 @@
     },
     "test": {
       "cache": true,
+      "outputs": []
+    },
+    "test:coverage": {
+      "cache": false,
+      "outputs": []
+    },
+    "test:stress": {
+      "cache": false,
       "outputs": []
     },
     "typecheck": {

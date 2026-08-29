@@ -6,7 +6,9 @@
   "scripts": {
     "lint": "biome check --config-path=../.. --error-on-warnings .",
     "lint:fix": "biome check --write --config-path=../.. --error-on-warnings .",
-    "test": "bun test",
+    "test": "bun test --preload ../../test/setup.ts",
+    "test:coverage": "bun test --preload ../../test/setup.ts --coverage --coverage-reporter=text",
+    "test:stress": "bun test --preload ../../test/setup.ts --isolate --randomize --rerun-each 5",
     "typecheck": "tsc --project tsconfig.json"
   },
   "pi": {

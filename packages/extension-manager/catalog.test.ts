@@ -1,16 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { ExtensionCatalog } from "./catalog.ts";
 import type {
+  CatalogDiagnostic,
   CatalogRow,
   CatalogSeed,
   CommitRequest,
   CommitResult,
   PackageToggleTarget,
   ResourceScope,
+  ScopeCommitResult,
+  SettingsDocument,
   ToggleTarget,
 } from "./types.ts";
 
 const path = "/repo/extensions/shared.ts";
+const settingsPath = "/agent/settings.json";
+
+async function noCommit(): Promise<CommitResult> {
+  return { scopes: [], committedScopes: [] };
+}
 
 function target(id: string, scope: ResourceScope): ToggleTarget {
   return {
@@ -112,12 +120,259 @@ function seed(
   };
 }
 
-describe("catalog staging", () => {
-  test("projects staged state and removes a stage when restored", () => {
-    const catalog = new ExtensionCatalog(
-      seed([row("winner", "project", true)]),
-      async () => ({ scopes: [], committedScopes: [] }),
-    );
+function catalogFor(
+  rows: readonly CatalogRow[],
+  targets?: ReadonlyMap<string, ToggleTarget>,
+): ExtensionCatalog {
+  const staged = targets === undefined ? seed(rows) : seed(rows, targets);
+  return new ExtensionCatalog(staged, noCommit);
+}
+
+interface ResolutionCandidate {
+  readonly id: string;
+  readonly scope: ResourceScope;
+  readonly kind: "delta" | "package" | "top-level";
+  readonly order: number;
+  readonly configured?: boolean;
+  readonly participates?: boolean;
+  readonly participatesWhenDisabled?: boolean;
+  readonly participatesWhenEnabled?: boolean;
+  readonly resolutionCandidate?: boolean;
+}
+
+interface ResolutionCase {
+  readonly label: string;
+  readonly candidates: readonly ResolutionCandidate[];
+  readonly stageId: string;
+  readonly stageEnabled: boolean;
+  readonly resolved: boolean;
+}
+
+function resolutionCatalog(
+  candidates: readonly ResolutionCandidate[],
+): ExtensionCatalog {
+  const rows = candidates.map((c) => ({
+    ...row(c.id, c.scope, c.configured ?? true),
+    resolutionCandidate: c.resolutionCandidate ?? true,
+    resolutionOrder: c.order,
+    resolutionParticipant: c.resolutionCandidate ?? true,
+  }));
+  const targets = new Map<string, ToggleTarget>(
+    candidates.map((c) => [
+      c.id,
+      c.kind === "top-level"
+        ? target(c.id, c.scope)
+        : packageTarget(c.id, c.scope, {
+            autoloadDelta: c.kind === "delta",
+            participates: c.participates ?? true,
+            participatesWhenDisabled: c.participatesWhenDisabled ?? true,
+            participatesWhenEnabled: c.participatesWhenEnabled ?? true,
+          }),
+    ]),
+  );
+  return catalogFor(rows, targets);
+}
+
+const resolutionCases: readonly ResolutionCase[] = [
+  {
+    label: "an autoload delta that stops participating yields to its package",
+    candidates: [
+      { id: "global", scope: "global", kind: "package", order: 1 },
+      {
+        id: "project",
+        scope: "project",
+        kind: "delta",
+        order: 0,
+        participatesWhenDisabled: false,
+      },
+    ],
+    stageId: "project",
+    stageEnabled: false,
+    resolved: true,
+  },
+  {
+    label: "an enabled autoload delta outranks a disabled package",
+    candidates: [
+      {
+        id: "global",
+        scope: "global",
+        kind: "package",
+        order: 1,
+        configured: false,
+      },
+      {
+        id: "project",
+        scope: "project",
+        kind: "delta",
+        order: 0,
+        configured: false,
+        participates: false,
+      },
+    ],
+    stageId: "project",
+    stageEnabled: true,
+    resolved: true,
+  },
+  {
+    label: "a disabled top-level winner outranks an enabled package delta",
+    candidates: [
+      {
+        id: "top",
+        scope: "project",
+        kind: "top-level",
+        order: 0,
+        configured: false,
+      },
+      {
+        id: "delta",
+        scope: "global",
+        kind: "delta",
+        order: 1,
+        configured: false,
+        participates: false,
+      },
+    ],
+    stageId: "delta",
+    stageEnabled: true,
+    resolved: false,
+  },
+  {
+    label: "a row that is not a resolution candidate never resolves",
+    candidates: [
+      {
+        id: "global",
+        scope: "global",
+        kind: "package",
+        order: 0,
+        configured: false,
+        resolutionCandidate: false,
+      },
+    ],
+    stageId: "global",
+    stageEnabled: true,
+    resolved: false,
+  },
+  {
+    label: "the lowest ordered candidate decides while it stays enabled",
+    candidates: [
+      { id: "global", scope: "global", kind: "package", order: 1 },
+      { id: "project", scope: "project", kind: "top-level", order: 0 },
+    ],
+    stageId: "global",
+    stageEnabled: false,
+    resolved: true,
+  },
+  {
+    label: "disabling the lowest ordered candidate disables resolution",
+    candidates: [
+      { id: "global", scope: "global", kind: "package", order: 1 },
+      { id: "project", scope: "project", kind: "top-level", order: 0 },
+    ],
+    stageId: "project",
+    stageEnabled: false,
+    resolved: false,
+  },
+];
+
+interface CommitCase {
+  readonly label: string;
+  readonly status: ScopeCommitResult["status"];
+  readonly stagedCount: number;
+}
+
+const commitCases: readonly CommitCase[] = [
+  {
+    label: "clears the stage for a committed scope",
+    status: "committed",
+    stagedCount: 0,
+  },
+  {
+    label: "retains the stage for a conflicting scope",
+    status: "conflict",
+    stagedCount: 1,
+  },
+  {
+    label: "retains the stage for a failed scope",
+    status: "failed",
+    stagedCount: 1,
+  },
+  {
+    label: "retains the stage for an unchanged scope",
+    status: "unchanged",
+    stagedCount: 1,
+  },
+];
+
+interface DiagnosticCase {
+  readonly label: string;
+  readonly diagnostic: CatalogDiagnostic;
+  readonly first: readonly string[];
+  readonly second: readonly string[];
+}
+
+const diagnosticCases: readonly DiagnosticCase[] = [
+  {
+    label: "a source diagnostic reaches only its own package row",
+    diagnostic: { scope: "global", source: "npm:first", message: "boom" },
+    first: ["boom"],
+    second: [],
+  },
+  {
+    label: "a resource path diagnostic reaches every row on that path",
+    diagnostic: { scope: "global", path, message: "boom" },
+    first: ["boom"],
+    second: ["boom"],
+  },
+  {
+    label: "a settings file diagnostic reaches every row in its scope",
+    diagnostic: { scope: "global", path: settingsPath, message: "boom" },
+    first: ["boom"],
+    second: ["boom"],
+  },
+  {
+    label: "a scope wide diagnostic reaches every row in that scope",
+    diagnostic: { scope: "global", message: "boom" },
+    first: ["boom"],
+    second: ["boom"],
+  },
+  {
+    label: "a diagnostic from another scope reaches no row",
+    diagnostic: { scope: "project", message: "boom" },
+    first: [],
+    second: [],
+  },
+];
+
+function diagnosticCatalog(diagnostic: CatalogDiagnostic): ExtensionCatalog {
+  const first: CatalogRow = {
+    ...row("first", "global", true),
+    source: "npm:first",
+  };
+  const second: CatalogRow = {
+    ...row("second", "global", true),
+    source: "npm:second",
+  };
+  const document: SettingsDocument = {
+    scope: "global",
+    path: settingsPath,
+    content: "{}",
+    value: {},
+  };
+  return new ExtensionCatalog(
+    {
+      ...seed([first, second]),
+      settings: new Map<ResourceScope, SettingsDocument>([
+        ["global", document],
+      ]),
+      diagnostics: [diagnostic],
+    },
+    noCommit,
+  );
+}
+
+describe("ExtensionCatalog.stage", () => {
+  test("should project a staged toggle and clear it when restored", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
 
     catalog.stage("winner", false);
     expect(catalog.view().rows[0]?.configured).toBe(false);
@@ -128,31 +383,66 @@ describe("catalog staging", () => {
     expect(catalog.hasChanges()).toBe(false);
   });
 
-  test("does not let a staged shadowed row change the resolved projection", () => {
-    const catalog = new ExtensionCatalog(
-      seed([
-        row("winner", "project", true),
-        row("loser", "global", true, "Project settings"),
-      ]),
-      async () => ({ scopes: [], committedScopes: [] }),
-    );
+  test("should throw when staging an unknown catalog row", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
+    const message = "Unknown catalog row: missing";
 
-    catalog.stage("loser", false);
-    expect(
-      catalog.view().rows.every((candidate) => candidate.resolvedAfterReload),
-    ).toBe(true);
-
-    catalog.stage("winner", false);
-    expect(
-      catalog.view().rows.every((candidate) => !candidate.resolvedAfterReload),
-    ).toBe(true);
+    expect(() => catalog.stage("missing", true)).toThrow(message);
   });
 
-  test("returns inspector provenance and configured versus resolved labels", () => {
-    const catalog = new ExtensionCatalog(
-      seed([row("winner", "project", true)]),
-      async () => ({ scopes: [], committedScopes: [] }),
+  test("should preserve resolution when staging a shadowed row", () => {
+    const catalog = catalogFor([
+      row("winner", "project", true),
+      row("loser", "global", true, "Project settings"),
+    ]);
+
+    catalog.stage("loser", false);
+    const shadowed = catalog.view().rows;
+    expect(shadowed.every((candidate) => candidate.resolvedAfterReload)).toBe(
+      true,
     );
+
+    catalog.stage("winner", false);
+    const disabled = catalog.view().rows;
+    expect(disabled.every((candidate) => !candidate.resolvedAfterReload)).toBe(
+      true,
+    );
+  });
+});
+
+describe("ExtensionCatalog.toggle", () => {
+  test("should toggle from the projected state", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
+
+    catalog.toggle("winner");
+
+    expect(catalog.view().rows[0]?.configured).toBe(false);
+    expect(catalog.hasChanges()).toBe(true);
+  });
+
+  test("should throw when toggling an unknown catalog row", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
+    const message = "Unknown catalog row: missing";
+
+    expect(() => catalog.toggle("missing")).toThrow(message);
+  });
+});
+
+describe("ExtensionCatalog.discard", () => {
+  test("should discard every staged toggle", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
+
+    catalog.toggle("winner");
+    catalog.discard();
+
+    expect(catalog.view().rows[0]?.configured).toBe(true);
+    expect(catalog.hasChanges()).toBe(false);
+  });
+});
+
+describe("ExtensionCatalog.inspect", () => {
+  test("should return configured and resolved provenance", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
 
     const inspection = catalog.inspect("winner");
     expect(inspection?.fields).toContainEqual({
@@ -172,390 +462,171 @@ describe("catalog staging", () => {
       value: "winner",
     });
   });
-});
 
-test("commit emits opaque mutations and retains only failed-scope stages", async () => {
-  const requests: CommitRequest[] = [];
-  const result: CommitResult = {
-    scopes: [
-      { scope: "global", status: "committed" },
-      { scope: "project", status: "failed", message: "disk full" },
-    ],
-    committedScopes: ["global"],
-  };
-  const catalog = new ExtensionCatalog(
-    seed([row("global", "global", true), row("project", "project", true)]),
-    async (request) => {
-      requests.push(request);
-      return result;
+  test("should project staged top-level filters and their reason", () => {
+    const projected = { ...target("winner", "project"), baseDir: "/repo" };
+    const catalog = catalogFor(
+      [row("winner", "project", true)],
+      new Map([["winner", projected]]),
+    );
+
+    catalog.stage("winner", false);
+    const fields = catalog.inspect("winner")?.fields;
+
+    expect(fields).toContainEqual({ label: "Configured", value: "Disabled" });
+    expect(fields).toContainEqual({
+      label: "Filters",
+      value: '"extensions/**", "-extensions/shared.ts"',
+    });
+    expect(fields).toContainEqual({
+      label: "Reason",
+      value: "Disabled by exact force-exclude `-extensions/shared.ts`",
+    });
+  });
+
+  test("should project an explicit-empty package filter and its reason", () => {
+    const packagePath = "/global/pkg/extensions/shared.ts";
+    const packageRow: CatalogRow = {
+      ...row("package", "global", false),
+      path: packagePath,
+      canonicalPath: packagePath,
+      filters: [],
+      configurationReason: "Disabled by explicit empty package filter",
+      resolvedAfterReload: false,
+    };
+    const packageToggle: PackageToggleTarget = {
+      ...packageTarget("package", "global", { canonicalPath: packagePath }),
+      hadFilterField: true,
+    };
+    const catalog = catalogFor(
+      [packageRow],
+      new Map([["package", packageToggle]]),
+    );
+
+    catalog.stage("package", true);
+    const fields = catalog.inspect("package")?.fields;
+
+    expect(fields).toContainEqual({ label: "Configured", value: "Enabled" });
+    expect(fields).toContainEqual({
+      label: "Filters",
+      value: '"extensions/shared.ts"',
+    });
+    expect(fields).toContainEqual({
+      label: "Reason",
+      value: "Enabled by include filter `extensions/shared.ts`",
+    });
+  });
+
+  test.each(diagnosticCases.map((entry) => [entry.label, entry] as const))(
+    "should project diagnostics for: %s",
+    (_label, scenario) => {
+      const catalog = diagnosticCatalog(scenario.diagnostic);
+      const first = catalog.inspect("first")?.diagnostics;
+      const second = catalog.inspect("second")?.diagnostics;
+      const rows = catalog.view().rows;
+      const firstRow = rows.find((candidate) => candidate.id === "first");
+
+      expect(first).toEqual([...scenario.first]);
+      expect(second).toEqual([...scenario.second]);
+      expect(firstRow?.diagnosticCount).toBe(scenario.first.length);
     },
   );
-  catalog.stage("global", false);
-  catalog.stage("project", false);
-
-  expect(await catalog.commit()).toEqual(result);
-  expect(
-    requests[0]?.mutations.map((mutation) => [
-      mutation.scope,
-      mutation.enabled,
-    ]),
-  ).toEqual([
-    ["global", false],
-    ["project", false],
-  ]);
-  expect(catalog.view().stagedCount).toBe(1);
-  expect(
-    catalog.view().rows.find((candidate) => candidate.id === "global")
-      ?.configured,
-  ).toBe(false);
 });
 
-test("self projection canonicalizes equivalent paths", () => {
-  const catalog = new ExtensionCatalog(
-    seed([row("winner", "project", true)]),
-    async () => ({ scopes: [], committedScopes: [] }),
+describe("ExtensionCatalog.selfResolved", () => {
+  test.each(resolutionCases.map((entry) => [entry.label, entry] as const))(
+    "should match projected resolution for: %s",
+    (_label, scenario) => {
+      const catalog = resolutionCatalog(scenario.candidates);
+
+      catalog.stage(scenario.stageId, scenario.stageEnabled);
+
+      expect(catalog.selfResolved(path, true)).toBe(scenario.resolved);
+    },
   );
-  expect(
-    catalog.wouldDisableSelf(
-      "/repo/extensions/../extensions/shared.ts",
-      "winner",
-      false,
-    ),
-  ).toBe(true);
-});
 
-test("self-disable projection follows the effective row across duplicate origins", () => {
-  const catalog = new ExtensionCatalog(
-    seed([
+  test("should follow the effective row across staged duplicate origins", () => {
+    const catalog = catalogFor([
       row("loser", "global", true, "Project settings"),
       row("winner", "project", true),
-    ]),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
+    ]);
 
-  expect(catalog.wouldDisableSelf(path, "loser", false)).toBe(false);
-  expect(catalog.wouldDisableSelf(path, "winner", false)).toBe(true);
+    catalog.stage("loser", false);
+    expect(catalog.selfResolved(path, true)).toBe(true);
 
-  catalog.stage("loser", false);
-  expect(catalog.selfResolved(path, true)).toBe(true);
-  catalog.stage("winner", false);
-  expect(catalog.selfResolved(path, true)).toBe(false);
-});
-
-test("keeps a lower canonical occurrence shadowed when its winner is disabled", () => {
-  const lower: CatalogRow = {
-    ...row("first", "global", true, "Project settings"),
-    resolutionCandidate: true,
-  };
-  const rows = [lower, row("second", "project", true)];
-  const targets = new Map<string, ToggleTarget>([
-    ["first", packageTarget("first", "global")],
-    ["second", target("second", "project")],
-  ]);
-  const catalog = new ExtensionCatalog(seed(rows, targets), async () => ({
-    scopes: [],
-    committedScopes: [],
-  }));
-
-  expect(catalog.wouldDisableSelf(path, "first", false)).toBe(false);
-  catalog.stage("first", false);
-  expect(catalog.selfResolved(path, true)).toBe(true);
-  expect(catalog.wouldDisableSelf(path, "second", false)).toBe(true);
-  catalog.stage("second", false);
-  expect(catalog.selfResolved(path, true)).toBe(false);
-});
-
-test("projects autoload delta removal to its enabled Global fallback", () => {
-  const globalRow: CatalogRow = {
-    ...row("global", "global", true, "Project package npm:kit"),
-    source: "npm:kit",
-    resolutionParticipant: false,
-    resolutionCandidate: true,
-  };
-  const projectRow: CatalogRow = {
-    ...row("project", "project", true),
-    source: "npm:kit",
-  };
-  const targets = new Map<string, ToggleTarget>([
-    ["global", packageTarget("global", "global")],
-    [
-      "project",
-      packageTarget("project", "project", {
-        autoloadDelta: true,
-        participates: true,
-        participatesWhenEnabled: true,
-        participatesWhenDisabled: false,
-      }),
-    ],
-  ]);
-  const catalog = new ExtensionCatalog(
-    seed([globalRow, projectRow], targets),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  expect(catalog.wouldDisableSelf(path, "project", false)).toBe(false);
-  catalog.stage("project", false);
-  expect(catalog.selfResolved(path, true)).toBe(true);
-});
-
-test("projects an absent autoload delta when it is enabled", () => {
-  const globalRow: CatalogRow = {
-    ...row("global", "global", false),
-    source: "npm:kit",
-    resolvedAfterReload: false,
-  };
-  const projectRow: CatalogRow = {
-    ...row("project", "project", false, "Global package npm:kit"),
-    source: "npm:kit",
-    resolvedAfterReload: false,
-    resolutionParticipant: false,
-    resolutionCandidate: true,
-  };
-  const targets = new Map<string, ToggleTarget>([
-    ["global", packageTarget("global", "global")],
-    [
-      "project",
-      packageTarget("project", "project", {
-        autoloadDelta: true,
-        participates: false,
-        participatesWhenEnabled: true,
-        participatesWhenDisabled: false,
-      }),
-    ],
-  ]);
-  const catalog = new ExtensionCatalog(
-    seed([globalRow, projectRow], targets),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("project", true);
-  expect(catalog.selfResolved(path, true)).toBe(true);
-});
-
-test("keeps a regular Global package shadowed by the same Project identity", () => {
-  const globalPath = "/global/pkg/extensions/shared.ts";
-  const globalRow: CatalogRow = {
-    ...row("global", "global", false, "Project package npm:kit"),
-    path: globalPath,
-    canonicalPath: globalPath,
-    source: "npm:kit",
-    resolvedAfterReload: false,
-    resolutionParticipant: false,
-    resolutionCandidate: false,
-  };
-  const target = packageTarget("global", "global", {
-    canonicalPath: globalPath,
+    catalog.stage("winner", false);
+    expect(catalog.selfResolved(path, true)).toBe(false);
   });
-  const catalog = new ExtensionCatalog(
-    seed([globalRow], new Map([["global", target]])),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("global", true);
-  expect(
-    catalog.view().rows.find((candidate) => candidate.id === "global")
-      ?.resolvedAfterReload,
-  ).toBe(false);
 });
 
-test("associates source diagnostics only with matching rows", () => {
-  const first: CatalogRow = {
-    ...row("first", "global", true),
-    source: "npm:first",
-  };
-  const second: CatalogRow = {
-    ...row("second", "global", true),
-    source: "npm:second",
-  };
-  const catalog = new ExtensionCatalog(
-    {
-      ...seed([first, second]),
-      diagnostics: [
-        {
-          scope: "global",
-          source: "npm:first",
-          message: "invalid extensions filter",
-        },
+describe("ExtensionCatalog.wouldDisableSelf", () => {
+  test("should canonicalize an equivalent path before projecting itself", () => {
+    const catalog = catalogFor([row("winner", "project", true)]);
+    const equivalent = "/repo/extensions/../extensions/shared.ts";
+
+    expect(catalog.wouldDisableSelf(equivalent, "winner", false)).toBe(true);
+  });
+
+  test("should follow the effective row across duplicate origins", () => {
+    const catalog = catalogFor([
+      row("loser", "global", true, "Project settings"),
+      row("winner", "project", true),
+    ]);
+
+    expect(catalog.wouldDisableSelf(path, "loser", false)).toBe(false);
+    expect(catalog.wouldDisableSelf(path, "winner", false)).toBe(true);
+  });
+});
+
+describe("ExtensionCatalog.commit", () => {
+  test("should hand the committer opaque documents and mutations", async () => {
+    const requests: CommitRequest[] = [];
+    const result: CommitResult = {
+      scopes: [
+        { scope: "global", status: "committed" },
+        { scope: "project", status: "failed", message: "disk full" },
       ],
+      committedScopes: ["global"],
+    };
+    const rows = [
+      row("global", "global", true),
+      row("project", "project", true),
+    ];
+    const catalog = new ExtensionCatalog(seed(rows), async (request) => {
+      requests.push(request);
+      return result;
+    });
+    catalog.stage("global", false);
+    catalog.stage("project", false);
+
+    expect(await catalog.commit()).toEqual(result);
+    const mutations = requests[0]?.mutations ?? [];
+    expect(mutations.map((one) => [one.scope, one.enabled])).toEqual([
+      ["global", false],
+      ["project", false],
+    ]);
+    const ids = mutations.map((one) => one.target.id);
+    expect(ids).toEqual(["global", "project"]);
+    expect(catalog.view().stagedCount).toBe(1);
+  });
+
+  test.each(commitCases.map((entry) => [entry.label, entry] as const))(
+    "should apply the commit outcome for: %s",
+    async (_label, scenario) => {
+      const committed = scenario.status === "committed";
+      const catalog = new ExtensionCatalog(
+        seed([row("global", "global", true)]),
+        async () => ({
+          scopes: [{ scope: "global", status: scenario.status }],
+          committedScopes: committed ? ["global"] : [],
+        }),
+      );
+      catalog.stage("global", false);
+
+      await catalog.commit();
+
+      expect(catalog.view().stagedCount).toBe(scenario.stagedCount);
+      expect(catalog.view().rows[0]?.configured).toBe(false);
     },
-    async () => ({ scopes: [], committedScopes: [] }),
   );
-
-  expect(catalog.inspect("first")?.diagnostics).toEqual([
-    "invalid extensions filter",
-  ]);
-  expect(catalog.inspect("second")?.diagnostics).toEqual([]);
-});
-
-test("falls through an absent delta to the next package candidate", () => {
-  const deltaRow: CatalogRow = {
-    ...row("delta", "project", true),
-    source: "npm:first",
-    resolutionOrder: 0,
-  };
-  const fallbackRow: CatalogRow = {
-    ...row("fallback", "global", true, "Project package npm:first"),
-    source: "npm:second",
-    resolutionParticipant: false,
-    resolutionCandidate: true,
-    resolutionOrder: 1,
-  };
-  const deltaTarget: PackageToggleTarget = {
-    ...packageTarget("delta", "project", {
-      autoloadDelta: true,
-      participates: true,
-      participatesWhenEnabled: true,
-      participatesWhenDisabled: false,
-    }),
-    package: { source: "npm:first", occurrence: 0 },
-    packageIdentity: "npm:first",
-  };
-  const fallbackTarget: PackageToggleTarget = {
-    ...packageTarget("fallback", "global"),
-    package: { source: "npm:second", occurrence: 0 },
-    packageIdentity: "npm:second",
-  };
-  const catalog = new ExtensionCatalog(
-    seed(
-      [deltaRow, fallbackRow],
-      new Map([
-        ["delta", deltaTarget],
-        ["fallback", fallbackTarget],
-      ]),
-    ),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("delta", false);
-  expect(catalog.selfResolved(path, true)).toBe(true);
-});
-
-test("keeps a disabled top-level winner ahead of an enabled package delta", () => {
-  const topRow: CatalogRow = {
-    ...row("top", "project", false),
-    resolvedAfterReload: false,
-    resolutionOrder: 0,
-  };
-  const deltaRow: CatalogRow = {
-    ...row("delta", "global", false, "Project settings"),
-    source: "npm:kit",
-    resolvedAfterReload: false,
-    resolutionParticipant: false,
-    resolutionCandidate: true,
-    resolutionOrder: 1,
-  };
-  const deltaTarget = packageTarget("delta", "global", {
-    autoloadDelta: true,
-    participates: false,
-    participatesWhenEnabled: true,
-    participatesWhenDisabled: false,
-  });
-  const catalog = new ExtensionCatalog(
-    seed(
-      [topRow, deltaRow],
-      new Map([
-        ["top", target("top", "project")],
-        ["delta", deltaTarget],
-      ]),
-    ),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("delta", true);
-  expect(catalog.selfResolved(path, true)).toBe(false);
-});
-
-test("projects staged top-level filters and precedence reason in inspection", () => {
-  const projectedTarget = {
-    ...target("winner", "project"),
-    baseDir: "/repo",
-  };
-  const catalog = new ExtensionCatalog(
-    seed(
-      [row("winner", "project", true)],
-      new Map([["winner", projectedTarget]]),
-    ),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("winner", false);
-  const fields = catalog.inspect("winner")?.fields;
-
-  expect(fields).toContainEqual({ label: "Configured", value: "Disabled" });
-  expect(fields).toContainEqual({
-    label: "Filters",
-    value: '"extensions/**", "-extensions/shared.ts"',
-  });
-  expect(fields).toContainEqual({
-    label: "Reason",
-    value: "Disabled by exact force-exclude `-extensions/shared.ts`",
-  });
-});
-
-test("projects explicit-empty package filters in inspection", () => {
-  const packagePath = "/global/pkg/extensions/shared.ts";
-  const packageRow: CatalogRow = {
-    ...row("package", "global", false),
-    path: packagePath,
-    canonicalPath: packagePath,
-    source: "npm:kit",
-    filters: [],
-    configurationReason: "Disabled by explicit empty package filter",
-    resolvedAfterReload: false,
-  };
-  const packageToggle: PackageToggleTarget = {
-    ...packageTarget("package", "global", {
-      canonicalPath: packagePath,
-    }),
-    hadFilterField: true,
-  };
-  const catalog = new ExtensionCatalog(
-    seed([packageRow], new Map([["package", packageToggle]])),
-    async () => ({ scopes: [], committedScopes: [] }),
-  );
-
-  catalog.stage("package", true);
-  const fields = catalog.inspect("package")?.fields;
-
-  expect(fields).toContainEqual({ label: "Configured", value: "Enabled" });
-  expect(fields).toContainEqual({
-    label: "Filters",
-    value: '"extensions/shared.ts"',
-  });
-  expect(fields).toContainEqual({
-    label: "Reason",
-    value: "Enabled by include filter `extensions/shared.ts`",
-  });
-});
-
-test("exposes every settings-file diagnostic to rows in that scope", () => {
-  const settingsPath = "/agent/settings.json";
-  const scopedSeed: CatalogSeed = {
-    ...seed([row("winner", "global", true)]),
-    settings: new Map([
-      [
-        "global",
-        {
-          scope: "global",
-          path: settingsPath,
-          content: "{}",
-          value: {},
-        },
-      ],
-    ]),
-    diagnostics: [
-      { scope: "global", path: settingsPath, message: "first parse problem" },
-      { scope: "global", path: settingsPath, message: "second parse problem" },
-    ],
-  };
-  const catalog = new ExtensionCatalog(scopedSeed, async () => ({
-    scopes: [],
-    committedScopes: [],
-  }));
-
-  expect(catalog.inspect("winner")?.diagnostics).toEqual([
-    "first parse problem",
-    "second parse problem",
-  ]);
-  expect(catalog.view().rows[0]?.diagnosticCount).toBe(2);
 });

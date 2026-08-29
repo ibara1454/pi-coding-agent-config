@@ -1,9 +1,9 @@
+import { canonicalizeResourcePath } from "./package-resource-paths.ts";
 import {
-  canonicalizeResourcePath,
   explainFilterState,
   mutateExactPattern,
   mutatePackagePatterns,
-} from "./resource-paths.ts";
+} from "./resource-filters.ts";
 import type {
   CatalogRow,
   CatalogSeed,

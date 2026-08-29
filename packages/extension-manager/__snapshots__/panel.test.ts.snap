@@ -1,0 +1,169 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`ExtensionManagerPanel.render should render the default narrow list 1`] = `
+"Extension Manager
+Persistent Extensions and Skills
+ All   Extensions   Skills
+Search: type to filter
+──────────────────────────────────────────────────────────────────────
+Extensions
+> [x] G alpha
+Skills
+  [x] P project-review
+──────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc\x1B[0m...\x1B[0m
+
+
+
+
+
+
+"
+`;
+
+exports[`ExtensionManagerPanel.render should render the default wide list beside the inspector 1`] = `
+"Extension Manager
+Persistent Extensions and Skills
+ All   Extensions   Skills
+Search: type to filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Extensions                                             │ alpha
+> [x] G alpha                                          │ alpha description
+Skills                                                 │ Kind: Extension
+  [x] P project-review                                 │ Scope: Global
+                                                       │ Source: Settings
+                                                       │ Resolved path: /repo/alpha.ts
+                                                       │ Canonical path: /repo/alpha.ts
+                                                       │ Filters: "extensions/**"
+                                                       │ Toggle serialization: alpha.ts
+                                                       │ Configured: Enabled
+                                                       │ Reason: Enabled by include filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc back  Click/wheel"
+`;
+
+exports[`ExtensionManagerPanel.render should render stable search results 1`] = `
+"Extension Manager
+Persistent Extensions and Skills
+ All   Extensions   Skills
+Search: rev
+──────────────────────────────────────────────────────────────────────
+Skills
+> [x] P project-review
+──────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc\x1B[0m...\x1B[0m
+
+
+
+
+
+
+
+
+"
+`;
+
+exports[`ExtensionManagerPanel.render should render the focused inspector 1`] = `
+"Extension Manager
+Persistent Extensions and Skills
+ All   Extensions   Skills
+Search: type to filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+alpha
+alpha description
+Kind: Extension
+Scope: Global
+Source: Settings
+Resolved path: /repo/alpha.ts
+Canonical path: /repo/alpha.ts
+Filters: "extensions/**"
+Toggle serialization: alpha.ts
+Configured: Enabled
+Reason: Enabled by include filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc back  Click/wheel"
+`;
+
+exports[`ExtensionManagerPanel.render should render the close confirmation 1`] = `
+"
+
+
+
+
+
+Apply staged changes before closing?
+
+ Apply   Discard   Cancel
+
+
+
+
+
+
+
+
+"
+`;
+
+exports[`ExtensionManagerPanel.render should render the self-disable warning 1`] = `
+"
+
+
+
+
+
+Disable Extension Manager?
+The command remains available until you run /reload.
+Recovery after reload: run \`pi config\` or edit settings.json.
+
+ Disable   Cancel
+
+
+
+
+
+
+"
+`;
+
+exports[`ExtensionManagerPanel.render should render discovery diagnostics 1`] = `
+"Extension Manager
+Diagnostic [Global · /agent/settings.json]: extensions[1] must be a string (+1 more)
+ All   Extensions   Skills
+Search: type to filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Extensions                                             │ alpha
+> [x] G alpha                                          │ alpha description
+Skills                                                 │ Kind: Extension
+  [x] P project-review [!]                             │ Scope: Global
+                                                       │ Source: Settings
+                                                       │ Resolved path: /repo/alpha.ts
+                                                       │ Canonical path: /repo/alpha.ts
+                                                       │ Filters: "extensions/**"
+                                                       │ Toggle serialization: alpha.ts
+                                                       │ Configured: Enabled
+                                                       │ Reason: Enabled by include filter
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc back  Click/wheel"
+`;
+
+exports[`ExtensionManagerPanel.render should render the partial commit error state 1`] = `
+"Extension Manager
+global: denied | project: changed
+ All   Extensions   Skills
+Search: type to filter
+──────────────────────────────────────────────────────────────────────
+Extensions
+> [ ] G alpha
+Skills
+  [x] P project-review
+──────────────────────────────────────────────────────────────────────
+Tab kind  ↑↓ select  Space toggle  Enter inspect  Ctrl-S apply  Esc\x1B[0m...\x1B[0m
+
+
+
+
+
+
+"
+`;
