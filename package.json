@@ -36,6 +36,7 @@
     "typecheck": "turbo run typecheck"
   },
   "workspaces": [
+    "packages/extension-manager",
     "packages/omp-status-line",
     "packages/omp-welcome",
     "packages/provider-base-url-overrides",

@@ -16,6 +16,6 @@
   "packages": [],
   "hideThinkingBlock": false,
   "extensions": [
-    "../../packages/*"
+    "../../packages/"
   ]
 }

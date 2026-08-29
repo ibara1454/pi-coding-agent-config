@@ -1,0 +1,29 @@
+{
+  "name": "extension-manager",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "lint": "biome check --config-path=../.. --error-on-warnings .",
+    "lint:fix": "biome check --write --config-path=../.. --error-on-warnings .",
+    "test": "bun test",
+    "typecheck": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "glob": "13.0.6",
+    "minimatch": "10.2.5",
+    "proper-lockfile": "4.1.2"
+  },
+  "devDependencies": {
+    "@types/proper-lockfile": "^4.1.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
