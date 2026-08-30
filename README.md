@@ -3,7 +3,36 @@
 This repository contains personal configuration and customized extensions for
 [pi-coding-agent](https://github.com/earendil-works/pi).
 
-Run `bun install --frozen-lockfile` after cloning to install workspace dependencies.
+## Installation
+
+From the repository root:
+
+1. Install every workspace dependency:
+
+   ```sh
+   bun install --frozen-lockfile
+   ```
+
+2. Start Pi with the tracked agent configuration:
+
+   ```sh
+   PI_CODING_AGENT_DIR="$PWD/apps/agent" pi
+   ```
+
+`apps/agent/settings.json` loads the repository's `packages/` directory, so
+every packaged extension is available without another settings entry.
+
+To load one package for a single run with a different Pi configuration, pass
+its entry point with `-e`:
+
+```sh
+pi -e ./packages/extension-manager/index.ts
+```
+
+For persistent use, add an extension file or directory to the `extensions`
+array in the applicable `settings.json`. Relative paths resolve from that
+settings file. See Pi's
+[extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md).
 
 ## Key extensions
 
@@ -14,7 +43,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`provider-base-url-overrides`](packages/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs `PROVIDER_BASE_URL`. | `bun test packages/provider-base-url-overrides` |
 | [`omp-status-line`](packages/omp-status-line/README.md) | Renders Pi's status line editor chrome. | `bun test packages/omp-status-line` |
 | [`omp-welcome`](packages/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test packages/omp-welcome` |
-| [`extension-manager`](packages/extension-manager) | Discovers Pi extensions and resources and toggles them from the `/extensions` panel. | `bun test packages/extension-manager` |
+| [`extension-manager`](packages/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test packages/extension-manager` |
 | [`sandbox`](packages/sandbox/README.md) | Replaces Pi's bash tool schema-backed sandbox policy. | Dependencies installed with `bun install --frozen-lockfile`; no test suite. |
 
 ## Validation
