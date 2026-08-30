@@ -13,7 +13,9 @@
     "preset": "default",
     "sessionAccent": true
   },
-  "packages": [],
+  "packages": [
+    "npm:@plannotator/pi-extension"
+  ],
   "hideThinkingBlock": false,
   "extensions": [
     "../../packages/"
