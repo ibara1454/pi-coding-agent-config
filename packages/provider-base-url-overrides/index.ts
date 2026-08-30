@@ -1,20 +1,43 @@
-import type { Api, Model, Provider } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  Api,
+  Model,
+  Provider,
+  ProviderRequestOptions,
+} from "@earendil-works/pi-ai";
+import type {
+  ExtensionAPI,
+  ModelRegistry,
+} from "@earendil-works/pi-coding-agent";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider URLs must reject ASCII control bytes.
 const ASCII_CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/u;
 const HTTP_URL_PREFIX = /^https?:\/\/[^/?#]+(?:\/|$)/iu;
 const AZURE_API = "azure-openai-responses";
+const WARNING_PREFIX = "[provider-base-url-overrides]";
+const PROVIDER_INSTALL_WARNING =
+  "Skipping a provider override because registration failed.";
 
-type TransportOptions = {
+type TransportOptions = ProviderRequestOptions & {
   azureBaseUrl?: string;
-  env?: Record<string, string>;
-  [key: string]: unknown;
+};
+
+type ProviderRoutes = {
+  root: string;
+  openAi: string;
+  googleGenerative: string;
 };
 
 type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
   [K in keyof T]?: NonNullable<T[K]>;
 };
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
+}
+
+function warn(message: string): void {
+  console.warn(`${WARNING_PREFIX} ${message}`);
+}
 
 function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
   record: T,
@@ -28,12 +51,13 @@ function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
 }
 
 function readProviderBaseUrl(): string | undefined {
-  const value = process.env["PROVIDER_BASE_URL"]?.trim();
+  const { PROVIDER_BASE_URL } = process.env;
+  const value = PROVIDER_BASE_URL?.trim();
   if (!value) return undefined;
 
   if (!isValidProviderBaseUrl(value)) {
-    console.warn(
-      "[provider-base-url-overrides] Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.",
+    warn(
+      "Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.",
     );
     return undefined;
   }
@@ -57,22 +81,31 @@ function isValidProviderBaseUrl(value: string): boolean {
   }
 }
 
+function createProviderRoutes(root: string): ProviderRoutes {
+  const suffixRoot = root.replace(/\/+$/u, "");
+  return {
+    root,
+    openAi: `${suffixRoot}/v1`,
+    googleGenerative: `${suffixRoot}/v1beta`,
+  };
+}
+
 function routedBaseUrl(
   model: Pick<Model<Api>, "api" | "baseUrl">,
-  providerBaseUrl: string,
+  routes: ProviderRoutes,
 ): string {
   switch (model.api) {
     case "anthropic-messages":
-      return providerBaseUrl;
+      return routes.root;
     case "google-generative-ai":
-      return `${providerBaseUrl.replace(/\/+$/u, "")}/v1beta`;
+      return routes.googleGenerative;
     case "google-vertex":
-      return providerBaseUrl;
+      return routes.root;
     case "openai-completions":
     case "openai-responses":
     case "azure-openai-responses":
     case "openai-codex-responses":
-      return `${providerBaseUrl.replace(/\/+$/u, "")}/v1`;
+      return routes.openAi;
     default:
       return model.baseUrl;
   }
@@ -80,45 +113,78 @@ function routedBaseUrl(
 
 function routeModel<TApi extends Api>(
   model: Model<TApi>,
-  providerBaseUrl: string,
+  routes: ProviderRoutes,
 ): Model<TApi> {
-  return { ...model, baseUrl: routedBaseUrl(model, providerBaseUrl) };
+  const snapshot = { ...model };
+  snapshot.baseUrl = routedBaseUrl(snapshot, routes);
+  return snapshot;
 }
 
-function routeTransportOptions<TOptions>(
+function routeModels<TApi extends Api>(
+  models: readonly Model<TApi>[],
+  routes: ProviderRoutes,
+): Model<TApi>[] {
+  const routedModels: Model<TApi>[] = [];
+  for (const model of models) {
+    routedModels.push(routeModel(model, routes));
+  }
+  return routedModels;
+}
+
+function routeTransportOptions<TOptions extends ProviderRequestOptions>(
   api: Api,
   routedModelBaseUrl: string,
   options: TOptions | undefined,
-): TOptions | undefined {
+): TOptions | undefined;
+
+function routeTransportOptions(
+  api: Api,
+  routedModelBaseUrl: string,
+  options: ProviderRequestOptions | undefined,
+): TransportOptions | undefined {
   if (api !== AZURE_API) return options;
 
-  const originalOptions = (options ?? {}) as TOptions & TransportOptions;
+  const optionsSnapshot: ProviderRequestOptions = { ...options };
   return {
-    ...originalOptions,
+    ...optionsSnapshot,
     azureBaseUrl: routedModelBaseUrl,
     env: {
-      ...originalOptions.env,
+      ...optionsSnapshot.env,
       AZURE_OPENAI_BASE_URL: routedModelBaseUrl,
     },
-  } as TOptions;
-}
-
-function routeRequest<TApi extends Api, TOptions>(
-  model: Model<TApi>,
-  providerBaseUrl: string,
-  options: TOptions | undefined,
-): { model: Model<TApi>; options: TOptions | undefined } {
-  const routedModel = routeModel(model, providerBaseUrl);
-  return {
-    model: routedModel,
-    options: routeTransportOptions(model.api, routedModel.baseUrl, options),
   };
 }
 
-function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
+function routeRequest<
+  TApi extends Api,
+  TOptions extends ProviderRequestOptions,
+>(
+  model: Model<TApi>,
+  routes: ProviderRoutes,
+  options: TOptions | undefined,
+): { model: Model<TApi>; options: TOptions | undefined } {
+  const routedModel = routeModel(model, routes);
+  return {
+    model: routedModel,
+    options: routeTransportOptions(
+      routedModel.api,
+      routedModel.baseUrl,
+      options,
+    ),
+  };
+}
+
+function wrapProvider(
+  provider: Provider<Api>,
+  routes: ProviderRoutes,
+): Provider {
+  const providerGetModels = provider.getModels;
+  const providerStream = provider.stream;
+  const providerStreamSimple = provider.streamSimple;
+
   const stream: Provider["stream"] = (model, context, options) => {
-    const request = routeRequest(model, providerBaseUrl, options);
-    return provider.stream.call(
+    const request = routeRequest(model, routes, options);
+    return providerStream.call(
       provider,
       request.model,
       context,
@@ -126,8 +192,8 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
     );
   };
   const streamSimple: Provider["streamSimple"] = (model, context, options) => {
-    const request = routeRequest(model, providerBaseUrl, options);
-    return provider.streamSimple.call(
+    const request = routeRequest(model, routes, options);
+    return providerStreamSimple.call(
       provider,
       request.model,
       context,
@@ -143,24 +209,20 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const filterModels = provider.filterModels;
   const wrappedFilterModels: Provider["filterModels"] = filterModels
     ? (models, credential) => {
-        const routedModels = models.map((model) =>
-          routeModel(model, providerBaseUrl),
-        );
+        const routedModels = routeModels(models, routes);
         const filteredModels = filterModels.call(
           provider,
           routedModels,
           credential,
         );
-        return filteredModels.map((model) =>
-          routeModel(model, providerBaseUrl),
-        );
+        return routeModels(filteredModels, routes);
       }
     : undefined;
 
   const fetchDeferred = provider.fetchDeferred;
   const wrappedFetchDeferred: Provider["fetchDeferred"] = fetchDeferred
     ? (model, handle, options) => {
-        const request = routeRequest(model, providerBaseUrl, options);
+        const request = routeRequest(model, routes, options);
         return fetchDeferred.call(
           provider,
           request.model,
@@ -173,7 +235,7 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   const cancelDeferred = provider.cancelDeferred;
   const wrappedCancelDeferred: Provider["cancelDeferred"] = cancelDeferred
     ? (model, handle, options) => {
-        const request = routeRequest(model, providerBaseUrl, options);
+        const request = routeRequest(model, routes, options);
         return cancelDeferred.call(
           provider,
           request.model,
@@ -186,12 +248,10 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   return {
     id: provider.id,
     name: provider.name,
-    baseUrl: providerBaseUrl,
+    baseUrl: routes.root,
     auth: provider.auth,
     getModels() {
-      return provider.getModels
-        .call(provider)
-        .map((model) => routeModel(model, providerBaseUrl));
+      return routeModels(providerGetModels.call(provider), routes);
     },
     stream,
     streamSimple,
@@ -205,20 +265,38 @@ function wrapProvider(provider: Provider, providerBaseUrl: string): Provider {
   };
 }
 
+function installProviderOverrides(
+  pi: ExtensionAPI,
+  registry: ModelRegistry,
+  routes: ProviderRoutes,
+  reportWarning: (message: string) => void,
+): void {
+  const models: Model<Api>[] = registry.getAll();
+  const providerIds = unique(models.map((model) => model.provider));
+
+  for (const providerId of providerIds) {
+    const providerValue = registry.getProvider(providerId);
+    if (providerValue === undefined) continue;
+
+    const wrappedProvider = wrapProvider(providerValue, routes);
+    try {
+      // Live host registration can fail while recomposing provider state.
+      pi.registerProvider(wrappedProvider);
+    } catch {
+      reportWarning(PROVIDER_INSTALL_WARNING);
+    }
+  }
+}
+
 export default function providerBaseUrlOverrides(pi: ExtensionAPI): void {
   const providerBaseUrl = readProviderBaseUrl();
   if (!providerBaseUrl) return;
 
+  const routes = createProviderRoutes(providerBaseUrl);
   pi.on("session_start", (_event, ctx) => {
-    const providerIds = new Set(
-      ctx.modelRegistry.getAll().map((model) => model.provider),
-    );
-
-    for (const providerId of providerIds) {
-      const provider = ctx.modelRegistry.getProvider(providerId);
-      if (provider) {
-        pi.registerProvider(wrapProvider(provider, providerBaseUrl));
-      }
-    }
+    const reportWarning = (message: string): void => {
+      ctx.ui.notify(`${WARNING_PREFIX} ${message}`, "warning");
+    };
+    installProviderOverrides(pi, ctx.modelRegistry, routes, reportWarning);
   });
 }

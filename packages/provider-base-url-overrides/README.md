@@ -34,10 +34,15 @@ The root is trimmed once. Anthropic and Vertex use the exact trimmed root, inclu
 - A nonblank value must be an absolute `http://` or `https://` URL with a hostname; credentials, port, and path are allowed.
 - ASCII control characters, query strings, and fragments are rejected.
 - An invalid nonblank value emits one warning during initialization without echoing the configured URL.
+- At `session_start`, the model registry must expose callable `getAll` and `getProvider` methods and return an array. Entries without a nonempty string provider ID are ignored.
+- Before wrapping, a Provider must match the requested ID, expose string `name`, object `auth`, and the required Provider methods, and have only callable or nullish optional methods.
+- Routed models must expose string `api` and `baseUrl` fields. Azure transport options must be objects, and a supplied `options.env` must contain only string values.
 
 ## Runtime and limitations
 
 `PROVIDER_BASE_URL` is captured when the extension initializes. The only lifecycle hook is `session_start`; at that event, the extension snapshots unique provider IDs represented then and wraps those effective Providers. A same-ID wrapper copies `id`, `name`, `headers`, and `auth`, and sets its `baseUrl` to the trimmed proxy root. It delegates `getModels`, `stream`, and `streamSimple`, plus `refreshModels`, `filterModels`, `fetchDeferred`, and `cancelDeferred` when present, to the original Provider with the original receiver. Routed model objects are cloned. Azure transport options and env maps are cloned before endpoint fields are overwritten; non-Azure options retain their original identity. Original Providers, models, and caller option/env objects are not mutated.
+
+Registry or hook inspection failures emit a generic warning and leave the extension inactive without blocking session startup. Invalid registry entries are ignored; invalid Providers and failed registrations skip only the affected override, warn without echoing external values, and allow remaining Providers to install. Once installed, a wrapper exposes malformed routed model data and Azure option/env data as `TypeError`; failures from original Provider methods propagate unchanged.
 
 Providers added later are not wrapped until a later `session_start`, such as after Pi `/reload`. Changing the process environment requires reinitialization; the extension does not poll. Unsupported API types keep their original model URLs. Custom transports that ignore `model.baseUrl` cannot be forced through this extension.
 
