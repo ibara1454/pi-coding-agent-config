@@ -1,6 +1,16 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
-  "plugins": ["./biome-plugins/no-double-type-assertion.grit"],
+  "plugins": [
+    {
+      "path": "./biome-plugins/no-async-describe-callback.grit",
+      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
+    },
+    "./biome-plugins/no-double-type-assertion.grit",
+    {
+      "path": "./biome-plugins/use-should-test-title.grit",
+      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
+    }
+  ],
   "files": {
     "includes": ["**", "!**/.turbo/**", "!**/node_modules/**"],
     "ignoreUnknown": true
@@ -14,7 +24,31 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "nursery": {
+        "noJsRestrictedProperties": {
+          "level": "error",
+          "options": {
+            "entries": [
+              {
+                "object": "globalThis",
+                "property": "Reflect",
+                "message": "The global `Reflect` namespace is not allowed, including through `globalThis`. Use the direct language or `Object` equivalent: `obj[key]` for `Reflect.get`, `obj[key] = value` for `Reflect.set`, `delete obj[key]` for `Reflect.deleteProperty`, `key in obj` for `Reflect.has`, `Object.keys`/`Object.getOwnPropertyNames`/`Object.getOwnPropertySymbols` for `Reflect.ownKeys`, and `Object.defineProperty`/`Object.getOwnPropertyDescriptor` for their `Reflect` counterparts. If it is genuinely unavoidable, suppress the single access with a preceding `// biome-ignore lint/nursery/noJsRestrictedProperties: <specific justification>` comment."
+              }
+            ]
+          }
+        }
+      },
+      "style": {
+        "noRestrictedGlobals": {
+          "level": "error",
+          "options": {
+            "deniedGlobals": {
+              "Reflect": "The global `Reflect` namespace is not allowed. Use the direct language or `Object` equivalent: `obj[key]` for `Reflect.get`, `obj[key] = value` for `Reflect.set`, `delete obj[key]` for `Reflect.deleteProperty`, `key in obj` for `Reflect.has`, `Object.keys`/`Object.getOwnPropertyNames`/`Object.getOwnPropertySymbols` for `Reflect.ownKeys`, and `Object.defineProperty`/`Object.getOwnPropertyDescriptor` for their `Reflect` counterparts. If it is genuinely unavoidable, suppress the single access with a preceding `// biome-ignore lint/style/noRestrictedGlobals: <specific justification>` comment."
+            }
+          }
+        }
+      }
     }
   },
   "javascript": {

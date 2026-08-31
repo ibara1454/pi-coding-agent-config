@@ -1,0 +1,30 @@
+language js
+
+// Rejects an asynchronous `describe` callback: `docs/agents/engineering.md`
+// requires the `describe` callback to be synchronous. The callee pattern
+// accepts `describe` plus any chain built on it, so `describe.only` and
+// `describe.each(rows)` are covered. Asynchronous work belongs in the leaf
+// test or in a lifecycle hook, both of which stay allowed.
+pattern describe_callee() {
+  or {
+    `describe`,
+    `$base.$_` where { $base <: describe_callee() },
+    `$base($...)` where { $base <: describe_callee() }
+  }
+}
+
+pattern async_callback() {
+  or {
+    `async ($...) => $_`,
+    `async function $_($...) { $... }`
+  }
+}
+
+`$callee($_, $callback)` where {
+  $callback <: async_callback(),
+  $callee <: describe_callee(),
+  register_diagnostic(
+    span = $callback,
+    message = "A `describe` callback must be synchronous. Move the asynchronous work into the leaf test that needs it, or into a lifecycle hook."
+  )
+}

@@ -1,0 +1,35 @@
+language js
+
+// Requires every leaf test title to start with `should `, as
+// `docs/agents/engineering.md` requires of every rendered leaf title. The
+// callee pattern accepts `test` and `it` plus any chain built on them, so
+// `test.only`, `it.each(rows)`, and `test.skip.each(rows)` are all covered.
+// Only a quoted title is inspected: a title assembled from an identifier or a
+// call cannot be read here, and the same guard skips the argument of an
+// intermediate `each(rows)` or `if(condition)` call.
+pattern test_leaf_callee() {
+  or {
+    `test`,
+    `it`,
+    `$base.$_` where { $base <: test_leaf_callee() },
+    `$base($...)` where { $base <: test_leaf_callee() }
+  }
+}
+
+pattern quoted_title() {
+  r"(?s)[\"'\x60].*"
+}
+
+pattern should_prefixed_title() {
+  r"(?s)[\"'\x60]should .*"
+}
+
+`$callee($title, $...)` where {
+  $callee <: test_leaf_callee(),
+  $title <: quoted_title(),
+  $title <: not should_prefixed_title(),
+  register_diagnostic(
+    span = $title,
+    message = "A leaf test title must start with `should `. Name the observable result after `should`, then add `when <condition>` or `if <condition>` when a condition distinguishes the case."
+  )
+}
