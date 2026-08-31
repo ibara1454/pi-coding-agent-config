@@ -1,5 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+  "plugins": ["./biome-plugins/no-double-type-assertion.grit"],
   "files": {
     "includes": ["**", "!**/.turbo/**", "!**/node_modules/**"],
     "ignoreUnknown": true

@@ -1,6 +1,11 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["test/setup.ts", "bunfig.toml"],
+  "globalDependencies": [
+    "test/setup.ts",
+    "bunfig.toml",
+    "biome.json",
+    "biome-plugins/**"
+  ],
   "tasks": {
     "lint": {
       "cache": true,

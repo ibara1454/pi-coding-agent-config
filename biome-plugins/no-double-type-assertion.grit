@@ -1,0 +1,20 @@
+language js
+
+// Rejects `value as unknown as Type`: an outer `as` assertion whose expression
+// is an assertion to `unknown`. Parenthesized spellings such as
+// `(value as unknown) as Type` are matched through the same pattern, while
+// ordinary single assertions and `as const` stay allowed.
+pattern assertion_to_unknown() {
+  or {
+    `$_ as unknown`,
+    `($inner)` where { $inner <: assertion_to_unknown() }
+  }
+}
+
+`$value as $_` where {
+  $value <: assertion_to_unknown(),
+  register_diagnostic(
+    span = $value,
+    message = "Double type assertion through `unknown` is not allowed. Narrow the declared type to the surface actually used, or build a value that satisfies the target type."
+  )
+}
