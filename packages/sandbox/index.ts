@@ -49,16 +49,26 @@ import {
   SandboxManager,
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   type BashOperations,
   CONFIG_DIR_NAME,
   createBashTool,
+  type ExtensionAPI,
+  type ExtensionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
+import deepMerge from "deepmerge";
 
 interface SandboxConfig extends SandboxRuntimeConfig {
-  enabled?: boolean;
+  enabled: boolean;
+}
+
+function formatError(error: unknown): string {
+  return String(error);
+}
+
+function formatConfigValues(values: string[] | undefined): string {
+  return values && values.length > 0 ? values.join(", ") : "(none)";
 }
 
 const DEFAULT_CONFIG: SandboxConfig = {
@@ -85,30 +95,48 @@ const DEFAULT_CONFIG: SandboxConfig = {
   },
 };
 
-function loadConfig(cwd: string): SandboxConfig {
-  const projectConfigPath = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
+type RecursivePartial<T> = T extends readonly unknown[]
+  ? T
+  : T extends (...args: never[]) => unknown
+    ? T
+    : T extends object
+      ? { [P in keyof T]?: RecursivePartial<T[P]> }
+      : T;
+
+function readConfig(configPath: string): RecursivePartial<SandboxConfig> {
+  if (!existsSync(configPath)) return {};
+
+  // Config files are assumed to match RecursivePartial<SandboxConfig>. Keep
+  // the assertion at this I/O seam so the rest of the extension receives typed
+  // config data; malformed JSON intentionally propagates to session startup.
+  return JSON.parse(
+    readFileSync(configPath, "utf-8"),
+  ) as RecursivePartial<SandboxConfig>;
+}
+
+const DEEP_MERGE_OPTIONS = {
+  arrayMerge: (_target: unknown[], source: unknown[]) => source,
+};
+
+function mergeConfig(
+  base: SandboxConfig,
+  overrides: RecursivePartial<SandboxConfig>,
+): SandboxConfig {
+  return deepMerge<SandboxConfig, RecursivePartial<SandboxConfig>>(
+    base,
+    overrides,
+    DEEP_MERGE_OPTIONS,
+  );
+}
+
+function loadConfig(cwd: string, projectTrusted: boolean): SandboxConfig {
   const globalConfigPath = join(getAgentDir(), "sandbox.json");
+  const config = mergeConfig(DEFAULT_CONFIG, readConfig(globalConfigPath));
 
-  let globalConfig: Partial<SandboxConfig> = {};
-  let projectConfig: Partial<SandboxConfig> = {};
+  if (!projectTrusted) return config;
 
-  if (existsSync(globalConfigPath)) {
-    try {
-      globalConfig = JSON.parse(readFileSync(globalConfigPath, "utf-8"));
-    } catch (e) {
-      console.error(`Warning: Could not parse ${globalConfigPath}: ${e}`);
-    }
-  }
-
-  if (existsSync(projectConfigPath)) {
-    try {
-      projectConfig = JSON.parse(readFileSync(projectConfigPath, "utf-8"));
-    } catch (e) {
-      console.error(`Warning: Could not parse ${projectConfigPath}: ${e}`);
-    }
-  }
-
-  return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
+  const projectConfigPath = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
+  return mergeConfig(config, readConfig(projectConfigPath));
 }
 
 interface SymlinkedConfigPath {
@@ -116,6 +144,13 @@ interface SymlinkedConfigPath {
   absolutePath: string;
   resolvedPath: string;
   isDirectory: boolean;
+}
+
+function formatSymlinkMapping({
+  configuredPath,
+  resolvedPath,
+}: SymlinkedConfigPath): string {
+  return `${configuredPath} -> ${resolvedPath}`;
 }
 
 interface FilesystemSymlinkWarnings {
@@ -207,16 +242,13 @@ function formatFilesystemSymlinkWidget(
 ): string[] {
   const mappings = [
     ...warnings.denyReadDirectories.map(
-      ({ configuredPath, resolvedPath }) =>
-        `denyRead: ${configuredPath} -> ${resolvedPath}`,
+      (entry) => `denyRead: ${formatSymlinkMapping(entry)}`,
     ),
     ...warnings.allowReadPaths.map(
-      ({ configuredPath, resolvedPath }) =>
-        `allowRead: ${configuredPath} -> ${resolvedPath}`,
+      (entry) => `allowRead: ${formatSymlinkMapping(entry)}`,
     ),
     ...warnings.allowWritePaths.map(
-      ({ configuredPath, resolvedPath }) =>
-        `allowWrite (skipped): ${configuredPath} -> ${resolvedPath}`,
+      (entry) => `allowWrite (skipped): ${formatSymlinkMapping(entry)}`,
     ),
   ];
   const visibleMappings = mappings.slice(0, 5);
@@ -243,10 +275,7 @@ function formatFilesystemSymlinkWarning(
     lines.push(
       "",
       heading,
-      ...paths.map(
-        ({ configuredPath, resolvedPath }) =>
-          `  ${configuredPath} -> ${resolvedPath}`,
-      ),
+      ...paths.map((entry) => `  ${formatSymlinkMapping(entry)}`),
     );
   };
 
@@ -286,40 +315,6 @@ function formatFilesystemSymlinkWarning(
   return lines.join("\n");
 }
 
-function deepMerge(
-  base: SandboxConfig,
-  overrides: Partial<SandboxConfig>,
-): SandboxConfig {
-  const result: SandboxConfig = { ...base };
-
-  if (overrides.enabled !== undefined) result.enabled = overrides.enabled;
-  if (overrides.network) {
-    result.network = { ...base.network, ...overrides.network };
-  }
-  if (overrides.filesystem) {
-    result.filesystem = { ...base.filesystem, ...overrides.filesystem };
-  }
-
-  const extOverrides = overrides as {
-    ignoreViolations?: Record<string, string[]>;
-    enableWeakerNestedSandbox?: boolean;
-  };
-  const extResult = result as {
-    ignoreViolations?: Record<string, string[]>;
-    enableWeakerNestedSandbox?: boolean;
-  };
-
-  if (extOverrides.ignoreViolations) {
-    extResult.ignoreViolations = extOverrides.ignoreViolations;
-  }
-  if (extOverrides.enableWeakerNestedSandbox !== undefined) {
-    extResult.enableWeakerNestedSandbox =
-      extOverrides.enableWeakerNestedSandbox;
-  }
-
-  return result;
-}
-
 function createSandboxedBashOps(): BashOperations {
   return {
     async exec(command, cwd, { onData, signal, timeout }) {
@@ -329,66 +324,60 @@ function createSandboxedBashOps(): BashOperations {
 
       const wrappedCommand = await SandboxManager.wrapWithSandbox(command);
 
-      return new Promise((resolve, reject) => {
-        let mountPointsCleaned = false;
-        const cleanupMountPoints = () => {
-          if (mountPointsCleaned) return;
-          mountPointsCleaned = true;
-          try {
-            // Linux bwrap creates host mount-point placeholders for absent deny paths.
-            SandboxManager.cleanupAfterCommand();
-          } catch {
-            // Cleanup must not obscure the command result.
-          }
-        };
-
+      try {
+        const { promise, resolve, reject } = Promise.withResolvers<{
+          exitCode: number | null;
+        }>();
         const child = spawn("bash", ["-c", wrappedCommand], {
           cwd,
           detached: true,
           stdio: ["ignore", "pipe", "pipe"],
         });
 
+        let settled = false;
         let timedOut = false;
         let timeoutHandle: NodeJS.Timeout | undefined;
 
-        if (timeout !== undefined && timeout > 0) {
-          timeoutHandle = setTimeout(() => {
-            timedOut = true;
-            if (child.pid) {
-              try {
-                process.kill(-child.pid, "SIGKILL");
-              } catch {
-                child.kill("SIGKILL");
-              }
-            }
-          }, timeout * 1000);
-        }
+        function terminateChild(): void {
+          if (!child.pid) return;
 
-        child.stdout?.on("data", onData);
-        child.stderr?.on("data", onData);
-
-        child.on("error", (err) => {
-          if (timeoutHandle) clearTimeout(timeoutHandle);
-          cleanupMountPoints();
-          reject(err);
-        });
-
-        const onAbort = () => {
-          if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
             try {
-              process.kill(-child.pid, "SIGKILL");
-            } catch {
               child.kill("SIGKILL");
+            } catch {
+              // The process may already have exited.
             }
           }
-        };
+        }
 
-        signal?.addEventListener("abort", onAbort, { once: true });
+        function releaseExecutionResources(): void {
+          if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = undefined;
+          }
+          signal?.removeEventListener("abort", terminateChild);
+          child.stdout?.off("data", onData);
+          child.stderr?.off("data", onData);
+          child.off("error", onChildError);
+          child.off("close", onChildClose);
+        }
 
-        child.on("close", (code) => {
-          if (timeoutHandle) clearTimeout(timeoutHandle);
-          signal?.removeEventListener("abort", onAbort);
-          cleanupMountPoints();
+        function beginSettlement(): boolean {
+          if (settled) return false;
+          settled = true;
+          releaseExecutionResources();
+          return true;
+        }
+
+        function onChildError(error: Error): void {
+          if (!beginSettlement()) return;
+          reject(error);
+        }
+
+        function onChildClose(code: number | null): void {
+          if (!beginSettlement()) return;
 
           if (signal?.aborted) {
             reject(new Error("aborted"));
@@ -397,13 +386,42 @@ function createSandboxedBashOps(): BashOperations {
           } else {
             resolve({ exitCode: code });
           }
-        });
-      });
+        }
+
+        child.stdout?.on("data", onData);
+        child.stderr?.on("data", onData);
+        child.once("error", onChildError);
+        child.once("close", onChildClose);
+
+        if (timeout !== undefined && timeout > 0) {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            terminateChild();
+          }, timeout * 1000);
+        }
+
+        signal?.addEventListener("abort", terminateChild, { once: true });
+        if (signal?.aborted) terminateChild();
+
+        return await promise;
+      } finally {
+        try {
+          // Linux bwrap creates host mount-point placeholders for absent deny paths.
+          SandboxManager.cleanupAfterCommand();
+        } catch {
+          // Cleanup must not obscure the command result.
+        }
+      }
     },
   };
 }
 
-export default function (pi: ExtensionAPI) {
+function clearSandboxUi(ctx: Pick<ExtensionContext, "ui">): void {
+  ctx.ui.setStatus("sandbox", undefined);
+  ctx.ui.setWidget(SANDBOX_SYMLINK_WIDGET_KEY, undefined);
+}
+
+export default function sandbox(pi: ExtensionAPI): void {
   pi.registerFlag("no-sandbox", {
     description: "Disable OS-level sandboxing for bash commands",
     type: "boolean",
@@ -413,14 +431,22 @@ export default function (pi: ExtensionAPI) {
   const localCwd = process.cwd();
   const localBash = createBashTool(localCwd);
 
-  let sandboxEnabled = false;
-  let sandboxInitialized = false;
+  let sandboxState: "inactive" | "initializing" | "active" = "inactive";
+  let managerNeedsReset = false;
+
+  async function releaseSandboxManager(): Promise<void> {
+    sandboxState = "inactive";
+    if (!managerNeedsReset) return;
+
+    await SandboxManager.reset();
+    managerNeedsReset = false;
+  }
 
   pi.registerTool({
     ...localBash,
     label: "bash (sandboxed)",
     async execute(id, params, signal, onUpdate, _ctx) {
-      if (!sandboxEnabled || !sandboxInitialized) {
+      if (sandboxState !== "active") {
         return localBash.execute(id, params, signal, onUpdate);
       }
 
@@ -432,34 +458,27 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("user_bash", () => {
-    if (!sandboxEnabled || !sandboxInitialized) return;
+    if (sandboxState !== "active") return;
     return { operations: createSandboxedBashOps() };
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // Extension UI is recreated on session replacement, but explicitly clear this
-    // so configuration changes also remove a warning during reload.
-    ctx.ui.setWidget(SANDBOX_SYMLINK_WIDGET_KEY, undefined);
+    clearSandboxUi(ctx);
 
-    const noSandbox = pi.getFlag("no-sandbox") as boolean;
-
+    const noSandbox = pi.getFlag("no-sandbox") === true;
     if (noSandbox) {
-      sandboxEnabled = false;
       ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
       return;
     }
 
-    const config = loadConfig(ctx.cwd);
-
+    const config = loadConfig(ctx.cwd, ctx.isProjectTrusted());
     if (!config.enabled) {
-      sandboxEnabled = false;
       ctx.ui.notify("Sandbox disabled via config", "info");
       return;
     }
 
     const platform = process.platform;
     if (platform !== "darwin" && platform !== "linux") {
-      sandboxEnabled = false;
       ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
       return;
     }
@@ -486,68 +505,68 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    sandboxState = "initializing";
     try {
-      const configExt = config as unknown as {
-        ignoreViolations?: Record<string, string[]>;
-        enableWeakerNestedSandbox?: boolean;
-      };
-
       await SandboxManager.initialize({
         network: config.network,
         filesystem: config.filesystem,
-        ignoreViolations: configExt.ignoreViolations,
-        enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+        ignoreViolations: config.ignoreViolations,
+        enableWeakerNestedSandbox: config.enableWeakerNestedSandbox,
       });
-
-      sandboxEnabled = true;
-      sandboxInitialized = true;
-
-      const networkCount = config.network?.allowedDomains?.length ?? 0;
-      const writeCount = config.filesystem?.allowWrite?.length ?? 0;
-      ctx.ui.setStatus(
-        "sandbox",
-        ctx.ui.theme.fg(
-          "accent",
-          `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`,
-        ),
+    } catch (error) {
+      sandboxState = "inactive";
+      const message = formatError(
+        error instanceof Error ? error.message : error,
       );
-      ctx.ui.notify("Sandbox initialized", "info");
-    } catch (err) {
-      sandboxEnabled = false;
-      ctx.ui.notify(
-        `Sandbox initialization failed: ${err instanceof Error ? err.message : err}`,
-        "error",
-      );
+      ctx.ui.notify(`Sandbox initialization failed: ${message}`, "error");
+      return;
     }
+    managerNeedsReset = true;
+
+    const networkCount = config.network.allowedDomains.length;
+    const writeCount = config.filesystem.allowWrite.length;
+    const status = ctx.ui.theme.fg(
+      "accent",
+      `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`,
+    );
+    ctx.ui.setStatus("sandbox", status);
+    ctx.ui.notify("Sandbox initialized", "info");
+    sandboxState = "active";
   });
 
-  pi.on("session_shutdown", async () => {
-    if (sandboxInitialized) {
-      try {
-        await SandboxManager.reset();
-      } catch {
-        // Ignore cleanup errors
-      }
+  pi.on("session_shutdown", async (_event, ctx) => {
+    // Pi awaits shutdown before reload or session replacement. Await the
+    // process-global manager reset so the next extension instance cannot start
+    // while the previous sandbox still owns runtime resources, and report
+    // failures instead of hiding cleanup state from that next instance.
+    try {
+      await releaseSandboxManager();
+    } catch (error) {
+      const message = formatError(
+        error instanceof Error ? error.message : error,
+      );
+      ctx.ui.notify(`Sandbox cleanup failed: ${message}`, "error");
     }
+    clearSandboxUi(ctx);
   });
 
   pi.registerCommand("sandbox", {
     description: "Show sandbox configuration",
     handler: async (_args, ctx) => {
-      const config = loadConfig(ctx.cwd);
+      const config = loadConfig(ctx.cwd, ctx.isProjectTrusted());
       const lines = [
         "Sandbox Configuration:",
-        `  Status: ${sandboxEnabled && sandboxInitialized ? "initialized" : "disabled or not initialized"}`,
+        `  Status: ${sandboxState === "active" ? "initialized" : "disabled or not initialized"}`,
         "",
         "Network:",
-        `  Allowed: ${config.network?.allowedDomains?.join(", ") || "(none)"}`,
-        `  Denied: ${config.network?.deniedDomains?.join(", ") || "(none)"}`,
+        `  Allowed: ${formatConfigValues(config.network.allowedDomains)}`,
+        `  Denied: ${formatConfigValues(config.network.deniedDomains)}`,
         "",
         "Filesystem:",
-        `  Deny Read: ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
-        `  Allow Read: ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
-        `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
-        `  Deny Write: ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
+        `  Deny Read: ${formatConfigValues(config.filesystem.denyRead)}`,
+        `  Allow Read: ${formatConfigValues(config.filesystem.allowRead)}`,
+        `  Allow Write: ${formatConfigValues(config.filesystem.allowWrite)}`,
+        `  Deny Write: ${formatConfigValues(config.filesystem.denyWrite)}`,
       ];
 
       const symlinkWarnings =

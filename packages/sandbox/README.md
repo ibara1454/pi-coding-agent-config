@@ -28,7 +28,7 @@ The extension reads configuration from these sources; later sources take precede
 
 1. Built-in defaults
 2. `~/.pi/agent/sandbox.json` (global)
-3. `<project>/.pi/sandbox.json` (project)
+3. `<project>/.pi/sandbox.json` (project, only after Pi grants project trust)
 
 `network` and `filesystem` are merged one property deep. Arrays and nested objects such as `tlsTerminate` replace the earlier value rather than being concatenated or recursively merged. A project-level `ignoreViolations` replaces the complete global map.
 
