@@ -6,6 +6,7 @@ import {
   CustomEditor,
   type ExtensionAPI,
   type ExtensionContext,
+  type ExtensionUIContext,
   estimateTokens,
   type ReadonlyFooterDataProvider,
   type Theme,
@@ -13,7 +14,7 @@ import {
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { isObjectRecord } from "./guards.ts";
 import { getPreset } from "./presets.ts";
-import { renderSegment } from "./segments.ts";
+import { renderSegment, sanitizeInlineText } from "./segments.ts";
 import {
   DEFAULT_STATUS_BG,
   getSeparator,
@@ -96,7 +97,8 @@ function readJsonObject(filePath: string): Record<string, unknown> {
 }
 
 function agentDir(): string {
-  const configured = process.env["PI_CODING_AGENT_DIR"]?.trim();
+  const { PI_CODING_AGENT_DIR } = process.env;
+  const configured = PI_CODING_AGENT_DIR?.trim();
   return configured || path.join(os.homedir(), ".pi", "agent");
 }
 
@@ -136,50 +138,68 @@ function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
   return result;
 }
 
-function readSettings(cwd: string): StatusLineSettings {
+function readSettings(
+  cwd: string,
+  projectTrusted: boolean,
+): StatusLineSettings {
   const global = readJsonObject(path.join(agentDir(), "settings.json"));
-  const project = readJsonObject(path.join(cwd, ".pi", "settings.json"));
-  const globalStatus = isObjectRecord(global["statusLine"])
-    ? global["statusLine"]
+  // Pi does not expose its merged SettingsManager to extensions. Because this
+  // extension reads settings directly, mirror Pi's trust gate before loading
+  // project-local configuration.
+  const project = projectTrusted
+    ? readJsonObject(path.join(cwd, ".pi", "settings.json"))
     : {};
-  const projectStatus = isObjectRecord(project["statusLine"])
-    ? project["statusLine"]
-    : {};
+  const { statusLine: globalValue } = global;
+  const { statusLine: projectValue } = project;
+  const globalStatus = isObjectRecord(globalValue) ? globalValue : {};
+  const projectStatus = isObjectRecord(projectValue) ? projectValue : {};
   const raw = { ...globalStatus, ...projectStatus };
+  const {
+    preset: presetValue,
+    separator: separatorValue,
+    leftSegments,
+    rightSegments,
+    showHookStatus,
+    sessionAccent,
+    transparent,
+    compactThinkingLevel,
+  } = raw;
   const preset =
-    typeof raw["preset"] === "string" &&
-    PRESETS[raw["preset"] as StatusLineSettings["preset"]] === true
-      ? (raw["preset"] as StatusLineSettings["preset"])
+    typeof presetValue === "string" &&
+    PRESETS[presetValue as StatusLineSettings["preset"]] === true
+      ? (presetValue as StatusLineSettings["preset"])
       : "default";
   const separator =
-    typeof raw["separator"] === "string" &&
-    SEPARATORS[raw["separator"] as StatusLineSeparatorStyle] === true
-      ? (raw["separator"] as StatusLineSeparatorStyle)
+    typeof separatorValue === "string" &&
+    SEPARATORS[separatorValue as StatusLineSeparatorStyle] === true
+      ? (separatorValue as StatusLineSeparatorStyle)
       : undefined;
+  const { segmentOptions: globalSegmentOptions } = globalStatus;
+  const { segmentOptions: projectSegmentOptions } = projectStatus;
   const segmentOptions =
-    isObjectRecord(globalStatus["segmentOptions"]) ||
-    isObjectRecord(projectStatus["segmentOptions"])
+    isObjectRecord(globalSegmentOptions) ||
+    isObjectRecord(projectSegmentOptions)
       ? mergeOptions(
-          isObjectRecord(globalStatus["segmentOptions"])
-            ? (globalStatus["segmentOptions"] as StatusLineSegmentOptions)
+          isObjectRecord(globalSegmentOptions)
+            ? (globalSegmentOptions as StatusLineSegmentOptions)
             : undefined,
-          isObjectRecord(projectStatus["segmentOptions"])
-            ? (projectStatus["segmentOptions"] as StatusLineSegmentOptions)
+          isObjectRecord(projectSegmentOptions)
+            ? (projectSegmentOptions as StatusLineSegmentOptions)
             : undefined,
         )
       : undefined;
   return {
     preset,
     ...toNonNullRecord({
-      leftSegments: parseSegmentIds(raw["leftSegments"]),
-      rightSegments: parseSegmentIds(raw["rightSegments"]),
+      leftSegments: parseSegmentIds(leftSegments),
+      rightSegments: parseSegmentIds(rightSegments),
       separator,
       segmentOptions,
     }),
-    showHookStatus: raw["showHookStatus"] !== false,
-    sessionAccent: raw["sessionAccent"] !== false,
-    transparent: raw["transparent"] === true,
-    compactThinkingLevel: raw["compactThinkingLevel"] === true,
+    showHookStatus: showHookStatus !== false,
+    sessionAccent: sessionAccent !== false,
+    transparent: transparent === true,
+    compactThinkingLevel: compactThinkingLevel === true,
   };
 }
 
@@ -203,13 +223,10 @@ function effectivePreset(settings: StatusLineSettings): PresetDef {
 }
 
 function messageUsage(message: unknown): Record<string, unknown> | undefined {
-  if (
-    !isObjectRecord(message) ||
-    message["role"] !== "assistant" ||
-    !isObjectRecord(message["usage"])
-  )
-    return undefined;
-  return message["usage"];
+  if (!isObjectRecord(message)) return undefined;
+  const { role, usage } = message;
+  if (role !== "assistant" || !isObjectRecord(usage)) return undefined;
+  return usage;
 }
 
 function numeric(value: unknown): number {
@@ -233,36 +250,41 @@ function aggregateUsage(
     if (entry.type !== "message") continue;
     const usage = messageUsage(entry.message);
     if (!usage) continue;
-    stats.input += numeric(usage["input"]);
-    stats.output += numeric(usage["output"]);
-    stats.cacheRead += numeric(usage["cacheRead"]);
-    stats.cacheWrite += numeric(usage["cacheWrite"]);
-    stats.premiumRequests += numeric(usage["premiumRequests"]);
-    const cost = usage["cost"];
-    stats.cost += isObjectRecord(cost) ? numeric(cost["total"]) : numeric(cost);
+    const { input, output, cacheRead, cacheWrite, premiumRequests, cost } =
+      usage;
+    stats.input += numeric(input);
+    stats.output += numeric(output);
+    stats.cacheRead += numeric(cacheRead);
+    stats.cacheWrite += numeric(cacheWrite);
+    stats.premiumRequests += numeric(premiumRequests);
+    if (isObjectRecord(cost)) {
+      const { total } = cost;
+      stats.cost += numeric(total);
+    } else {
+      stats.cost += numeric(cost);
+    }
   }
   return stats;
 }
 
-function sanitizeStatus(text: string): string {
-  return text.replace(/[\r\n\t]+/g, " ").trim();
-}
-
 export default function ompStatusLine(pi: ExtensionAPI): void {
   let currentCtx: ExtensionContext | null = null;
-  let settings: StatusLineSettings = readSettings(process.cwd());
+  let settings: StatusLineSettings = readSettings(process.cwd(), false);
   let footerData: ReadonlyFooterDataProvider | null = null;
   let tui: { requestRender(): void } | null = null;
   let footerUnsubscribe: (() => void) | null = null;
   let ticker: NodeJS.Timeout | undefined;
-  let editorInstalled = false;
+  let delayedRefresh: NodeJS.Timeout | undefined;
+  let disposeUi: (() => void) | null = null;
   let activeMs = 0;
   let activeStartedAt: number | null = null;
   let streamStartedAt: number | null = null;
   let tokensPerSecond: number | null = null;
   let gitLastFetch = 0;
+  let gitController: AbortController | null = null;
   let gitInFlight = false;
   let prBranchKey: string | null = null;
+  let prController: AbortController | null = null;
   let prInFlight = false;
   let gitState: GitState = {
     branch: null,
@@ -276,58 +298,105 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     tui?.requestRender();
   };
 
+  const releaseSessionResources = (): void => {
+    clearInterval(ticker);
+    ticker = undefined;
+    clearTimeout(delayedRefresh);
+    delayedRefresh = undefined;
+    footerUnsubscribe?.();
+    footerUnsubscribe = null;
+    gitController?.abort();
+    gitController = null;
+    gitInFlight = false;
+    prController?.abort();
+    prController = null;
+    prInFlight = false;
+    disposeUi?.();
+    disposeUi = null;
+    currentCtx = null;
+    footerData = null;
+    tui = null;
+    activeMs = 0;
+    activeStartedAt = null;
+    streamStartedAt = null;
+    tokensPerSecond = null;
+  };
+
   const refreshPr = async (
     branch: string | null,
     force = false,
   ): Promise<void> => {
-    if (!currentCtx || !branch || branch === "detached" || prInFlight) {
+    const ctx = currentCtx;
+    if (!ctx || !branch || branch === "detached" || prInFlight) {
       if (!branch || branch === "detached") gitState.pr = null;
       return;
     }
-    const key = `${currentCtx.cwd}\0${branch}`;
+    const key = `${ctx.cwd}\0${branch}`;
     if (!force && prBranchKey === key) return;
     prBranchKey = key;
     prInFlight = true;
+    const controller = new AbortController();
+    prController = controller;
     try {
       const result = await pi.exec(
         "gh",
         ["pr", "view", "--json", "number,url"],
-        { cwd: currentCtx.cwd, timeout: 2_000 },
+        { cwd: ctx.cwd, timeout: 2_000, signal: controller.signal },
       );
+      if (
+        prController !== controller ||
+        currentCtx !== ctx ||
+        prBranchKey !== key
+      )
+        return;
       if (result.code !== 0) {
         gitState.pr = null;
       } else {
         const parsed: unknown = JSON.parse(result.stdout);
-        gitState.pr =
-          isObjectRecord(parsed) &&
-          typeof parsed["number"] === "number" &&
-          typeof parsed["url"] === "string"
-            ? { number: parsed["number"], url: parsed["url"] }
-            : null;
+        if (isObjectRecord(parsed)) {
+          const { number, url } = parsed;
+          gitState.pr =
+            typeof number === "number" && typeof url === "string"
+              ? { number, url }
+              : null;
+        } else {
+          gitState.pr = null;
+        }
       }
     } catch {
-      gitState.pr = null;
+      if (
+        prController === controller &&
+        currentCtx === ctx &&
+        prBranchKey === key
+      )
+        gitState.pr = null;
     } finally {
-      prInFlight = false;
-      requestRender();
+      if (prController === controller) {
+        prController = null;
+        prInFlight = false;
+        requestRender();
+      }
     }
   };
 
   const refreshGit = async (force = false): Promise<void> => {
+    const ctx = currentCtx;
     if (
-      !currentCtx ||
+      !ctx ||
       gitInFlight ||
       (!force && Date.now() - gitLastFetch < GIT_TTL_MS)
     )
       return;
     gitInFlight = true;
-    const cwd = currentCtx.cwd;
+    const controller = new AbortController();
+    gitController = controller;
     try {
       const result = await pi.exec(
         "git",
         ["status", "--porcelain=v1", "--untracked-files=normal"],
-        { cwd, timeout: 2_000 },
+        { cwd: ctx.cwd, timeout: 2_000, signal: controller.signal },
       );
+      if (gitController !== controller || currentCtx !== ctx) return;
       if (result.code !== 0) {
         gitState = {
           branch: null,
@@ -367,10 +436,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       }
       gitLastFetch = Date.now();
     } catch {
-      gitLastFetch = Date.now();
+      if (gitController === controller) gitLastFetch = Date.now();
     } finally {
-      gitInFlight = false;
-      requestRender();
+      if (gitController === controller) {
+        gitController = null;
+        gitInFlight = false;
+        requestRender();
+      }
     }
   };
 
@@ -434,12 +506,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         continue;
       const usage = messageUsage(entry.message);
       if (!usage) continue;
+      const { totalTokens, input, output, cacheRead, cacheWrite } = usage;
       const contextTokens =
-        numeric(usage["totalTokens"]) ||
-        numeric(usage["input"]) +
-          numeric(usage["output"]) +
-          numeric(usage["cacheRead"]) +
-          numeric(usage["cacheWrite"]);
+        numeric(totalTokens) ||
+        numeric(input) +
+          numeric(output) +
+          numeric(cacheRead) +
+          numeric(cacheWrite);
       if (contextTokens > 0) return true;
     }
     return false;
@@ -624,7 +697,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     if (!leftGroup || !rightGroup) return `${leftGroup}${rightGroup}`;
 
     const gapWidth = Math.max(1, width - leftWidth - rightWidth);
-    const sessionName = currentCtx?.sessionManager.getSessionName();
+    const sessionName = sanitizeInlineText(
+      currentCtx?.sessionManager.getSessionName() ?? "",
+    ).trim();
     const gapColor =
       settings.sessionAccent && sessionName
         ? sessionAccentAnsi(sessionName)
@@ -633,77 +708,107 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   const installUi = (ctx: ExtensionContext): void => {
-    if (!editorInstalled) {
-      const previousEditorFactory = ctx.ui.getEditorComponent();
-      ctx.ui.setEditorComponent((editorTui, editorTheme, keybindings) => {
-        const editor =
-          previousEditorFactory?.(editorTui, editorTheme, keybindings) ??
-          new CustomEditor(editorTui, editorTheme, keybindings);
-        const originalRender = editor.render.bind(editor);
-        editor.render = (width: number): string[] => {
-          if (width < 10 || !currentCtx) return [...originalRender(width)];
-          const chromeWidth = 3;
-          const contentWidth = Math.max(1, width - chromeWidth * 2);
-          const lines = [...originalRender(contentWidth)];
-          if (lines.length < 3) return lines;
+    const previousEditorFactory = ctx.ui.getEditorComponent();
+    const installedEditorFactory: NonNullable<
+      Parameters<ExtensionUIContext["setEditorComponent"]>[0]
+    > = (editorTui, editorTheme, keybindings) => {
+      const editor =
+        previousEditorFactory?.(editorTui, editorTheme, keybindings) ??
+        new CustomEditor(editorTui, editorTheme, keybindings);
+      const originalRender = editor.render.bind(editor);
+      editor.render = (width: number): string[] => {
+        if (width < 10 || !currentCtx) return [...originalRender(width)];
+        const chromeWidth = 3;
+        const contentWidth = Math.max(1, width - chromeWidth * 2);
+        const lines = [...originalRender(contentWidth)];
+        if (lines.length < 3) return lines;
 
-          let bottomBorderIndex = lines.length - 1;
-          for (let index = lines.length - 1; index >= 1; index--) {
-            if (/^─{3,}/.test(stripVTControlCharacters(lines[index] ?? ""))) {
-              bottomBorderIndex = index;
-              break;
-            }
+        let bottomBorderIndex = lines.length - 1;
+        for (let index = lines.length - 1; index >= 1; index--) {
+          if (/^─{3,}/.test(stripVTControlCharacters(lines[index] ?? ""))) {
+            bottomBorderIndex = index;
+            break;
           }
+        }
 
-          const theme = currentCtx.ui.theme;
-          const border = theme.getFgAnsi("border");
-          const paintBorder = (text: string): string =>
-            `${border}${text}\x1b[39m`;
-          const status = buildStatusLine(contentWidth, theme);
-          const statusFill = Math.max(0, contentWidth - visibleWidth(status));
-          const result: string[] = [
-            `${paintBorder("╭──")}${status}${paintBorder(`${"─".repeat(statusFill)}──╮`)}`,
-          ];
-          const contentLines = lines.slice(1, bottomBorderIndex);
-          for (let index = 0; index < contentLines.length; index++) {
-            const line = contentLines[index] ?? "";
-            const lineFill = " ".repeat(
-              Math.max(0, contentWidth - visibleWidth(line)),
+        const theme = currentCtx.ui.theme;
+        const border = theme.getFgAnsi("border");
+        const paintBorder = (text: string): string =>
+          `${border}${text}\x1b[39m`;
+        const status = buildStatusLine(contentWidth, theme);
+        const statusFill = Math.max(0, contentWidth - visibleWidth(status));
+        const result: string[] = [
+          `${paintBorder("╭──")}${status}${paintBorder(`${"─".repeat(statusFill)}──╮`)}`,
+        ];
+        const contentLines = lines.slice(1, bottomBorderIndex);
+        for (let index = 0; index < contentLines.length; index++) {
+          const line = contentLines[index] ?? "";
+          const lineFill = " ".repeat(
+            Math.max(0, contentWidth - visibleWidth(line)),
+          );
+          if (index === contentLines.length - 1) {
+            result.push(
+              `${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`,
             );
-            if (index === contentLines.length - 1) {
-              result.push(
-                `${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`,
-              );
-            } else {
-              result.push(
-                `${paintBorder("│  ")}${line}${lineFill}${paintBorder("  │")}`,
-              );
-            }
+          } else {
+            result.push(
+              `${paintBorder("│ ")}${line}${lineFill}${paintBorder(" │")}`,
+            );
           }
-          for (const line of lines.slice(bottomBorderIndex + 1)) {
-            result.push(`${" ".repeat(chromeWidth)}${line}`);
-          }
-          return result;
-        };
-        return editor;
-      });
-      editorInstalled = true;
-    }
+        }
+        for (const line of lines.slice(bottomBorderIndex + 1)) {
+          result.push(`${" ".repeat(chromeWidth)}${line}`);
+        }
+        return result;
+      };
+      return editor;
+    };
 
+    let disposed = false;
+    let ownsFooterSlot = false;
+    let footerFactoryInvoked = false;
+    const releaseInstalledUi = (): void => {
+      if (disposed) return;
+      if (ownsFooterSlot) {
+        ownsFooterSlot = false;
+        ctx.ui.setFooter(undefined);
+      }
+      if (ctx.ui.getEditorComponent() === installedEditorFactory)
+        ctx.ui.setEditorComponent(previousEditorFactory);
+      footerData = null;
+      tui = null;
+      disposed = true;
+    };
+    disposeUi = releaseInstalledUi;
+
+    ctx.ui.setEditorComponent(installedEditorFactory);
     ctx.ui.setFooter((footerTui, _theme, data) => {
+      footerFactoryInvoked = true;
+      ownsFooterSlot = true;
       footerData = data;
       tui = footerTui;
       footerUnsubscribe?.();
-      footerUnsubscribe = data.onBranchChange(() => {
+      const unsubscribe = data.onBranchChange(() => {
         gitLastFetch = 0;
         prBranchKey = null;
+        prController?.abort();
+        prController = null;
+        prInFlight = false;
         void refreshGit(true);
       });
+      footerUnsubscribe = unsubscribe;
       void refreshGit(true);
       return {
         dispose(): void {
-          footerUnsubscribe?.();
-          footerUnsubscribe = null;
+          ownsFooterSlot = false;
+          if (footerUnsubscribe === unsubscribe) {
+            unsubscribe();
+            footerUnsubscribe = null;
+          }
+          if (footerData === data) {
+            footerData = null;
+            tui = null;
+          }
         },
         invalidate(): void {
           requestRender();
@@ -715,7 +820,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
             ...preset.leftSegments,
             ...preset.rightSegments,
           ]);
-          const statuses = Array.from(data.getExtensionStatuses().entries())
+          return Array.from(data.getExtensionStatuses().entries())
             .filter(
               ([key]) =>
                 !(
@@ -724,16 +829,18 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
                 ),
             )
             .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-            .map(([, text]) => truncateToWidth(sanitizeStatus(text), width));
-          return statuses;
+            .map(([, text]) =>
+              truncateToWidth(sanitizeInlineText(text).trim(), width),
+            );
         },
       };
     });
+    if (!footerFactoryInvoked) ownsFooterSlot = true;
   };
 
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    settings = readSettings(ctx.cwd);
+    settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
     activeMs = 0;
     activeStartedAt = null;
     streamStartedAt = null;
@@ -741,8 +848,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     gitLastFetch = 0;
     prBranchKey = null;
     gitState = { branch: null, staged: 0, unstaged: 0, untracked: 0, pr: null };
-    if (ctx.mode === "tui") installUi(ctx);
-    ticker ??= setInterval(() => {
+    if (ctx.mode !== "tui") return;
+
+    installUi(ctx);
+    ticker = setInterval(() => {
       void refreshGit();
       requestRender();
     }, 1_000);
@@ -779,8 +888,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
-      const output = numeric(usage["output"]);
-      if (elapsed > 0 && output > 0) tokensPerSecond = output / elapsed;
+      const { output } = usage;
+      const outputTokens = numeric(output);
+      if (elapsed > 0 && outputTokens > 0)
+        tokensPerSecond = outputTokens / elapsed;
     }
     requestRender();
   });
@@ -789,8 +900,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
-      const output = numeric(usage["output"]);
-      if (elapsed > 0 && output > 0) tokensPerSecond = output / elapsed;
+      const { output } = usage;
+      const outputTokens = numeric(output);
+      if (elapsed > 0 && outputTokens > 0)
+        tokensPerSecond = outputTokens / elapsed;
     }
     requestRender();
   });
@@ -810,16 +923,19 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       void refreshGit(true);
       return;
     }
+    if (event.toolName !== "bash" || !isObjectRecord(event.input)) return;
+    const { command } = event.input;
     if (
-      event.toolName === "bash" &&
-      isObjectRecord(event.input) &&
-      typeof event.input["command"] === "string" &&
+      typeof command === "string" &&
       /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(
-        event.input["command"],
+        command,
       )
     ) {
       gitLastFetch = 0;
       prBranchKey = null;
+      prController?.abort();
+      prController = null;
+      prInFlight = false;
       void refreshGit(true);
     }
   });
@@ -830,18 +946,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         event.command,
       )
     ) {
-      gitLastFetch = 0;
-      prBranchKey = null;
-      setTimeout(() => void refreshGit(true), 150);
+      clearTimeout(delayedRefresh);
+      delayedRefresh = setTimeout(() => {
+        delayedRefresh = undefined;
+        prController?.abort();
+        prController = null;
+        prInFlight = false;
+        void refreshGit(true);
+      }, 150);
     }
   });
   pi.on("session_shutdown", async () => {
-    clearInterval(ticker);
-    ticker = undefined;
-    footerUnsubscribe?.();
-    footerUnsubscribe = null;
-    currentCtx = null;
-    footerData = null;
-    tui = null;
+    releaseSessionResources();
   });
 }

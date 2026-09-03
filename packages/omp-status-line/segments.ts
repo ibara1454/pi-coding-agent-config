@@ -1,5 +1,11 @@
 import * as os from "node:os";
 import * as path from "node:path";
+import { URL } from "node:url";
+import {
+  sliceByColumn,
+  stripTerminalSequences,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import { color, getIcons, sessionAccentAnsi, statusColor } from "./theme.ts";
 import type {
   RenderedSegment,
@@ -32,18 +38,57 @@ function formatDuration(milliseconds: number): string {
   return `${remainder}s`;
 }
 
-function sanitize(text: string): string {
-  return text.replace(/[\r\n\t]+/g, " ").trim();
+export function sanitizeInlineText(text: string): string {
+  const source = stripTerminalSequences(text);
+  let sanitized = "";
+  let previousWasControl = false;
+  for (const character of source) {
+    const codePoint = character.codePointAt(0);
+    const isControl =
+      codePoint !== undefined &&
+      (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f));
+    if (isControl) {
+      if (!previousWasControl) sanitized += " ";
+      previousWasControl = true;
+      continue;
+    }
+    sanitized += character;
+    previousWasControl = false;
+  }
+  return sanitized;
 }
 
-function clampPathLength(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  return `…${value.slice(-Math.max(0, maxLength - 1))}`;
+function safeHyperlinkUrl(text: string): string | null {
+  const sanitized = sanitizeInlineText(text).trim();
+  if (sanitized !== text || /\s/u.test(sanitized)) return null;
+  try {
+    const url = new URL(sanitized);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? sanitized
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function clampPathWidth(value: string, maxWidth: number): string {
+  const width = visibleWidth(value);
+  if (width <= maxWidth) return value;
+  const ellipsis = "…";
+  const tailWidth = Math.max(0, maxWidth - visibleWidth(ellipsis));
+  return `${ellipsis}${sliceByColumn(
+    value,
+    Math.max(0, width - tailWidth),
+    tailWidth,
+    true,
+  )}`;
 }
 
 function statusValue(ctx: SegmentContext, key: string): string | undefined {
   const value = ctx.footerData?.getExtensionStatuses().get(key);
-  return value ? sanitize(value) : undefined;
+  if (value === undefined) return undefined;
+  const sanitized = sanitizeInlineText(value).trim();
+  return sanitized || undefined;
 }
 
 function thinkingDisplay(ctx: SegmentContext): string {
@@ -72,15 +117,16 @@ function thinkingDisplay(ctx: SegmentContext): string {
 
 function renderModel(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
-  let name =
-    ctx.extensionContext.model?.name ||
-    ctx.extensionContext.model?.id ||
-    "no-model";
+  const modelName = sanitizeInlineText(
+    ctx.extensionContext.model?.name ?? "",
+  ).trim();
+  const modelId = sanitizeInlineText(
+    ctx.extensionContext.model?.id ?? "",
+  ).trim();
+  let name = modelName || modelId || "no-model";
   if (name.startsWith("Claude ")) name = name.slice(7);
-  if (
-    /^gpt-[\d.]+-[a-z][a-z0-9-]*$/i.test(ctx.extensionContext.model?.id ?? "")
-  ) {
-    name = (ctx.extensionContext.model?.id ?? name)
+  if (/^gpt-[\d.]+-[a-z][a-z0-9-]*$/i.test(modelId)) {
+    name = modelId
       .split("-")
       .map((part, index) =>
         index === 0
@@ -126,7 +172,7 @@ function renderPath(ctx: SegmentContext): RenderedSegment {
   ) {
     cwd = `~${cwd.slice(os.homedir().length)}`;
   }
-  cwd = clampPathLength(cwd, opts.maxLength ?? 40);
+  cwd = clampPathWidth(sanitizeInlineText(cwd), opts.maxLength ?? 40);
   return {
     content: color(statusColor.path, withIcon(icons.folder, cwd)),
     visible: true,
@@ -140,8 +186,11 @@ function renderGit(ctx: SegmentContext): RenderedSegment {
   if (!branch && staged === 0 && unstaged === 0 && untracked === 0)
     return { content: "", visible: false };
   const dirty = staged > 0 || unstaged > 0 || untracked > 0;
+  const safeBranch = sanitizeInlineText(branch ?? "").trim();
   let content =
-    opts.showBranch === false || !branch ? "" : withIcon(icons.branch, branch);
+    opts.showBranch === false || !safeBranch
+      ? ""
+      : withIcon(icons.branch, safeBranch);
   const indicators: string[] = [];
   if (opts.showUnstaged !== false && unstaged > 0)
     indicators.push(color(statusColor.dirty, `*${unstaged}`));
@@ -231,10 +280,11 @@ export function renderSegment(
     case "pr": {
       if (!ctx.git.pr) return { content: "", visible: false };
       const label = withIcon(icons.pr, `#${ctx.git.pr.number}`);
+      const url = safeHyperlinkUrl(ctx.git.pr.url);
       return {
         content: ctx.theme.fg(
           "accent",
-          `\x1b]8;;${ctx.git.pr.url}\x07${label}\x1b]8;;\x07`,
+          url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label,
         ),
         visible: true,
       };
@@ -333,18 +383,23 @@ export function renderSegment(
       return renderTime(ctx);
     case "session": {
       const idValue =
-        ctx.extensionContext.sessionManager.getSessionId()?.slice(0, 8) ||
-        "new";
+        sliceByColumn(
+          sanitizeInlineText(
+            ctx.extensionContext.sessionManager.getSessionId() ?? "",
+          ).trim(),
+          0,
+          8,
+          true,
+        ) || "new";
       return { content: withIcon(icons.session, idValue), visible: true };
     }
-    case "hostname":
+    case "hostname": {
+      const hostname = sanitizeInlineText(os.hostname()).trim();
       return {
-        content: withIcon(
-          icons.host,
-          os.hostname().split(".")[0] ?? os.hostname(),
-        ),
+        content: withIcon(icons.host, hostname.split(".")[0] ?? hostname),
         visible: true,
       };
+    }
     case "cache_read":
       return ctx.usage.cacheRead > 0
         ? {
@@ -382,12 +437,14 @@ export function renderSegment(
       };
     }
     case "session_name": {
-      const name = ctx.extensionContext.sessionManager.getSessionName();
+      const name = sanitizeInlineText(
+        ctx.extensionContext.sessionManager.getSessionName() ?? "",
+      ).trim();
       if (!name) return { content: "", visible: false };
       const ansi = ctx.settings.sessionAccent
         ? sessionAccentAnsi(name)
         : ctx.theme.getFgAnsi("accent");
-      return { content: color(ansi, sanitize(name)), visible: true };
+      return { content: color(ansi, name), visible: true };
     }
   }
 }

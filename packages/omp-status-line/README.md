@@ -50,6 +50,9 @@ To match oh-my-pi, this extension:
 
 Configure the extension under `statusLine` in Pi's `settings.json`:
 
+Global settings always apply. Project `.pi/settings.json` values override them
+only when Pi reports the project as trusted.
+
 ```json
 {
   "statusLine": {
@@ -119,7 +122,9 @@ Statuses not consumed by configured segments remain visible below the editor. Fo
 
 ## GitHub pull requests
 
-The `pr` segment runs `gh pr view --json number,url` in the active working directory. It remains hidden when GitHub CLI is unavailable, unauthenticated, or the current branch has no pull request.
+The `pr` segment runs `gh pr view --json number,url` in the active working
+directory. It remains hidden when GitHub CLI is unavailable or unauthenticated,
+or when the current branch has no pull request.
 
 ## Installation in this repository
 
