@@ -4,10 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   collectWelcomeExtensions,
-  discoverExtensionFiles,
   effectiveQuietStartup,
-  formatSessionAge,
-  sessionLabel,
   type WelcomeExtension,
   welcomeSessions,
 } from "./data.ts";
@@ -44,7 +41,7 @@ afterEach(() => {
     fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe("Pi extension discovery", () => {
+describe("collectWelcomeExtensions", () => {
   test("honors root entries, ignored files, and symlink targets exactly once", () => {
     const root = temporaryDirectory();
     const extensions = path.join(root, "extensions");
@@ -57,18 +54,21 @@ describe("Pi extension discovery", () => {
     write(path.join(linked, "index.js"));
     fs.symlinkSync(linked, path.join(extensions, "linked"), "dir");
 
-    expect(
-      discoverExtensionFiles(extensions)
-        .map((file) => path.relative(extensions, file))
-        .sort(),
-    ).toEqual(["first.ts", "linked/index.js"]);
+    const discovered = () =>
+      collectWelcomeExtensions({
+        cwd: path.join(root, "project"),
+        agentDir: root,
+        projectTrusted: false,
+      })
+        .flatMap((row) =>
+          row.path ? [path.relative(extensions, row.path)] : [],
+        )
+        .sort();
+
+    expect(discovered()).toEqual(["first.ts", "linked/index.js"]);
 
     write(path.join(extensions, "index.ts"));
-    expect(
-      discoverExtensionFiles(extensions).map((file) =>
-        path.relative(extensions, file),
-      ),
-    ).toEqual(["index.ts"]);
+    expect(discovered()).toEqual(["index.ts"]);
   });
 });
 
@@ -244,7 +244,7 @@ describe("welcome extension snapshot", () => {
   });
 });
 
-describe("recent session labels", () => {
+describe("welcomeSessions", () => {
   test("uses explicit names, then sanitized prompts, then OMP untitled labels and ages", () => {
     const now = new Date("2026-08-12T12:00:00.000Z").getTime();
     const named = {
@@ -264,21 +264,32 @@ describe("recent session labels", () => {
       modified: new Date(now - 9 * 86_400_000),
     };
 
-    expect(sessionLabel(named)).toBe("Named");
-    expect(sessionLabel(prompted)).toBe("first prompt");
-    expect(sessionLabel(untitled)).toBe("Untitled · 10:30 AM");
-    expect(formatSessionAge(new Date(now + 10_000), now)).toBe("just now");
-    expect(formatSessionAge(new Date(now - 59 * 60_000), now)).toBe("59m ago");
-    expect(formatSessionAge(new Date(now - 23 * 3_600_000), now)).toBe(
-      "23h ago",
-    );
-    expect(formatSessionAge(new Date(now - 6 * 86_400_000), now)).toBe(
-      "6d ago",
-    );
-    expect(
-      welcomeSessions([named, prompted, untitled], now).map(
-        (session) => session.name,
-      ),
-    ).toEqual(["Named", "first prompt", "Untitled · 10:30 AM"]);
+    expect(welcomeSessions([named, prompted, untitled], now)).toEqual([
+      { name: "Named", timeAgo: "10m ago" },
+      { name: "first prompt", timeAgo: "2h ago" },
+      {
+        name: "Untitled · 10:30 AM",
+        timeAgo: untitled.modified.toLocaleDateString(),
+      },
+    ]);
   });
+
+  test.each([
+    ["just now", "from the near future", -10_000],
+    ["59m ago", "59 minutes old", 59 * 60_000],
+    ["23h ago", "23 hours old", 23 * 3_600_000],
+    ["6d ago", "6 days old", 6 * 86_400_000],
+  ] as const)(
+    "formats the age as %s when the session is %s",
+    (expected, _condition, age) => {
+      const now = new Date("2026-08-12T12:00:00.000Z").getTime();
+      const modified = new Date(now - age);
+      const sessions = welcomeSessions(
+        [{ firstMessage: "Session", created: modified, modified }],
+        now,
+      );
+
+      expect(sessions[0]?.timeAgo).toBe(expected);
+    },
+  );
 });

@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { WelcomeExtension, WelcomeSession } from "./data.ts";
-import {
-  stripAnsi,
-  truncateToWidth,
-  visibleWidth,
-  WelcomeHeader,
-} from "./welcome.ts";
+import { sanitizeInline, truncateToWidth, visibleWidth } from "./terminal.ts";
+import { WelcomeHeader } from "./welcome.ts";
 
 function required<T>(value: T): NonNullable<T> {
   expect(value).toBeDefined();
@@ -38,7 +34,7 @@ function header(
 }
 
 function rawLines(component: WelcomeHeader, width: number): string[] {
-  return component.render(width).map(stripAnsi);
+  return component.render(width).map(sanitizeInline);
 }
 
 function sectionIndex(lines: readonly string[], heading: string): number {
@@ -62,7 +58,7 @@ describe("wide welcome box", () => {
     ];
     const component = header({ extensions, recentSessions: sessions });
     const rendered = component.render(102);
-    const lines = rendered.map(stripAnsi);
+    const lines = rendered.map(sanitizeInline);
     const first = required(lines[0]);
     const bottom = required(lines.find((line) => line.startsWith("╰")));
 
@@ -249,7 +245,7 @@ describe("terminal-cell-safe rendering", () => {
 
     expect(visibleWidth(source)).toBe(11);
     expect(visibleWidth(truncated)).toBe(6);
-    expect(stripAnsi(truncated)).toBe("界e\u0301👩‍💻…");
+    expect(sanitizeInline(truncated)).toBe("界e\u0301👩‍💻…");
     expect(truncated.endsWith("\x1b[0m")).toBe(true);
   });
 
@@ -264,13 +260,41 @@ describe("terminal-cell-safe rendering", () => {
     const lines = component.render(102);
     const box = lines.slice(
       0,
-      lines.findIndex((line) => stripAnsi(line).startsWith("╰")) + 1,
+      lines.findIndex((line) => sanitizeInline(line).startsWith("╰")) + 1,
     );
 
     expect(box.every((line) => visibleWidth(line) === 100)).toBe(true);
     expect(
       lines.slice(box.length).every((line) => visibleWidth(line) <= 100),
     ).toBe(true);
+    component.dispose();
+  });
+
+  test("sanitizes every rendered option string before terminal output", () => {
+    const component = header({
+      version: "\x1b[31m0.84.1\x1b[0m\nsafe",
+      extensions: [
+        {
+          name: "\x1b]8;;https://evil.test\x07ext\x1b]8;;\x07\nname",
+          scope: "user",
+        },
+      ],
+      recentSessions: [
+        { name: "session\u0007\n\u202Ename", timeAgo: "1m\rago" },
+      ],
+      selectedTip: "Use\u0000 controls\nsafely",
+    });
+    const rendered = component.render(102);
+    const raw = rendered.join("\n");
+    const plain = rendered.map(sanitizeInline).join("\n");
+
+    expect(raw).not.toContain("https://evil.test");
+    expect(raw).not.toContain("\u202E");
+    expect(raw).not.toContain("\x1b[31m");
+    expect(plain).toContain("pi v0.84.1 safe");
+    expect(plain).toContain("ext name");
+    expect(plain).toContain("session name (1m ago)");
+    expect(plain).toContain("Use controls safely");
     component.dispose();
   });
 });

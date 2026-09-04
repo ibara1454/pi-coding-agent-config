@@ -107,12 +107,22 @@ function osc8Terminator(sequence: string): string | undefined {
 }
 
 /** Remove CSI, OSC, DCS, APC, and two-byte terminal control sequences. */
-export function stripTerminalSequences(value: string): string {
+function stripTerminalSequences(value: string): string {
   let result = "";
   for (const token of terminalTokens(value)) {
     if (token.grapheme) result += token.grapheme;
   }
   return result;
+}
+
+/** Strip terminal sequences and controls from untrusted single-line text. */
+export function sanitizeInline(value: string): string {
+  const plain = stripTerminalSequences(value);
+  return plain.replace(
+    / *[\p{Bidi_Control}\p{Cc}\p{Zl}\p{Zp}]+ */gu,
+    (match, offset) =>
+      offset === 0 || offset + match.length === plain.length ? "" : " ",
+  );
 }
 
 /** Width in terminal cells, not UTF-16 code units or Unicode code points. */

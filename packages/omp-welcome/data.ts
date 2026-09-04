@@ -46,7 +46,7 @@ interface PackageEntry {
   scope: ExtensionScope;
 }
 
-export interface WelcomeSnapshotOptions {
+interface WelcomeSnapshotOptions {
   cwd: string;
   agentDir?: string;
   projectTrusted: boolean;
@@ -186,7 +186,7 @@ function canonicalPath(filePath: string): string {
   }
 }
 
-export function extensionNameFromPath(extensionPath: string): string {
+function extensionNameFromPath(extensionPath: string): string {
   const base = path.basename(extensionPath);
   if (base === "index.ts" || base === "index.js")
     return path.basename(path.dirname(extensionPath));
@@ -311,7 +311,7 @@ function resolveExtensionEntries(directory: string): string[] | undefined {
 }
 
 /** Pi's one-level auto-discovery, including root entry handling and symlink targets. */
-export function discoverExtensionFiles(directory: string): string[] {
+function discoverExtensionFiles(directory: string): string[] {
   if (!fs.existsSync(directory)) return [];
   const rootEntries = resolveExtensionEntries(directory);
   if (rootEntries) return rootEntries;
@@ -1084,7 +1084,7 @@ function sanitizeSessionText(value: string | undefined): string | undefined {
   return cleaned || undefined;
 }
 
-export interface SessionInfoLike {
+interface SessionInfoLike {
   name?: string;
   firstMessage: string;
   created: Date;
@@ -1092,7 +1092,7 @@ export interface SessionInfoLike {
 }
 
 /** OMP's compact relative age wording. */
-export function formatSessionAge(date: Date, now = Date.now()): string {
+function formatSessionAge(date: Date, now = Date.now()): string {
   const difference = now - date.getTime();
   const minutes = Math.floor(difference / 60_000);
   const hours = Math.floor(difference / 3_600_000);
@@ -1105,7 +1105,7 @@ export function formatSessionAge(date: Date, now = Date.now()): string {
 }
 
 /** OMP's explicit-name → first-prompt → untitled label precedence. */
-export function sessionLabel(session: SessionInfoLike): string {
+function sessionLabel(session: SessionInfoLike): string {
   const explicit = sanitizeSessionText(session.name);
   if (explicit) return explicit;
   const first =

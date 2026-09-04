@@ -10,7 +10,7 @@ import {
   RESTING_FRAMES,
 } from "./gradient.ts";
 import {
-  stripTerminalSequences,
+  sanitizeInline,
   truncateToWidth as truncateTerminalWidth,
   visibleWidth,
   wrapTextWithAnsi,
@@ -54,14 +54,8 @@ export interface WelcomeHeaderOptions {
   playIntro?: boolean;
 }
 
-export { visibleWidth };
-
-export function stripAnsi(value: string): string {
-  return stripTerminalSequences(value);
-}
-
 /** Pi TUI's ANSI- and terminal-cell-safe truncation with the welcome ellipsis. */
-export function truncateToWidth(value: string, width: number): string {
+function truncateToWidth(value: string, width: number): string {
   return truncateTerminalWidth(value, width, "…");
 }
 
@@ -88,6 +82,22 @@ function colorMode(theme: WelcomeTheme): ColorMode {
   return theme.getColorMode() === "truecolor" ? "truecolor" : "256color";
 }
 
+function sanitizeOptions(options: WelcomeHeaderOptions): WelcomeHeaderOptions {
+  return {
+    ...options,
+    version: sanitizeInline(options.version),
+    selectedTip: sanitizeInline(options.selectedTip),
+    extensions: options.extensions.map((extension) => ({
+      ...extension,
+      name: sanitizeInline(extension.name),
+    })),
+    recentSessions: options.recentSessions.map((session) => ({
+      name: sanitizeInline(session.name),
+      timeAgo: sanitizeInline(session.timeAgo),
+    })),
+  };
+}
+
 /**
  * Display-only startup header. Its rows are normal TUI header output, so the
  * main-screen transcript owns scrolling and the editor/footer stay docked.
@@ -99,13 +109,13 @@ export class WelcomeHeader {
   private disposed = false;
 
   constructor(options: WelcomeHeaderOptions) {
-    this.options = options;
+    this.options = sanitizeOptions(options);
     this.animation = new IntroAnimation(() => {
       if (this.disposed) return;
       this.invalidate();
-      options.requestRender();
+      this.options.requestRender();
     });
-    if (options.playIntro) this.animation.start();
+    if (this.options.playIntro) this.animation.start();
   }
 
   invalidate(): void {

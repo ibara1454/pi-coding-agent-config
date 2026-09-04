@@ -1,4 +1,4 @@
-export const PI_LOGO = [
+const PI_LOGO = [
   "▀██████████▀",
   " ╘██    ██  ",
   "  ██    ██  ",
@@ -15,10 +15,10 @@ const GRADIENT_STOPS = [
 ] as const;
 const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
 const SHINE_HALF_WIDTH = 0.18;
-export const INTRO_MS = 3_000;
-export const INTRO_TICK_MS = 33;
+const INTRO_MS = 3_000;
+const INTRO_TICK_MS = 33;
 
-export interface ShineConfig {
+interface ShineConfig {
   strength: number;
   pos: number;
 }
@@ -30,7 +30,7 @@ function wrappedUnit(value: number): number {
 }
 
 /** Exact OMP five-stop logo gradient with Pi's 256-color fallback ramp. */
-export function gradientEscape(
+function gradientEscape(
   t: number,
   colorMode: ColorMode,
   shine?: ShineConfig,
@@ -70,7 +70,7 @@ export function gradientEscape(
   return `\x1b[38;5;${GRADIENT_RAMP_256[index]}m`;
 }
 
-export function gradientLogo(
+function gradientLogo(
   lines: readonly string[],
   colorMode: ColorMode,
   phase = 0,
@@ -108,9 +108,9 @@ export function introFrame(progress: number, colorMode: ColorMode): string[] {
   return gradientLogo(PI_LOGO, colorMode, phase, shine);
 }
 
-export type IntroTimerHandle = NodeJS.Timeout;
+type IntroTimerHandle = NodeJS.Timeout;
 
-export interface IntroTimer {
+interface IntroTimer {
   now(): number;
   setInterval(handler: () => void, milliseconds: number): IntroTimerHandle;
   clearInterval(timer: IntroTimerHandle): void;

@@ -1,30 +1,54 @@
 import { describe, expect, test } from "bun:test";
-import {
-  gradientEscape,
-  gradientLogo,
-  INTRO_MS,
-  IntroAnimation,
-  PI_LOGO,
-} from "./gradient.ts";
+import { IntroAnimation, RESTING_FRAMES } from "./gradient.ts";
+import { sanitizeInline } from "./terminal.ts";
 
 describe("Pi logo gradient", () => {
-  test("uses the exact five-row block logo and truecolor palette endpoints", () => {
-    expect(PI_LOGO).toEqual([
-      "▀██████████▀",
-      " ╘██    ██  ",
-      "  ██    ██  ",
-      "  ██    ██  ",
-      " ▄██▄  ▄██▄ ",
+  const logo = [
+    "▀██████████▀",
+    " ╘██    ██  ",
+    "  ██    ██  ",
+    "  ██    ██  ",
+    " ▄██▄  ▄██▄ ",
+  ];
+  const colorCodes = (frame: readonly string[]) => [
+    ...new Set(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: Match ANSI SGR color escapes.
+      frame.join("").match(/\x1b\[38;(?:2;\d+;\d+;\d+|5;\d+)m/g) ?? [],
+    ),
+  ];
+
+  test("uses the exact five-row block logo and truecolor palette", () => {
+    expect(RESTING_FRAMES.truecolor.map(sanitizeInline)).toEqual(logo);
+    expect(colorCodes(RESTING_FRAMES.truecolor)).toEqual([
+      "\x1b[38;2;200;110;255m",
+      "\x1b[38;2;180;115;255m",
+      "\x1b[38;2;160;120;255m",
+      "\x1b[38;2;140;125;255m",
+      "\x1b[38;2;120;130;255m",
+      "\x1b[38;2;105;148;255m",
+      "\x1b[38;2;90;165;255m",
+      "\x1b[38;2;75;183;255m",
+      "\x1b[38;2;60;200;255m",
+      "\x1b[38;2;75;214;246m",
+      "\x1b[38;2;90;228;238m",
+      "\x1b[38;2;105;241;229m",
+      "\x1b[38;2;214;106;241m",
+      "\x1b[38;2;241;97;214m",
+      "\x1b[38;2;228;101;228m",
     ]);
-    expect(gradientEscape(0, "truecolor")).toBe("\x1b[38;2;255;92;200m");
-    expect(gradientEscape(1, "truecolor")).toBe("\x1b[38;2;120;255;220m");
-    expect(gradientLogo(PI_LOGO, "truecolor")).toHaveLength(5);
   });
 
-  test("falls back to the OMP 256-color ramp", () => {
-    expect(gradientEscape(0, "256color")).toBe("\x1b[38;5;199m");
-    expect(gradientEscape(0.5, "256color")).toBe("\x1b[38;5;99m");
-    expect(gradientLogo(PI_LOGO, "256color")[0]).toContain("\x1b[38;5;");
+  test("uses the exact OMP 256-color ramp", () => {
+    expect(RESTING_FRAMES["256color"].map(sanitizeInline)).toEqual(logo);
+    expect(colorCodes(RESTING_FRAMES["256color"])).toEqual([
+      "\x1b[38;5;135m",
+      "\x1b[38;5;99m",
+      "\x1b[38;5;75m",
+      "\x1b[38;5;51m",
+      "\x1b[38;5;87m",
+      "\x1b[38;5;171m",
+      "\x1b[38;5;199m",
+    ]);
   });
 });
 
@@ -34,6 +58,7 @@ describe("welcome intro lifecycle", () => {
     let timer: (() => void) | undefined;
     let cleared = 0;
     let renders = 0;
+    const timerHandle: NodeJS.Timeout = Object.create(null);
     const animation = new IntroAnimation(
       () => {
         renders++;
@@ -42,7 +67,7 @@ describe("welcome intro lifecycle", () => {
         now: () => now,
         setInterval: (handler) => {
           timer = handler;
-          return 1 as unknown as NodeJS.Timeout;
+          return timerHandle;
         },
         clearInterval: () => {
           cleared++;
@@ -53,7 +78,7 @@ describe("welcome intro lifecycle", () => {
     animation.start();
     expect(animation.isActive()).toBe(true);
     expect(renders).toBe(1);
-    now = INTRO_MS;
+    now = 3_000;
     timer?.();
     expect(animation.isActive()).toBe(false);
     expect(cleared).toBe(1);
