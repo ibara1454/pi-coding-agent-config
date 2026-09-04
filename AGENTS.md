@@ -19,7 +19,7 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - `packages/omp-status-line/` — self-contained ESM status-line/editor-chrome extension and Bun test package.
 - `packages/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
 - `packages/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
-- `packages/sandbox/` — sandbox bash replacement, npm dependency lockfile, and no test suite.
+- `packages/sandbox/` — OS-level sandboxing for Pi's Bash tool.
 - `apps/agent/` — Pi Coding Agent configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
 - `apps/agent/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `apps/agent/sandbox.json`.
 - `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
@@ -43,17 +43,20 @@ bun test packages/extension-manager
 bun test packages/provider-base-url-overrides
 bun test packages/omp-status-line
 bun test packages/omp-welcome
+bun test packages/sandbox
 ```
-
-`packages/sandbox` has no test suite. Do not treat its `bun run build` or `bun run check` commands as validation; both are explicit no-ops.
 
 ## Code Conventions & Common Patterns
 
 - Follow `.editorconfig`: TypeScript uses 2 spaces; keep LF, UTF-8, trimmed trailing whitespace, and a final newline.
 - Use ESM imports and Node built-ins with `node:` specifiers. Use `import type` for type-only host contracts.
 - Pi-host-loaded package entries default-export only the declared extension factory and do not re-export implementation helpers. Keep mutable session state closure-local, and release timers, subscriptions, panels, terminal modes, and retained host references on shutdown and every earlier exit path.
+- UI components with resources expose and call `dispose()`.
+- Wrap `pi.exec`, filesystem parsing, sockets, and other external operations in `try`/`catch`; degrade gracefully, retain usable cached state where appropriate, and never block the host tool flow on optional integration failure.
 - For Pi refresh work triggered by events or renders, reuse matching in-flight work and invalidate cached results when relevant inputs change.
 - Pi terminal UI must use cell-width and ANSI helpers, sanitize external inline text, and close OSC 8 hyperlinks within the rendered surface.
+- Keep declarative UI data separate from rendering where existing modules already do so: e.g. status-line presets/theme/types versus `renderSegment`, and welcome discovery data versus `WelcomeHeader` rendering.
+- Name direct suites `*.test.ts`; use `*.integration.test.ts` when the result is owned by another production module, an external runtime, or real filesystem/process semantics. Use lowercase behavior-focused descriptions.
 
 ## Important Files
 
@@ -73,6 +76,7 @@ bun test packages/omp-welcome
 - Use **Bun** for root workspace dependency installation and tests.
 - Extension packages are private ESM packages with Pi entry points declared in their local `package.json` files.
 - The sandbox dependency declares Node `>=20.11.0`; this is a sandbox dependency constraint, not evidence of a repository-wide engine declaration.
+- Pi-host modules are available in Pi at runtime. Host-facing integration tests should mock Pi runtime modules before dynamically importing the extension, as `packages/omp-status-line/index.integration.test.ts` does.
 - `apps/agent/settings.json` is intentionally tracked because it contains the monorepo extension references. Credentials and runtime artifacts (`auth.json`, `models-store.json`, `trust.json`, `sessions/`, and generated binaries) remain ignored.
 - Treat extension-specific READMEs as scoped guidance. In particular, sandbox prerequisites apply to sandbox deployment, not every extension.
 
@@ -80,7 +84,9 @@ bun test packages/omp-welcome
 
 - Tests use `bun:test`; there is no Jest, Vitest, or root build command.
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
-- `bun run test:coverage` runs the tested packages' coverage commands; no threshold is enforced, and CI does not run coverage.
+- Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
+- Prefer lightweight fake Pi/UI/context objects over broad integration setup. For filesystem/configuration tests, create deterministic temp roots, restore environment variables, invoke shutdown/dispose paths, and remove temp data in `finally`/`afterEach`.
+- Run the affected extension's test command before delivering a permanent behavior change.
 
 ## Agent skills
 
