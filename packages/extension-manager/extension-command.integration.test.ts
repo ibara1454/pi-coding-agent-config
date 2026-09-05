@@ -1,11 +1,15 @@
 import { describe, expect, mock, test } from "bun:test";
 import type {
-  ExtensionAPI,
   ExtensionCommandContext,
+  ExtensionHandler,
+  SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
 import { ExtensionCatalog } from "./catalog.ts";
 import { PackageResolutionFailure } from "./discovery.ts";
-import { registerExtensionManager } from "./extension-command.ts";
+import {
+  type ExtensionManagerApi,
+  registerExtensionManager,
+} from "./extension-command.ts";
 import type { ExtensionManagerRuntime } from "./extension-runtime.ts";
 import type {
   CatalogSeed,
@@ -76,25 +80,22 @@ function runtimeAdapter(
 function piHarness(runtime: ExtensionManagerRuntime): PiHarness {
   const commands: CommandRegistration[] = [];
   const events: string[] = [];
-  let shutdownHandler: (() => void) | undefined;
-  const pi = {
-    on(event: string, callback: () => void) {
+  let shutdownHandler: ExtensionHandler<SessionShutdownEvent>;
+  const pi: ExtensionManagerApi = {
+    on(event, handler) {
       events.push(event);
       if (event === "session_shutdown") {
-        shutdownHandler = callback;
+        shutdownHandler = handler as ExtensionHandler<SessionShutdownEvent>;
       }
     },
-    registerCommand(
-      name: string,
-      options: { description: string; handler: CommandHandler },
-    ) {
+    registerCommand(name, options) {
       commands.push({
         name,
         description: options.description,
         handler: options.handler,
       });
     },
-  } as unknown as ExtensionAPI;
+  };
   registerExtensionManager(pi, runtime);
   return {
     commands,
@@ -107,7 +108,9 @@ function piHarness(runtime: ExtensionManagerRuntime): PiHarness {
       await command.handler("", ctx);
     },
     shutdown() {
-      shutdownHandler?.();
+      const dummyEvent = {} as SessionShutdownEvent;
+      const dummyCtx = {} as ExtensionCommandContext;
+      shutdownHandler?.(dummyEvent, dummyCtx);
     },
   };
 }
@@ -142,7 +145,7 @@ function commandHost(options: {
       isProjectTrusted() {
         return options.trusted ?? true;
       },
-    } as unknown as ExtensionCommandContext,
+    } as ExtensionCommandContext,
   };
 }
 

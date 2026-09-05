@@ -6,7 +6,7 @@ import type {
   ExtensionCommandContext,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 import { ExtensionCatalog } from "./catalog.ts";
 import { createDefaultRuntime } from "./extension-runtime.ts";
 import type { PanelResult } from "./panel.ts";
@@ -58,7 +58,7 @@ function emptySeed(): CatalogSeed {
   };
 }
 
-function panelHost(): PanelHost {
+function createDummyPanelHost(): PanelHost {
   const writes: string[] = [];
   let options: unknown;
   let finish: (result: PanelResult) => void = () => undefined;
@@ -72,7 +72,7 @@ function panelHost(): PanelHost {
       },
     },
     requestRender() {},
-  } as unknown as TUI;
+  } as TUI;
   const theme = {
     fg: (_color: string, text: string) => text,
     bg: (_color: string, text: string) => text,
@@ -81,28 +81,25 @@ function panelHost(): PanelHost {
     underline: (text: string) => text,
     inverse: (text: string) => text,
     strikethrough: (text: string) => text,
-  } as unknown as Theme;
-  const ctx = {
-    ui: {
-      custom<T>(
-        factory: (
-          value: TUI,
-          valueTheme: Theme,
-          keybindings: never,
-          done: (result: T) => void,
-        ) => unknown,
-        customOptions?: unknown,
-      ): Promise<T> {
-        options = customOptions;
-        const pending = Promise.withResolvers<T>();
-        finish = (result) => pending.resolve(result as T);
-        factory(tui, theme, undefined as never, pending.resolve);
-        return pending.promise;
-      },
-    },
-  } as unknown as ExtensionCommandContext;
+  } as Theme;
+  const custom = async <T>(
+    factory: (
+      tui: TUI,
+      theme: Theme,
+      keybindings: KeybindingsManager,
+      done: (result: T) => void,
+    ) => unknown,
+    customOptions?: unknown,
+  ): Promise<T> => {
+    options = customOptions;
+    const pending = Promise.withResolvers<T>();
+    finish = (result) => pending.resolve(result as T);
+    factory(tui, theme, undefined as never, pending.resolve);
+    return pending.promise;
+  };
+  const ctx = { ui: { custom } } as ExtensionCommandContext;
   return {
-    ctx,
+    ctx: ctx,
     finish: (result) => finish(result),
     customOptions: () => options,
     teardowns: () =>
@@ -120,7 +117,7 @@ describe("createDefaultRuntime", () => {
 
   test("should open the panel as a full-size top-left overlay", async () => {
     const runtime = createDefaultRuntime();
-    const host = panelHost();
+    const host = createDummyPanelHost();
 
     const open = runtime.openPanel(
       host.ctx,
@@ -144,7 +141,7 @@ describe("createDefaultRuntime", () => {
 
   test("should return the panel result and tear the panel down once", async () => {
     const runtime = createDefaultRuntime();
-    const host = panelHost();
+    const host = createDummyPanelHost();
 
     const open = runtime.openPanel(
       host.ctx,
@@ -181,8 +178,8 @@ describe("createDefaultRuntime", () => {
   test("should dispose only panels owned by the returned runtime", async () => {
     const first = createDefaultRuntime();
     const second = createDefaultRuntime();
-    const firstHost = panelHost();
-    const secondHost = panelHost();
+    const firstHost = createDummyPanelHost();
+    const secondHost = createDummyPanelHost();
     const firstOpen = first.openPanel(
       firstHost.ctx,
       new ExtensionCatalog(emptySeed(), first.commit),
@@ -213,7 +210,7 @@ describe("createDefaultRuntime", () => {
 
   test("should tear the panel down once when dispose is invoked repeatedly after closure", async () => {
     const runtime = createDefaultRuntime();
-    const host = panelHost();
+    const host = createDummyPanelHost();
     const open = runtime.openPanel(
       host.ctx,
       new ExtensionCatalog(emptySeed(), runtime.commit),

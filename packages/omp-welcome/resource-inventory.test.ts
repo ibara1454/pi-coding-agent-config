@@ -37,7 +37,7 @@ function host() {
 }
 
 describe("native resource inventory override", () => {
-  test("suppresses routine startup and reload inventory but preserves diagnostics", () => {
+  test("should suppress routine startup and reload inventory but preserve diagnostics", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const override = installResourceInventoryOverride(
@@ -62,7 +62,7 @@ describe("native resource inventory override", () => {
     expect(calls.at(-1)).toEqual({ showListing: true, showDiagnostics: true });
   });
 
-  test("retains explicit forced and verbose listings", () => {
+  test("should retain explicit forced and verbose listings", () => {
     const forced = host();
     const forcedOverride = installResourceInventoryOverride(
       "0.84.1",
@@ -91,7 +91,7 @@ describe("native resource inventory override", () => {
     verboseOverride.release();
   });
 
-  test("is reference-counted across extension reloads", () => {
+  test("should be reference-counted across extension reloads", () => {
     const { InteractiveMode, calls } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const first = installResourceInventoryOverride("0.84.1", InteractiveMode);
@@ -113,7 +113,7 @@ describe("native resource inventory override", () => {
     expect(InteractiveMode.prototype.showLoadedResources).toBe(original);
   });
 
-  test("fails open for unsupported versions and changed method structure", () => {
+  test("should fail open for unsupported versions and changed method structure", () => {
     const unsupportedVersion = host();
     const original =
       unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
@@ -137,7 +137,7 @@ describe("native resource inventory override", () => {
     expect(structureResult.reason).toContain("no longer matches");
   });
 
-  test("fails open when the settings-manager seam is unavailable", () => {
+  test("should fail open when the settings-manager seam is unavailable", () => {
     const calls: HostOptions[] = [];
     class MissingManager {
       showLoadedResources(options?: HostOptions) {

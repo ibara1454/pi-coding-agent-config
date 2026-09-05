@@ -38,7 +38,7 @@ function plainTheme(): Theme {
     underline: (text: string) => text,
     inverse: (text: string) => text,
     strikethrough: (text: string) => text,
-  } as unknown as Theme;
+  } as Theme;
 }
 
 function fakeTui(
@@ -66,7 +66,7 @@ function fakeTui(
       requestRender() {
         renders.count += 1;
       },
-    } as unknown as TUI,
+    } as TUI,
   };
 }
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { ExtensionCatalog } from "./catalog.ts";
 import { commitNotification } from "./commit-notification.ts";
 import { PackageResolutionFailure } from "./discovery.ts";
@@ -8,8 +8,19 @@ import {
 } from "./extension-runtime.ts";
 import type { CatalogSeed } from "./types.ts";
 
+export interface ExtensionManagerApi {
+  on(event: "session_shutdown", handler: () => void): void;
+  registerCommand(
+    name: string,
+    options: {
+      description: string;
+      handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+    },
+  ): void;
+}
+
 export function registerExtensionManager(
-  pi: ExtensionAPI,
+  pi: ExtensionManagerApi,
   runtime: ExtensionManagerRuntime = createDefaultRuntime(),
 ): void {
   let reloadPending = false;

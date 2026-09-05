@@ -123,19 +123,20 @@ function parseSegmentIds(value: unknown): StatusLineSegmentId[] | undefined {
   );
 }
 
-type NonNullRecord<T extends Record<PropertyKey, unknown>> = {
-  [K in keyof T]?: NonNullable<T[K]>;
+type NonNullRecord<T extends Record<string, unknown>> = {
+  [K in keyof T as K extends string ? K : never]?: NonNullable<T[K]>;
 };
 
-function toNonNullRecord<T extends Record<PropertyKey, unknown>>(
+function toNonNullRecord<T extends Record<string, unknown>>(
   record: T,
 ): NonNullRecord<T> {
-  const result: NonNullRecord<T> = {};
-  for (const key of Reflect.ownKeys(record) as Array<keyof T>) {
-    const value = record[key];
-    if (value !== null && value !== undefined) result[key] = value;
-  }
-  return result;
+  // entries/fromEntries lose the per-key value types. The assertion restores
+  // them: retained values are unchanged, and the filter removes nullish values.
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      ([, value]) => value !== null && value !== undefined,
+    ),
+  ) as NonNullRecord<T>;
 }
 
 function readSettings(

@@ -15,7 +15,7 @@ interface ResourceOptions {
 }
 
 interface QuietStartupManager {
-  getQuietStartup(): boolean;
+  getQuietStartup?(): boolean;
 }
 
 interface InteractiveModeLike {
@@ -49,12 +49,11 @@ export interface ResourceInventoryOverride {
 }
 
 function patchRegistry(): PatchRegistry {
-  const existing = Reflect.get(globalThis, PATCH_REGISTRY) as
-    | PatchRegistry
-    | undefined;
+  const globalScope = globalThis as Record<PropertyKey, unknown>;
+  const existing = globalScope[PATCH_REGISTRY] as PatchRegistry | undefined;
   if (existing) return existing;
   const created: PatchRegistry = { patches: new WeakMap() };
-  Reflect.set(globalThis, PATCH_REGISTRY, created);
+  globalScope[PATCH_REGISTRY] = created;
   return created;
 }
 
@@ -76,7 +75,10 @@ function acquiredPatch(
       state.owners--;
       if (state.owners > 0) return;
 
-      if (Reflect.get(prototype, "showLoadedResources") === state.wrapper) {
+      if (
+        Object.getOwnPropertyDescriptor(prototype, "showLoadedResources")
+          ?.value === state.wrapper
+      ) {
         Object.defineProperty(
           prototype,
           "showLoadedResources",
@@ -105,7 +107,10 @@ export function installResourceInventoryOverride(
   const registry = patchRegistry();
   const existing = registry.patches.get(prototype);
   if (existing) {
-    if (Reflect.get(prototype, "showLoadedResources") !== existing.wrapper) {
+    if (
+      Object.getOwnPropertyDescriptor(prototype, "showLoadedResources")
+        ?.value !== existing.wrapper
+    ) {
       return unsupported(
         "showLoadedResources was replaced by another extension",
       );
@@ -155,7 +160,7 @@ export function installResourceInventoryOverride(
       if (ownDescriptor) {
         Object.defineProperty(manager, "getQuietStartup", ownDescriptor);
       } else {
-        Reflect.deleteProperty(manager, "getQuietStartup");
+        delete manager.getQuietStartup;
       }
     }
   };

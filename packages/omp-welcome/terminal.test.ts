@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { sanitizeInline, truncateToWidth, visibleWidth } from "./terminal.ts";
 
 describe("terminal-cell helpers", () => {
-  test("truncates styled wide graphemes without splitting clusters", () => {
+  test("should truncate styled wide graphemes without splitting clusters", () => {
     const input = "\x1b[35m界e\u0301👩‍💻abcdef";
     const output = truncateToWidth(input, 6);
 
@@ -12,7 +12,7 @@ describe("terminal-cell helpers", () => {
     expect(output.endsWith("\x1b[0m")).toBe(true);
   });
 
-  test("closes an open OSC 8 hyperlink before its ellipsis", () => {
+  test("should close an open OSC 8 hyperlink before its ellipsis", () => {
     const input = "\x1b]8;;https://example.test\x07abcdef";
     const output = truncateToWidth(input, 4);
 
@@ -23,7 +23,7 @@ describe("terminal-cell helpers", () => {
 });
 
 describe("sanitizeInline", () => {
-  test("removes terminal sequences and bidi controls at display boundaries", () => {
+  test("should remove terminal sequences and bidi controls at display boundaries", () => {
     const output = sanitizeInline(
       "\x1b]8;;https://example.test\x07界e\u0301\x1b]8;;\x07\n\u202Enext\u0007",
     );

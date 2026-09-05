@@ -33,7 +33,7 @@ function plainTheme(): Theme {
     underline: (text: string) => text,
     inverse: (text: string) => text,
     strikethrough: (text: string) => text,
-  } as unknown as Theme;
+  } as Theme;
 }
 
 function fakeTui(): { readonly tui: TUI; readonly writes: string[] } {
@@ -50,7 +50,7 @@ function fakeTui(): { readonly tui: TUI; readonly writes: string[] } {
         },
       },
       requestRender() {},
-    } as unknown as TUI,
+    } as TUI,
   };
 }
 

@@ -44,7 +44,7 @@ function sectionIndex(lines: readonly string[], heading: string): number {
 }
 
 describe("wide welcome box", () => {
-  test("renders OMP geometry, gradient logo, Pi tips, and ordered sections", () => {
+  test("should render OMP geometry, gradient logo, Pi tips, and ordered sections", () => {
     const extensions: WelcomeExtension[] = [
       { name: "project.ts", scope: "project" },
       { name: "user.ts", scope: "user" },
@@ -97,7 +97,7 @@ describe("wide welcome box", () => {
     component.dispose();
   });
 
-  test("omits model details, keeps list entries on separate rows, and uses one-row vertical padding", () => {
+  test("should omit model details, keep list entries on separate rows, and use one-row vertical padding", () => {
     const extensions: WelcomeExtension[] = [
       { name: "first", scope: "user" },
       { name: "second", scope: "project" },
@@ -134,7 +134,7 @@ describe("wide welcome box", () => {
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
-  test("preserves three extension names and overflow when the wide header must scroll", () => {
+  test("should preserve three extension names and overflow when the wide header must scroll", () => {
     const extensions = Array.from({ length: 6 }, (_, index) => ({
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
@@ -152,7 +152,7 @@ describe("wide welcome box", () => {
 });
 
 describe("narrow welcome box", () => {
-  test("stacks left content then all named sections in one rounded box", () => {
+  test("should stack left content then all named sections in one rounded box", () => {
     const lines = rawLines(
       header({
         extensions: [{ name: "local.ts", scope: "project" }],
@@ -183,7 +183,7 @@ describe("narrow welcome box", () => {
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
-  test("preserves three extension names and overflow when the stacked header must scroll", () => {
+  test("should preserve three extension names and overflow when the stacked header must scroll", () => {
     const extensions = Array.from({ length: 6 }, (_, index) => ({
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
@@ -199,7 +199,7 @@ describe("narrow welcome box", () => {
     expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });
 
-  test("shows empty section rows and truncates values before trailing metadata", () => {
+  test("should show empty section rows and truncate values before trailing metadata", () => {
     const lines = rawLines(
       header({
         extensions: [
@@ -239,7 +239,7 @@ describe("narrow welcome box", () => {
 });
 
 describe("terminal-cell-safe rendering", () => {
-  test("counts graphemes in cells and closes ANSI state before ellipsis", () => {
+  test("should count graphemes in cells and close ANSI state before ellipsis", () => {
     const source = "\x1b[35m界e\u0301👩‍💻abcdef";
     const truncated = truncateToWidth(source, 6);
 
@@ -249,7 +249,7 @@ describe("terminal-cell-safe rendering", () => {
     expect(truncated.endsWith("\x1b[0m")).toBe(true);
   });
 
-  test("keeps every box row within its terminal-cell budget for wide Unicode", () => {
+  test("should keep every box row within its terminal-cell budget for wide Unicode", () => {
     const component = header({
       extensions: [{ name: "拡張👩‍💻-長い名前.ts", scope: "user" }],
       recentSessions: [
@@ -270,7 +270,7 @@ describe("terminal-cell-safe rendering", () => {
     component.dispose();
   });
 
-  test("sanitizes every rendered option string before terminal output", () => {
+  test("should sanitize every rendered option string before terminal output", () => {
     const component = header({
       version: "\x1b[31m0.84.1\x1b[0m\nsafe",
       extensions: [
@@ -300,7 +300,7 @@ describe("terminal-cell-safe rendering", () => {
 });
 
 describe("dynamic welcome behavior", () => {
-  test("uses the 256-color logo fallback", () => {
+  test("should use the 256-color logo fallback", () => {
     const component = header({ theme: identityTheme("256color") });
     const rendered = component.render(102).join("\n");
 

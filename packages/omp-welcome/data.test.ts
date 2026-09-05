@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("collectWelcomeExtensions", () => {
-  test("honors root entries, ignored files, and symlink targets exactly once", () => {
+  test("should honor root entries, ignored files, and symlink targets exactly once", () => {
     const root = temporaryDirectory();
     const extensions = path.join(root, "extensions");
     write(path.join(extensions, "first.ts"));
@@ -73,7 +73,7 @@ describe("collectWelcomeExtensions", () => {
 });
 
 describe("welcome extension snapshot", () => {
-  test("uses Pi scope precedence, filters, package deltas, and base directories", () => {
+  test("should use Pi scope precedence, filters, package deltas, and base directories", () => {
     const root = temporaryDirectory();
     const agentDir = path.join(root, "agent");
     const cwd = path.join(root, "project");
@@ -168,7 +168,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("uses convention files for a filtered empty manifest and normalizes glob entries", () => {
+  test("should use convention files for a filtered empty manifest and normalize glob entries", () => {
     const root = temporaryDirectory();
     const agentDir = path.join(root, "agent");
     const cwd = path.join(root, "project");
@@ -198,7 +198,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("omits all project-local settings, packages, and files when untrusted", () => {
+  test("should omit all project-local settings, packages, and files when untrusted", () => {
     const root = temporaryDirectory();
     const agentDir = path.join(root, "agent");
     const cwd = path.join(root, "project");
@@ -223,7 +223,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("honors effective quiet startup and its verbose command-line override", () => {
+  test("should honor effective quiet startup and its verbose command-line override", () => {
     const root = temporaryDirectory();
     const agentDir = path.join(root, "agent");
     const cwd = path.join(root, "project");
@@ -245,7 +245,7 @@ describe("welcome extension snapshot", () => {
 });
 
 describe("welcomeSessions", () => {
-  test("uses explicit names, then sanitized prompts, then OMP untitled labels and ages", () => {
+  test("should use explicit names, then sanitized prompts, then OMP untitled labels and ages", () => {
     const now = new Date("2026-08-12T12:00:00.000Z").getTime();
     const named = {
       name: "  Named\nignored",
@@ -280,7 +280,7 @@ describe("welcomeSessions", () => {
     ["23h ago", "23 hours old", 23 * 3_600_000],
     ["6d ago", "6 days old", 6 * 86_400_000],
   ] as const)(
-    "formats the age as %s when the session is %s",
+    "should format age %s when session is %s",
     (expected, _condition, age) => {
       const now = new Date("2026-08-12T12:00:00.000Z").getTime();
       const modified = new Date(now - age);

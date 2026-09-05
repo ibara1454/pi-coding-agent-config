@@ -100,14 +100,14 @@ function resolvePiPath(input: string, baseDir: string, trim = false): string {
 
 /** Pi's public agent-directory resolution, including PI_CODING_AGENT_DIR expansion. */
 export function getAgentDir(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env["PI_CODING_AGENT_DIR"];
+  const { PI_CODING_AGENT_DIR: configured } = env;
   return configured
     ? normalizePiPath(configured)
     : path.join(os.homedir(), ".pi", "agent");
 }
 
 function cleanSettings(settings: Record<string, unknown>): PiSettings {
-  const rawPackages = settings["packages"];
+  const { packages: rawPackages } = settings;
   const packages = Array.isArray(rawPackages)
     ? rawPackages.reduce<Array<string | PackageSource>>((result, entry) => {
         if (typeof entry === "string") {
@@ -116,13 +116,12 @@ function cleanSettings(settings: Record<string, unknown>): PiSettings {
         }
         if (entry === null || typeof entry !== "object" || Array.isArray(entry))
           return result;
-        const source = "source" in entry ? entry["source"] : undefined;
+        const source = "source" in entry ? entry.source : undefined;
         if (typeof source !== "string") return result;
         const packageSource: PackageSource = { source };
-        const autoload = "autoload" in entry ? entry["autoload"] : undefined;
+        const autoload = "autoload" in entry ? entry.autoload : undefined;
         if (typeof autoload === "boolean") packageSource.autoload = autoload;
-        const extensions =
-          "extensions" in entry ? entry["extensions"] : undefined;
+        const extensions = "extensions" in entry ? entry.extensions : undefined;
         if (Array.isArray(extensions)) {
           packageSource.extensions = extensions.filter(
             (value: unknown): value is string => typeof value === "string",
@@ -133,10 +132,10 @@ function cleanSettings(settings: Record<string, unknown>): PiSettings {
       }, [])
     : undefined;
   const cleaned: PiSettings = {};
-  const quietStartup = settings["quietStartup"];
+  const { quietStartup } = settings;
   if (typeof quietStartup === "boolean") cleaned.quietStartup = quietStartup;
   if (packages !== undefined) cleaned.packages = packages;
-  const extensions = settings["extensions"];
+  const { extensions } = settings;
   if (Array.isArray(extensions)) {
     cleaned.extensions = extensions.filter(
       (entry: unknown): entry is string => typeof entry === "string",
@@ -284,7 +283,7 @@ function discoveryIgnored(
 
 function manifestExtensionEntries(directory: string): string[] | undefined {
   const manifest = readJson(path.join(directory, "package.json"));
-  const pi = manifest["pi"];
+  const { pi } = manifest;
   if (
     pi === null ||
     typeof pi !== "object" ||
@@ -695,7 +694,7 @@ function packageFiles(
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
   const manifest = readJson(path.join(root, "package.json"));
-  const pi = manifest["pi"];
+  const { pi } = manifest;
   const hasPiManifest =
     pi !== null && typeof pi === "object" && !Array.isArray(pi);
   const extensions =

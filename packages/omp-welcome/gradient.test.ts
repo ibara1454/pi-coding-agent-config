@@ -17,7 +17,7 @@ describe("Pi logo gradient", () => {
     ),
   ];
 
-  test("uses the exact five-row block logo and truecolor palette", () => {
+  test("should use the exact five-row block logo and truecolor palette", () => {
     expect(RESTING_FRAMES.truecolor.map(sanitizeInline)).toEqual(logo);
     expect(colorCodes(RESTING_FRAMES.truecolor)).toEqual([
       "\x1b[38;2;200;110;255m",
@@ -38,7 +38,7 @@ describe("Pi logo gradient", () => {
     ]);
   });
 
-  test("uses the exact OMP 256-color ramp", () => {
+  test("should use the exact OMP 256-color ramp", () => {
     expect(RESTING_FRAMES["256color"].map(sanitizeInline)).toEqual(logo);
     expect(colorCodes(RESTING_FRAMES["256color"])).toEqual([
       "\x1b[38;5;135m",
@@ -53,7 +53,7 @@ describe("Pi logo gradient", () => {
 });
 
 describe("welcome intro lifecycle", () => {
-  test("terminates at three seconds and disposal clears the only timer", () => {
+  test("should terminate at three seconds and clear the only timer during disposal", () => {
     let now = 0;
     let timer: (() => void) | undefined;
     let cleared = 0;
