@@ -19,7 +19,7 @@
         "@earendil-works/pi-tui": "^0.84.1",
       },
     },
-    "packages/extension-manager": {
+    "apps/extension-manager": {
       "name": "extension-manager",
       "version": "1.0.0",
       "dependencies": {
@@ -35,19 +35,19 @@
         "@earendil-works/pi-tui": "^0.84.1",
       },
     },
-    "packages/omp-status-line": {
+    "apps/omp-status-line": {
       "name": "pi-extension-omp-status-line",
       "version": "1.0.0",
     },
-    "packages/omp-welcome": {
+    "apps/omp-welcome": {
       "name": "omp-welcome",
       "version": "1.0.0",
     },
-    "packages/provider-base-url-overrides": {
+    "apps/provider-base-url-overrides": {
       "name": "provider-base-url-overrides",
       "version": "1.0.0",
     },
-    "packages/sandbox": {
+    "apps/sandbox": {
       "name": "sandbox",
       "version": "1.14.1",
       "dependencies": {
@@ -303,7 +303,7 @@
 
     "extend": ["extend@3.0.2", "", {}, "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="],
 
-    "extension-manager": ["extension-manager@workspace:packages/extension-manager"],
+    "extension-manager": ["extension-manager@workspace:apps/extension-manager"],
 
     "fetch-blob": ["fetch-blob@3.2.0", "", { "dependencies": { "node-domexception": "^1.0.0", "web-streams-polyfill": "^3.0.3" } }, "sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ=="],
 
@@ -365,7 +365,7 @@
 
     "node-forge": ["node-forge@1.4.0", "", {}, "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="],
 
-    "omp-welcome": ["omp-welcome@workspace:packages/omp-welcome"],
+    "omp-welcome": ["omp-welcome@workspace:apps/omp-welcome"],
 
     "openai": ["openai@6.40.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"] }, "sha512-MWtTjd/gQt4jpbji61NTgFWJLoY/PdRJ6wG9/ZDRMYNMlBKrCrSlkLI+KgHP1vR1qT6LKSAyAqIxno6lcK9JiA=="],
 
@@ -377,19 +377,19 @@
 
     "path-scurry": ["path-scurry@2.0.2", "", { "dependencies": { "lru-cache": "^11.0.0", "minipass": "^7.1.2" } }, "sha512-3O/iVVsJAPsOnpwWIeD+d6z/7PmqApyQePUtCndjatj/9I5LylHvt5qluFaBT3I5h3r1ejfR056c+FCv+NnNXg=="],
 
-    "pi-extension-omp-status-line": ["pi-extension-omp-status-line@workspace:packages/omp-status-line"],
+    "pi-extension-omp-status-line": ["pi-extension-omp-status-line@workspace:apps/omp-status-line"],
 
     "proper-lockfile": ["proper-lockfile@4.1.2", "", { "dependencies": { "graceful-fs": "^4.2.4", "retry": "^0.12.0", "signal-exit": "^3.0.2" } }, "sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA=="],
 
     "protobufjs": ["protobufjs@7.6.5", "", { "dependencies": { "@protobufjs/aspromise": "^1.1.2", "@protobufjs/base64": "^1.1.2", "@protobufjs/codegen": "^2.0.5", "@protobufjs/eventemitter": "^1.1.1", "@protobufjs/fetch": "^1.1.1", "@protobufjs/float": "^1.0.2", "@protobufjs/path": "^1.1.2", "@protobufjs/pool": "^1.1.0", "@protobufjs/utf8": "^1.1.1", "@types/node": ">=13.7.0", "long": "^5.3.2" } }, "sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw=="],
 
-    "provider-base-url-overrides": ["provider-base-url-overrides@workspace:packages/provider-base-url-overrides"],
+    "provider-base-url-overrides": ["provider-base-url-overrides@workspace:apps/provider-base-url-overrides"],
 
     "retry": ["retry@0.12.0", "", {}, "sha512-9LkiTwjUh6rT555DtE9rTX+BKByPfrMzEAtnlEtdEwr3Nkffwiihqe2bWADg+OQRjt9gl6ICdmB/ZFDCGAtSow=="],
 
     "safe-buffer": ["safe-buffer@5.2.1", "", {}, "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ=="],
 
-    "sandbox": ["sandbox@workspace:packages/sandbox"],
+    "sandbox": ["sandbox@workspace:apps/sandbox"],
 
     "semver": ["semver@7.8.0", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA=="],
 

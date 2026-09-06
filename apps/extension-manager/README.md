@@ -240,7 +240,7 @@ extensions, and `commitSettings(...)` owns locked validation and writes.
 Run the focused suite from the repository root:
 
 ```sh
-bun test packages/extension-manager
+bun test apps/extension-manager
 ```
 
 Run repository lint and type checking:
@@ -252,5 +252,5 @@ bun run check
 For panel work, run the focused test file:
 
 ```sh
-bun test packages/extension-manager/panel.test.ts
+bun test apps/extension-manager/panel.test.ts
 ```

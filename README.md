@@ -3,36 +3,97 @@
 This repository contains personal configuration and customized extensions for
 [pi-coding-agent](https://github.com/earendil-works/pi).
 
+## Repository layout
+
+- `apps/` contains **Pi extension packages only**. Each extension is a complete
+  package with its own `package.json`, entrypoint, and supporting files.
+- `packages/` is reserved for shared libraries consumed by extensions.
+- `config/pi/` contains Pi configuration and local runtime state. It is not an
+  application or a Bun workspace package.
+
+`config/pi/settings.json` loads every extension package in `apps/` through
+`"extensions": ["../../apps"]`. Keep non-extension applications out of `apps/`.
+Before introducing one, replace that directory-wide setting with explicit paths
+to the Pi extension packages.
+
 ## Installation
 
-From the repository root:
+Install [Pi](https://github.com/earendil-works/pi) and [Bun](https://bun.com/)
+separately, then choose one of the following setups.
 
-1. Install every workspace dependency:
+### Use the entire repository
+
+1. Copy or clone the entire repository to local storage and open its root
+   directory. Keep `apps/` and `config/pi/` in their existing relative locations.
+2. Install the workspace dependencies:
 
    ```sh
    bun install --frozen-lockfile
    ```
 
-2. Start Pi with the tracked agent configuration:
+3. Point Pi at the canonical configuration directory:
 
    ```sh
-   PI_CODING_AGENT_DIR="$PWD/apps/agent" pi
+   export PI_CODING_AGENT_DIR="$(realpath config/pi)"
    ```
 
-`apps/agent/settings.json` loads the repository's `packages/` directory, so
-every packaged extension is available without another settings entry.
+4. Start Pi:
 
-To load one package for a single run with a different Pi configuration, pass
-its entry point with `-e`:
+   ```sh
+   pi
+   ```
+
+**`PI_CODING_AGENT_DIR` must name the directory containing `settings.json`, not
+the JSON file itself.** The export above selects `config/pi/settings.json` and
+makes its `../../apps` extension path resolve to this repository's `apps/`.
+
+The export lasts for the current shell and its child processes. To make it
+persistent, add an equivalent export with the canonical absolute directory to
+your own shell startup configuration. No shell files are modified by this
+repository.
+
+An existing `~/.pi/agent` symlink may point to `config/pi/`, but pass its resolved
+target to Pi rather than the symlink's spelling:
 
 ```sh
-pi -e ./packages/extension-manager/index.ts
+export PI_CODING_AGENT_DIR="$(realpath "$HOME/.pi/agent")"
 ```
 
-For persistent use, add an extension file or directory to the `extensions`
-array in the applicable `settings.json`. Relative paths resolve from that
-settings file. See Pi's
-[extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md).
+Using an unresolved symlink as the configuration directory can break relative
+extension paths and dependency lookup. This setup needs neither an `extensions`
+symlink nor a `node_modules` symlink inside `config/pi/`.
+
+### Copy extensions into your own Pi configuration
+
+Use this option to keep an existing Pi configuration independent of this
+repository.
+
+1. Copy each desired **complete package directory** from `apps/` into your Pi
+   configuration's `extensions/` directory. For example, copy `apps/sandbox/` to
+   `~/.pi/agent/extensions/sandbox/`. If `PI_CODING_AGENT_DIR` is already set, use
+   its `extensions/` directory instead. Include `package.json`, the entrypoint,
+   supporting source files, and assets; omit generated `node_modules/` directories.
+2. Open each copied package directory and install its runtime dependencies there:
+
+   ```sh
+   bun install --production
+   ```
+
+3. Restart Pi or run `/reload`. Pi automatically discovers these package
+   directories; do not copy this repository's settings or its `../../apps` entry
+   into your independent configuration.
+
+Copying only `index.ts` is insufficient for extensions with supporting modules.
+Sandbox users must also meet its [platform requirements](apps/sandbox/README.md#install).
+
+For a one-off run from the repository root after installing workspace dependencies:
+
+```sh
+pi -e "$(realpath apps/extension-manager/index.ts)"
+```
+
+See Pi's [extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
+for other loading options.
 
 ## Key extensions
 
@@ -40,11 +101,11 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 
 | Extension | Purpose | Scoped guidance and test status |
 | --- | --- | --- |
-| [`provider-base-url-overrides`](packages/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs `PROVIDER_BASE_URL`. | `bun test packages/provider-base-url-overrides` |
-| [`omp-status-line`](packages/omp-status-line/README.md) | Renders Pi's status line editor chrome. | `bun test packages/omp-status-line` |
-| [`omp-welcome`](packages/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test packages/omp-welcome` |
-| [`extension-manager`](packages/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test packages/extension-manager` |
-| [`sandbox`](packages/sandbox/README.md) | Replaces Pi's bash tool schema-backed sandbox policy. | Dependencies installed with `bun install --frozen-lockfile`; no test suite. |
+| [`provider-base-url-overrides`](apps/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs with `PROVIDER_BASE_URL`. | `bun test apps/provider-base-url-overrides` |
+| [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
+| [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
+| [`extension-manager`](apps/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/extension-manager` |
+| [`sandbox`](apps/sandbox/README.md) | Replaces Pi's bash tool with schema-backed sandbox policy. | `bun test apps/sandbox` |
 
 ## Validation
 
@@ -79,11 +140,11 @@ Run all extension tests through Turborepo:
 bun run test
 ```
 
-Use the focused `bun test packages/...` commands above while iterating on one extension.
+Use the focused `bun test apps/...` commands above while iterating on one extension.
 
 ## Testing
 
-A normal run (`bun run test`, or a focused `bun test packages/...`) executes every
+A normal run (`bun run test`, or a focused `bun test apps/...`) executes the
 declared suite: the direct unit suites, the panel and rendering suites, and the
 command-level integration suites.
 
@@ -95,8 +156,8 @@ them at the top level and stay isolated to their own file.
 Narrow a run to one file while working on the extension manager panel:
 
 ```bash
-bun test packages/extension-manager
-bun test packages/extension-manager/panel.test.ts
+bun test apps/extension-manager
+bun test apps/extension-manager/panel.test.ts
 ```
 
 ### Coverage

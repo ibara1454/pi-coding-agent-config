@@ -13,12 +13,8 @@
     "preset": "default",
     "sessionAccent": true
   },
-  "packages": [
-    "npm:@plannotator/pi-extension"
-  ],
+  "packages": ["npm:@plannotator/pi-extension"],
   "hideThinkingBlock": false,
-  "extensions": [
-    "../../packages/"
-  ],
+  "extensions": ["../../apps"],
   "theme": "dark"
 }

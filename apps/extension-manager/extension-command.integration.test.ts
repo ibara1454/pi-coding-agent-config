@@ -71,7 +71,7 @@ function runtimeAdapter(
     commit: async () => ({ scopes: [], committedScopes: [] }),
     discover: async (input) => seed({ reloadPending: input.reloadPending }),
     openPanel: async () => ({ type: "closed" }),
-    selfPath: "/packages/extension-manager/index.ts",
+    selfPath: "/apps/extension-manager/index.ts",
     dispose: () => undefined,
     ...overrides,
   };

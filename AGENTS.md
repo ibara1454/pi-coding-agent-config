@@ -2,26 +2,27 @@
 
 ## Project Overview
 
-This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `packages/` contains self-contained TypeScript extensions. `apps/agent/` contains the Pi configuration; its tracked `settings.json` loads `../../packages/*`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle.
+This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained TypeScript extensions; `packages/` is reserved for shared libraries. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
 
 ## Architecture & Data Flow
 
-- Extension manager: `packages/extension-manager/index.ts` delegates `/extensions` registration to `extension-command.ts`, which discovers settings resources into a catalog, opens the panel, and reports commits; `extension-runtime.ts` binds discovery, persistence, panel creation, and disposal.
-- Status line: `packages/omp-status-line/index.ts` reads global and project settings, aggregates session/context/git state, renders declarative segments, then wraps the editor and footer. `segments.ts` is the segment-rendering interface; `types.ts`, `presets.ts`, and `theme.ts` define its contracts and presentation data.
-- Welcome UI: `packages/omp-welcome/index.ts` collects extension/session data and installs a responsive header. `data.ts` handles discovery/settings snapshots; `welcome.ts` renders; `resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
-- Provider base URL overrides: `packages/provider-base-url-overrides/index.ts` validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
-- Sandbox: `packages/sandbox/index.ts` layers defaults, global, and project policy before replacing Pi's bash tool with `SandboxManager` operations.
-- Agent configuration: `apps/agent/settings.json` loads package directories through `../../packages/*`; credentials and runtime state remain ignored beside it.
+- Extension manager: `apps/extension-manager/index.ts` delegates `/extensions` registration to `extension-command.ts`, which discovers settings resources into a catalog, opens the panel, and reports commits; `extension-runtime.ts` binds discovery, persistence, panel creation, and disposal.
+- Status line: `apps/omp-status-line/index.ts` reads global and project settings, aggregates session/context/git state, renders declarative segments, then wraps the editor and footer. `segments.ts` is the segment-rendering interface; `types.ts`, `presets.ts`, and `theme.ts` define its contracts and presentation data.
+- Welcome UI: `apps/omp-welcome/index.ts` collects extension/session data and installs a responsive header. `data.ts` handles discovery/settings snapshots; `welcome.ts` renders; `resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
+- Provider base URL overrides: `apps/provider-base-url-overrides/index.ts` validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
+- Sandbox: `apps/sandbox/index.ts` layers defaults, global, and project policy before replacing Pi's bash tool with `SandboxManager` operations.
+- Agent configuration: `config/pi/settings.json` loads extension packages through `../../apps`; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
 
 ## Key Directories
 
-- `packages/extension-manager/` — private ESM `/extensions` discovery, persistence, and terminal UI package with Bun tests.
-- `packages/omp-status-line/` — self-contained ESM status-line/editor-chrome extension and Bun test package.
-- `packages/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
-- `packages/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
-- `packages/sandbox/` — OS-level sandboxing for Pi's Bash tool.
-- `apps/agent/` — Pi Coding Agent configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
-- `apps/agent/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `apps/agent/sandbox.json`.
+- `apps/extension-manager/` — private ESM `/extensions` discovery, persistence, and terminal UI package with Bun tests.
+- `apps/omp-status-line/` — self-contained ESM status-line/editor-chrome extension and Bun test package.
+- `apps/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
+- `apps/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
+- `apps/sandbox/` — OS-level sandboxing for Pi's Bash tool.
+- `packages/` — shared library packages, as they are added.
+- `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
+- `config/pi/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `config/pi/sandbox.json`.
 - `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
 
 ## Development Commands
@@ -39,11 +40,11 @@ bun run check
 bun run test
 
 # Run one extension's tests.
-bun test packages/extension-manager
-bun test packages/provider-base-url-overrides
-bun test packages/omp-status-line
-bun test packages/omp-welcome
-bun test packages/sandbox
+bun test apps/extension-manager
+bun test apps/provider-base-url-overrides
+bun test apps/omp-status-line
+bun test apps/omp-welcome
+bun test apps/sandbox
 ```
 
 ## Code Conventions & Common Patterns
@@ -62,22 +63,22 @@ bun test packages/sandbox
 
 - `README.md` — repository purpose and root setup entry point.
 - `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
-- `apps/agent/settings.json` — tracked, non-secret Pi defaults and extension references.
-- `apps/agent/sandbox.json` and `apps/agent/schemas/sandbox.schema.json` — sandbox policy and its strict schema.
-- `packages/extension-manager/index.ts` — extension-manager host entry point.
-- `packages/omp-status-line/index.ts` — status-line integration entry point.
-- `packages/omp-welcome/index.ts` — welcome integration entry point.
-- `packages/sandbox/index.ts` — sandbox tool/policy entry point.
-- `packages/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
-- `.gitignore` and `apps/agent/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
+- `config/pi/settings.json` — tracked, non-secret Pi defaults and extension references.
+- `config/pi/sandbox.json` and `config/pi/schemas/sandbox.schema.json` — sandbox policy and its strict schema.
+- `apps/extension-manager/index.ts` — extension-manager host entry point.
+- `apps/omp-status-line/index.ts` — status-line integration entry point.
+- `apps/omp-welcome/index.ts` — welcome integration entry point.
+- `apps/sandbox/index.ts` — sandbox tool/policy entry point.
+- `apps/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
+- `.gitignore` and `config/pi/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
 
 ## Runtime/Tooling Preferences
 
 - Use **Bun** for root workspace dependency installation and tests.
 - Extension packages are private ESM packages with Pi entry points declared in their local `package.json` files.
 - The sandbox dependency declares Node `>=20.11.0`; this is a sandbox dependency constraint, not evidence of a repository-wide engine declaration.
-- Pi-host modules are available in Pi at runtime. Host-facing integration tests should mock Pi runtime modules before dynamically importing the extension, as `packages/omp-status-line/index.integration.test.ts` does.
-- `apps/agent/settings.json` is intentionally tracked because it contains the monorepo extension references. Credentials and runtime artifacts (`auth.json`, `models-store.json`, `trust.json`, `sessions/`, and generated binaries) remain ignored.
+- Pi-host modules are available in Pi at runtime. Host-facing integration tests should mock Pi runtime modules before dynamically importing the extension, as `apps/omp-status-line/index.integration.test.ts` does.
+- `config/pi/settings.json` is intentionally tracked because it contains the monorepo extension references. Credentials and runtime artifacts (`auth.json`, `models-store.json`, `trust.json`, `sessions/`, and generated binaries) remain ignored.
 - Treat extension-specific READMEs as scoped guidance. In particular, sandbox prerequisites apply to sandbox deployment, not every extension.
 
 ## Testing & QA

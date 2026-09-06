@@ -17,7 +17,7 @@ bun install --frozen-lockfile
 Start Pi with the repository's agent configuration:
 
 ```sh
-PI_CODING_AGENT_DIR="$PWD/apps/agent" pi
+PI_CODING_AGENT_DIR="$(realpath config/pi)" pi
 ```
 
 On Linux, install `bubblewrap`, `socat`, and `ripgrep` through your system package manager.
@@ -27,12 +27,12 @@ On Linux, install `bubblewrap`, `socat`, and `ripgrep` through your system packa
 The extension reads configuration from these sources; later sources take precedence:
 
 1. Built-in defaults
-2. `~/.pi/agent/sandbox.json` (global)
+2. `$PI_CODING_AGENT_DIR/sandbox.json` (global; defaults to `~/.pi/agent/sandbox.json`)
 3. `<project>/.pi/sandbox.json` (project, only after Pi grants project trust)
 
 `network` and `filesystem` are merged one property deep. Arrays and nested objects such as `tlsTerminate` replace the earlier value rather than being concatenated or recursively merged. A project-level `ignoreViolations` replaces the complete global map.
 
-The JSON Schema for both configuration files is [`apps/agent/schemas/sandbox.schema.json`](../../apps/agent/schemas/sandbox.schema.json). Unknown properties are currently ignored at runtime, but the schema rejects them so misspelled or unsupported settings remain visible in editors and validators. A config may include a `$schema` string for editor integration; the extension itself ignores it.
+The JSON Schema for both configuration files is [`config/pi/schemas/sandbox.schema.json`](../../config/pi/schemas/sandbox.schema.json). Unknown properties are currently ignored at runtime, but the schema rejects them so misspelled or unsupported settings remain visible in editors and validators. A config file may include a `$schema` string; the extension ignores it.
 
 ### Built-in defaults
 
@@ -65,7 +65,7 @@ The JSON Schema for both configuration files is [`apps/agent/schemas/sandbox.sch
 Set `--no-sandbox` to disable sandboxing for one run:
 
 ```sh
-PI_CODING_AGENT_DIR="$PWD/apps/agent" pi --no-sandbox
+PI_CODING_AGENT_DIR="$(realpath config/pi)" pi --no-sandbox
 ```
 
 ### Top-level settings

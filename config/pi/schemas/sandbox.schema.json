@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Pi sandbox extension configuration",
-  "description": "Configuration for packages/sandbox. This describes the JSON settings the extension actually merges and passes to @anthropic-ai/sandbox-runtime 0.0.71.",
+  "description": "Configuration for apps/sandbox. This describes the JSON settings the extension actually merges and passes to @anthropic-ai/sandbox-runtime 0.0.71.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -84,11 +84,7 @@
         }
       ],
       "description": "Host-only domain pattern without a port suffix. IPv6 literals are unbracketed in these host-only fields.",
-      "examples": [
-        "api.example.com",
-        "*.internal.example.com",
-        "::1"
-      ]
+      "examples": ["api.example.com", "*.internal.example.com", "::1"]
     },
     "path": {
       "type": "string",
@@ -192,10 +188,7 @@
     "mitmProxy": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "socketPath",
-        "domains"
-      ],
+      "required": ["socketPath", "domains"],
       "properties": {
         "socketPath": {
           "type": "string",
@@ -216,12 +209,8 @@
       "type": "object",
       "additionalProperties": false,
       "dependentRequired": {
-        "caCertPath": [
-          "caKeyPath"
-        ],
-        "caKeyPath": [
-          "caCertPath"
-        ]
+        "caCertPath": ["caKeyPath"],
+        "caKeyPath": ["caCertPath"]
       },
       "properties": {
         "caCertPath": {
@@ -280,11 +269,7 @@
         },
         "denyRead": {
           "type": "array",
-          "default": [
-            "~/.ssh",
-            "~/.aws",
-            "~/.gnupg"
-          ],
+          "default": ["~/.ssh", "~/.aws", "~/.gnupg"],
           "items": {
             "$ref": "#/$defs/path"
           },
@@ -299,10 +284,7 @@
         },
         "allowWrite": {
           "type": "array",
-          "default": [
-            ".",
-            "/tmp"
-          ],
+          "default": [".", "/tmp"],
           "items": {
             "$ref": "#/$defs/path"
           },
@@ -310,12 +292,7 @@
         },
         "denyWrite": {
           "type": "array",
-          "default": [
-            ".env",
-            ".env.*",
-            "*.pem",
-            "*.key"
-          ],
+          "default": [".env", ".env.*", "*.pem", "*.key"],
           "items": {
             "$ref": "#/$defs/path"
           },
@@ -333,23 +310,13 @@
     {
       "enabled": true,
       "network": {
-        "allowedDomains": [
-          "github.com",
-          "*.github.com"
-        ],
+        "allowedDomains": ["github.com", "*.github.com"],
         "deniedDomains": []
       },
       "filesystem": {
-        "denyRead": [
-          "~/.ssh"
-        ],
-        "allowWrite": [
-          ".",
-          "/tmp"
-        ],
-        "denyWrite": [
-          ".env"
-        ]
+        "denyRead": ["~/.ssh"],
+        "allowWrite": [".", "/tmp"],
+        "denyWrite": [".env"]
       }
     }
   ]

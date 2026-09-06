@@ -116,7 +116,7 @@ The extension has no extension-specific configuration.
 
 ## Installation in this repository
 
-The extension has no runtime package dependencies. When `apps/agent` is used as `PI_CODING_AGENT_DIR`, its tracked `settings.json` loads `packages/omp-welcome` through the `../../packages/*` extension glob.
+The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
 
 Run the unit tests from the extension directory:
 

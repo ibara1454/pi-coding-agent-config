@@ -30,13 +30,13 @@
  * ```
  *
  * Usage:
- * - `PI_CODING_AGENT_DIR="$PWD/apps/agent" pi` - load the extension from the tracked agent settings
- * - `pi -e ./packages/sandbox --no-sandbox` - load it directly with sandboxing disabled
+ * - `PI_CODING_AGENT_DIR="$(realpath config/pi)" pi` - load the extension from tracked agent settings
+ * - `pi -e ./apps/sandbox --no-sandbox` - load directly with sandboxing disabled
  * - `/sandbox` - show current sandbox configuration
  *
  * Setup:
- * 1. Run `npm ci` from the repository root
- * 2. Use `apps/agent` as `PI_CODING_AGENT_DIR`
+ * 1. Run `bun install --frozen-lockfile` from the repository root
+ * 2. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`
  *
  * Linux also requires: bubblewrap, socat, ripgrep
  */

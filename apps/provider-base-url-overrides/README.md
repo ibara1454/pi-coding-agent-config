@@ -7,10 +7,10 @@ This extension rewrites model base URLs for effective Pi Providers at `session_s
 From the repository root, load the extension for a one-off Pi run:
 
 ```sh
-PROVIDER_BASE_URL=http://127.0.0.1:8787 pi -e ./packages/provider-base-url-overrides/index.ts
+PROVIDER_BASE_URL=http://127.0.0.1:8787 pi -e "$(realpath apps/provider-base-url-overrides/index.ts)"
 ```
 
-When `apps/agent` is used as `PI_CODING_AGENT_DIR`, its tracked `settings.json` loads the extension through `../../packages/*`; in that case, omit `-e`. Setting `PROVIDER_BASE_URL` only enables routing after the extension is loaded.
+When `PI_CODING_AGENT_DIR` names the canonical path of `config/pi`, its tracked `settings.json` loads this extension through `../../apps`; in that case, omit `-e`. Setting `PROVIDER_BASE_URL` only enables routing after the extension is loaded.
 
 ### Model API mapping
 
@@ -55,7 +55,7 @@ For `azure-openai-responses`, the wrapper overwrites both `options.azureBaseUrl`
 From the repository root:
 
 ```sh
-bun test packages/provider-base-url-overrides
+bun test apps/provider-base-url-overrides
 ```
 
 ## Security
