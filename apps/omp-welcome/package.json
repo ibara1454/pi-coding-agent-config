@@ -11,6 +11,12 @@
     "test:stress": "bun test --preload ../../test/setup.ts --isolate --randomize --rerun-each 5",
     "typecheck": "tsc --project tsconfig.json"
   },
+  "dependencies": {
+    "semver": "7.8.0"
+  },
+  "devDependencies": {
+    "@types/semver": "7.8.0"
+  },
   "pi": {
     "extensions": [
       "./index.ts"

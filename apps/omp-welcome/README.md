@@ -93,7 +93,7 @@ Pi does not expose control of its loaded-resource container through the public e
 
 The private override is enabled only when both conditions hold:
 
-1. The installed `@earendil-works/pi-coding-agent` version is `0.84.x`.
+1. The installed `@earendil-works/pi-coding-agent` version must satisfy `>=0.84.0 <0.86.0`.
 2. `showLoadedResources()` still contains the reviewed control-flow seams.
 
 If either guard fails, the extension fails open: Pi's native inventory remains visible, the welcome still renders, and one TUI warning explains that inventory suppression is unavailable. It never attempts an unverified patch.

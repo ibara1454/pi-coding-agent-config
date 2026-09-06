@@ -41,7 +41,7 @@ describe("native resource inventory override", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const override = installResourceInventoryOverride(
-      "0.84.9",
+      "0.85.1",
       InteractiveMode,
     );
     const mode = new InteractiveMode();
@@ -118,7 +118,7 @@ describe("native resource inventory override", () => {
     const original =
       unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
     const versionResult = installResourceInventoryOverride(
-      "0.85.0",
+      "0.86.0",
       unsupportedVersion.InteractiveMode,
     );
     expect(versionResult.supported).toBe(false);

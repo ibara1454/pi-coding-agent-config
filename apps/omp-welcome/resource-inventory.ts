@@ -1,4 +1,6 @@
-const SUPPORTED_PI_MINOR = /^0\.84\.\d+(?:[-+].*)?$/;
+import { satisfies } from "semver";
+
+const SUPPORTED_PI_RANGE = ">=0.84.0 <0.86.0";
 const PATCH_REGISTRY = Symbol.for(
   "pi-agent.extensions.omp-welcome.resource-inventory-patches",
 );
@@ -99,8 +101,10 @@ export function installResourceInventoryOverride(
   version: string,
   interactiveMode: InteractiveModeConstructorLike,
 ): ResourceInventoryOverride {
-  if (!SUPPORTED_PI_MINOR.test(version)) {
-    return unsupported(`unsupported pi-coding-agent version ${version}`);
+  if (!satisfies(version, SUPPORTED_PI_RANGE)) {
+    return unsupported(
+      `unsupported pi-coding-agent version ${version}; supported range ${SUPPORTED_PI_RANGE}`,
+    );
   }
 
   const prototype = interactiveMode.prototype;
@@ -131,7 +135,7 @@ export function installResourceInventoryOverride(
   const source = Function.prototype.toString.call(original);
   if (METHOD_ANCHORS.some((anchor) => !source.includes(anchor))) {
     return unsupported(
-      "showLoadedResources no longer matches the reviewed Pi 0.84.x implementation",
+      "showLoadedResources no longer matches the reviewed implementation",
     );
   }
 
