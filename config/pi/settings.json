@@ -17,6 +17,14 @@
     "npm:@plannotator/pi-extension"
   ],
   "hideThinkingBlock": false,
-  "extensions": ["../../apps"],
-  "theme": "dark"
+  "extensions": [
+    "../../apps"
+  ],
+  "theme": "dark",
+  "skills": [
+    "-skills/plannotator",
+    "-skills/plannotator-annotate",
+    "-skills/plannotator-last",
+    "-skills/plannotator-review"
+  ]
 }
