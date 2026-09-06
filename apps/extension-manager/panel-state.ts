@@ -105,17 +105,19 @@ export class ExtensionManagerPanelState {
   }
 
   moveSelection(delta: number): void {
-    const rows = this.visibleRows();
+    const rows = this.listEntries().filter((entry) => entry.type === "row");
     if (rows.length === 0) {
       this.#selectedId = undefined;
       return;
     }
-    const current = rows.findIndex((row) => row.id === this.#selectedId);
+    const current = rows.findIndex(
+      (entry) => entry.row.id === this.#selectedId,
+    );
     const next =
       current === -1
         ? 0
         : Math.max(0, Math.min(rows.length - 1, current + delta));
-    this.#selectedId = rows[next]?.id;
+    this.#selectedId = rows[next]?.row.id;
   }
 
   moveTab(delta: number): void {

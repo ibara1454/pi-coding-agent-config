@@ -71,7 +71,7 @@ project, package, or symlinked declarations exist.
 | --- | --- |
 | `Tab` / `Right` | Move to the next resource-kind tab. |
 | `Shift-Tab` / `Left` | Move to the previous tab. |
-| `Up` / `Down` or `k` / `j` | Move the selected row. |
+| `Up` / `Down` or `k` / `j` | Move one resource row in display order, skipping group headers. |
 | Printable text / `Backspace` | Edit the fuzzy-search query. |
 | `Space` | Stage an enable or disable toggle. |
 | `Enter` | Focus the selected row's inspector. |

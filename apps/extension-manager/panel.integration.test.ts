@@ -95,6 +95,59 @@ function makePanel(
 }
 
 describe("ExtensionManagerPanel.handleInput", () => {
+  test.each([
+    ["Extensions", "\t", "extension", ""],
+    ["Skills", LEFT, "skill", ""],
+    ["filtered Skills", LEFT, "skill", "ill"],
+  ] as const)(
+    "should visit adjacent rendered rows in both directions when navigating %s source groups",
+    (_label, tabKey, kind, query) => {
+      const { panel } = makePanel({
+        rows: [
+          catalogRow("alpha-skill", kind, "Settings"),
+          catalogRow("beta-skill", kind, "npm:kit"),
+          catalogRow("charlie-skill", kind, "Settings"),
+          catalogRow("delta-skill", kind, "npm:kit"),
+        ],
+      });
+      panel.render(70);
+      panel.handleInput(tabKey);
+      for (const character of query) {
+        panel.handleInput(character);
+      }
+
+      const displayedRows = panel.render(70).flatMap((line) => {
+        const match = /^[ >] \[x\] [GP] (\S+)/.exec(line);
+        return match ? [match[1]] : [];
+      });
+      expect(displayedRows).toEqual([
+        "beta-skill",
+        "delta-skill",
+        "alpha-skill",
+        "charlie-skill",
+      ]);
+
+      for (const _row of displayedRows) {
+        panel.handleInput("\u001b[A");
+      }
+      for (const name of displayedRows) {
+        expect(
+          panel.render(70).find((line) => line.startsWith("> ")),
+        ).toContain(name);
+        panel.handleInput("\u001b[B");
+      }
+      for (const name of displayedRows.toReversed()) {
+        expect(
+          panel.render(70).find((line) => line.startsWith("> ")),
+        ).toContain(name);
+        panel.handleInput("\u001b[A");
+      }
+      expect(panel.render(70).find((line) => line.startsWith("> "))).toContain(
+        displayedRows[0],
+      );
+    },
+  );
+
   test("should apply staged changes and forward catalog mutations when the close dialog applies", async () => {
     const requests: CommitRequest[] = [];
     const commitResult: CommitResult = {
