@@ -224,6 +224,7 @@ export class ExtensionCatalog {
     this.#staged.set(id, enabled);
   }
 
+  // ponytail: delete this test-only wrapper; callers already use stage().
   toggle(id: string): void {
     const row = this.view().rows.find((candidate) => candidate.id === id);
     if (row === undefined) {

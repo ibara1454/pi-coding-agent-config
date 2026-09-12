@@ -21,6 +21,7 @@ export interface SettingsDocument {
 
 export interface ResourceOrigin {
   readonly label: string;
+  // ponytail: delete this unused origin discriminator; only label is read.
   readonly source: "auto" | "settings" | "package";
 }
 
@@ -45,6 +46,7 @@ export interface CatalogRow {
   readonly configurationReason: string;
   readonly configured: boolean;
   readonly resolvedAfterReload: boolean;
+  // ponytail: drop this output field; keep discovery's local precedence flag.
   readonly resolutionParticipant: boolean;
   readonly resolutionCandidate: boolean;
   readonly resolutionOrder: number;
@@ -97,6 +99,7 @@ export interface CatalogSeed {
   readonly settings: ReadonlyMap<ResourceScope, SettingsDocument>;
   readonly diagnostics: readonly CatalogDiagnostic[];
   readonly projectTrusted: boolean;
+  // ponytail: drop this copied mode; the panel uses the actual TUI mode.
   readonly tuiMode: "regular" | "fullscreen";
   readonly reloadPending: boolean;
 }
@@ -106,6 +109,7 @@ export interface CatalogView {
   readonly diagnostics: readonly CatalogDiagnostic[];
   readonly projectTrusted: boolean;
   readonly reloadPending: boolean;
+  // ponytail: remove mode/count outputs; use the TUI and hasChanges().
   readonly tuiMode: "regular" | "fullscreen";
   readonly stagedCount: number;
 }
@@ -120,6 +124,7 @@ export interface RowInspection {
   readonly preview?: string;
 }
 
+// ponytail: delete this unreferenced type.
 export interface StagedToggle {
   readonly id: string;
   readonly enabled: boolean;

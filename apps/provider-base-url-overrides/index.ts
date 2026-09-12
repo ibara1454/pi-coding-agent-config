@@ -27,6 +27,7 @@ type ProviderRoutes = {
   googleGenerative: string;
 };
 
+// ponytail: use optional spreads; keep getter reads single and ordered.
 type NonNullRecord<T extends Record<string, unknown>> = {
   [K in keyof T as K extends string ? K : never]?: NonNullable<T[K]>;
 };

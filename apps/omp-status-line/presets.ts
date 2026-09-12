@@ -151,6 +151,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
   },
 };
 
+// ponytail: inline the sole lookup, retaining the default preset fallback.
 export function getPreset(name: StatusLinePreset): PresetDef {
   return STATUS_LINE_PRESETS[name] ?? STATUS_LINE_PRESETS.default;
 }

@@ -133,6 +133,7 @@ export type FilterEvaluationMode =
   | "top-level"
   | "autoload-disabled";
 
+// ponytail: return only the reason string; callers never use enabled.
 export interface FilterExplanation {
   readonly enabled: boolean;
   readonly reason: string;

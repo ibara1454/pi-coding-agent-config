@@ -61,6 +61,7 @@ const SEGMENT_IDS: Record<StatusLineSegmentId, true> = {
   usage: true,
   collab: true,
 };
+// ponytail: validate STATUS_LINE_PRESETS keys instead of this duplicate list.
 const PRESETS: Record<StatusLineSettings["preset"], true> = {
   default: true,
   minimal: true,
@@ -123,6 +124,7 @@ function parseSegmentIds(value: unknown): StatusLineSegmentId[] | undefined {
   );
 }
 
+// ponytail: replace toNonNullRecord with explicit optional spreads.
 type NonNullRecord<T extends Record<string, unknown>> = {
   [K in keyof T as K extends string ? K : never]?: NonNullable<T[K]>;
 };
@@ -858,6 +860,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }, 1_000);
   });
 
+  // ponytail: share one context-refresh callback across these five hooks.
   pi.on("session_info_changed", async (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
@@ -884,6 +887,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     streamStartedAt = Date.now();
     requestRender();
   });
+  // ponytail: share the identical message_update/message_end usage callback.
   pi.on("message_update", async (event, ctx) => {
     currentCtx = ctx;
     const usage = messageUsage(event.message);
