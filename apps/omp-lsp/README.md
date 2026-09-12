@@ -163,17 +163,85 @@ Server definitions are read only from the agent directory and the trusted projec
 
 Project-root files, `.omp/`, `.claude/`, and plugin directories are not searched.
 
-For example, `.pi/lsp.json` can override existing presets and set an idle limit:
+You can override any bundled preset without editing `defaults.json`. Use the preset name from the tables above as the key under `servers`.
+
+#### 1. Choose the configuration scope
+
+| Scope | Extension switches | Server overrides |
+| --- | --- | --- |
+| All projects using this Pi agent directory | `<agent-dir>/settings.json` | `<agent-dir>/lsp.json` |
+| This trusted project only | `.pi/settings.json` | `.pi/lsp.json` |
+
+`<agent-dir>` is `PI_CODING_AGENT_DIR`, or `~/.pi/agent` when unset. With this repository's setup, it is the canonical `config/pi` directory. Precedence is **bundled defaults → agent-directory overrides → trusted project overrides**. Untrusted projects cannot supply project overrides or run language servers.
+
+The examples below use project-local files. Merge these keys into existing files; do not replace unrelated settings such as your extension list.
+
+#### 2. Override extension behavior in `.pi/settings.json`
+
+```json
+{
+  "lsp": {
+    "diagnosticsOnEdit": true,
+    "formatOnWrite": true
+  }
+}
+```
+
+This enables diagnostic feedback after edits and formatting after writes. Other switches, such as `diagnosticsOnWrite`, retain their lower-priority values. These switches belong in `settings.json`, not `lsp.json`.
+
+#### 3. Override server presets in `.pi/lsp.json`
 
 ```json
 {
   "idleTimeoutMs": 600000,
   "servers": {
-    "clangd": { "args": ["--background-index"] },
-    "rust-analyzer": { "disabled": true }
+    "clangd": {
+      "args": ["--background-index", "--clang-tidy"]
+    },
+    "pyright": {
+      "settings": {
+        "python": {
+          "analysis": {
+            "autoSearchPaths": true,
+            "diagnosticMode": "workspace",
+            "useLibraryCodeForTypes": true
+          }
+        }
+      }
+    },
+    "ruff": {
+      "disabled": true
+    }
   }
 }
 ```
+
+This example:
+
+- Sets the idle timeout to 600,000 milliseconds (10 minutes).
+- Replaces clangd's complete argument list. The bundled `--header-insertion=iwyu` argument is omitted; add it explicitly if you want to retain it.
+- Configures Pyright to analyze the workspace rather than only open files, retaining the two other bundled analysis settings.
+- Disables the Ruff preset for this project.
+
+**Server overrides merge by field, not recursively.** Omitted fields such as `command`, `fileTypes`, and `rootMarkers` retain their lower-priority values. Supplied arrays such as `args` replace the entire array; supplied objects such as `settings`, `initOptions`, and `env` replace the entire object.
+
+For example, if your agent-directory `lsp.json` adds another Pyright setting, the project-level `settings` object above replaces it too. Copy every nested value you want to retain into the higher-priority object. The same replacement rule applies between configuration files within one directory.
+
+#### 4. Reload and inspect the configuration
+
+After saving, call the `lsp` tool with:
+
+```json
+{"action":"reload","file":"*"}
+```
+
+Then inspect configured and missing servers:
+
+```json
+{"action":"status"}
+```
+
+Overrides do not install executables. Install the required servers separately, or override their `command` field to point to an installed executable.
 
 New named definitions specify `command`, `args`, `fileTypes`, and `rootMarkers`. Optional `env`, `settings`, `initOptions`, `languageId`, and `extensionToLanguage` configure the server further. See [defaults.json](./defaults.json) for complete examples.
 
