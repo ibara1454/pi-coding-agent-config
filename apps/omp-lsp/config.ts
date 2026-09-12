@@ -568,12 +568,6 @@ export async function loadLspConfig(
       );
     }
   }
-  for (const server of result.servers) {
-    if (!server.disabled && !server.resolvedCommand)
-      result.warnings.push(
-        `${server.name}: executable '${server.command}' was not found in installed project binaries or PATH (root: ${server.root}); install it explicitly or configure command`,
-      );
-  }
   return result;
 }
 

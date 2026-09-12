@@ -27,6 +27,8 @@ Install the language servers your projects need separately. Project-local binari
 
 Install only what you need. Multiple entries for one language are alternatives, not a requirement to install every server. The preset names in parentheses identify entries you can customize or disable in [server definitions](#server-definitions).
 
+Only installed servers with matching project-root markers are eligible to run. Missing optional executables do not produce startup warnings; the `lsp` tool's `status` action still lists them as unavailable. Invalid configuration and failures to start installed servers remain visible. Requests without an available matching server report an error rather than a clean result.
+
 | Language or framework | Server to install (preset) | Required executable |
 | --- | --- | --- |
 | Astro | Astro language server (`astro`) | `astro-ls` |
