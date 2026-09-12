@@ -98,6 +98,7 @@ interface ResourceDraft {
         readonly participates: boolean;
         readonly participatesWhenEnabled: boolean;
         readonly participatesWhenDisabled: boolean;
+        // ponytail: delete this unused draft field and its assignment.
         readonly settingsIndex: number;
         readonly hadFilterField: boolean;
         readonly packageIdentity: string;

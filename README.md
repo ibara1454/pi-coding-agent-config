@@ -106,6 +106,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
 | [`extension-manager`](apps/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/extension-manager` |
 | [`sandbox`](apps/sandbox/README.md) | Replaces Pi's bash tool with schema-backed sandbox policy. | `bun test apps/sandbox` |
+| [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
 ## Validation
 

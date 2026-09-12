@@ -63,6 +63,7 @@ interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
 }
 
+// ponytail: inline String(...) at both callers; this wrapper adds no policy.
 function formatError(error: unknown): string {
   return String(error);
 }
