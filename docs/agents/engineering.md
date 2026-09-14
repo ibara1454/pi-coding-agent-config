@@ -20,6 +20,17 @@ A module is a function, class, package, or larger slice with an interface and an
 
 ## Module design contract
 
+### Document important or repeatedly called functions
+
+When adding or modifying a TypeScript function or method, agents MUST add or update a TSDoc comment directly above its declaration if either condition applies:
+
+- **Important:** its contract is needed to understand a module's public behavior, core policy, validation, state transitions, or resource ownership.
+- **Repeated calls:** it serves multiple callers or is expected to be invoked more than once, including repeated invocations through a single call site.
+
+The TSDoc MUST explain the purpose, input and output semantics, and relevant errors, side effects, or resource ownership. Use `@param`, `@returns`, and `@throws` where applicable, and include an `@example` showing concrete inputs and expected output or observable effects. Explain non-obvious terminology and units; keep comments concise and focused on behavior rather than restating TypeScript types.
+
+Before completing the change, check every added or modified function against these conditions and ensure its required TSDoc matches the implementation.
+
 ### Add a module only when it removes work from callers
 
 Keep a module when deleting it would spread policy, effects, or lifecycle steps into callers. Delete a pass-through whose callers already know the wrapped operation.
