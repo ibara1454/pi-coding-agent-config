@@ -7,7 +7,7 @@ This repository contains personal configuration and customized extensions for
 
 - `apps/` contains **Pi extension packages only**. Each extension is a complete
   package with its own `package.json`, entrypoint, and supporting files.
-- `packages/` is reserved for shared libraries consumed by extensions.
+- `packages/` contains shared libraries and development tooling.
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
 
@@ -123,6 +123,29 @@ workspace:
 bun run lint
 ```
 
+Custom Biome rules reject private class methods written as `private method()`
+or `#method()`, including overload signatures. Private fields remain allowed.
+Move internal helpers to module scope rather than making them public.
+
+Custom `.grit` rules and their colocated integration tests live in
+`packages/biome-rules/src/`. The root Biome configuration loads the rules by
+filesystem path; Biome 2.5.10 does not resolve package specifiers for plugins.
+
+Each rule has a colocated `*.integration.test.ts` file with inline valid and
+invalid source strings. The shared `test-utils.ts` helper loads the checked-in
+`.grit` rule into an in-memory filesystem and runs the real Biome WASM engine.
+It releases each workspace after use and decodes diagnostic spans as UTF-8
+byte offsets. Tests require neither CLI subprocesses nor fixture files.
+
+Keep `@biomejs/wasm-nodejs` pinned to the same version as the root
+`@biomejs/biome` CLI so tests and repository lint use the same engine.
+
+Run only the custom-rule tests:
+
+```bash
+bun test packages/biome-rules
+```
+
 Apply safe Biome fixes:
 
 ```bash
@@ -135,7 +158,7 @@ Run strict type checking for every workspace:
 bun run typecheck
 ```
 
-Run all extension tests through Turborepo:
+Run all workspace tests through Turborepo:
 
 ```bash
 bun run test

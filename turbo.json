@@ -4,7 +4,7 @@
     "test/setup.ts",
     "bunfig.toml",
     "biome.json",
-    "biome-plugins/**"
+    "packages/biome-rules/src/*.grit"
   ],
   "tasks": {
     "lint": {

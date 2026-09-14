@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained TypeScript extensions; `packages/` is reserved for shared libraries. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
+This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained TypeScript extensions; `packages/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
 
 ## Architecture & Data Flow
 
@@ -20,7 +20,7 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - `apps/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
 - `apps/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
 - `apps/sandbox/` — OS-level sandboxing for Pi's Bash tool.
-- `packages/` — shared library packages, as they are added.
+- `packages/biome-rules/` — custom GritQL rules with colocated Bun integration tests.
 - `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
 - `config/pi/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `config/pi/sandbox.json`.
 - `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
@@ -36,15 +36,16 @@ bun install --frozen-lockfile
 # Run lint and type checking across every workspace.
 bun run check
 
-# Run every extension test.
+# Run every workspace's tests.
 bun run test
 
-# Run one extension's tests.
+# Run one workspace's tests.
 bun test apps/extension-manager
 bun test apps/provider-base-url-overrides
 bun test apps/omp-status-line
 bun test apps/omp-welcome
 bun test apps/sandbox
+bun test packages/biome-rules
 ```
 
 ## Code Conventions & Common Patterns
@@ -86,14 +87,15 @@ bun test apps/sandbox
 - Tests use `bun:test`; there is no Jest, Vitest, or root build command.
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
+- For changes to `packages/biome-rules/`, read the custom-rule testing notes in `README.md`.
 - Prefer lightweight fake Pi/UI/context objects over broad integration setup. For filesystem/configuration tests, create deterministic temp roots, restore environment variables, invoke shutdown/dispose paths, and remove temp data in `finally`/`afterEach`.
-- Run the affected extension's test command before delivering a permanent behavior change.
+- Run the affected workspace's test command before delivering a permanent behavior change.
 
 ## Agent skills
 
 ### Repository engineering
 
-Before implementing or reviewing any repository change, read and apply `docs/agents/engineering.md`; it governs module/interface design, exports, resource ownership, cross-interface dispatch, tests and snapshots, and deviations.
+Before implementing or reviewing any repository change, read and apply `docs/agents/engineering.md`; it governs module/interface design, TSDoc requirements, exports, resource ownership, cross-interface dispatch, tests and snapshots, and deviations.
 
 ### Issue tracker
 

@@ -1,0 +1,16 @@
+{
+  "name": "biome-rules",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "devDependencies": {
+    "@biomejs/wasm-nodejs": "2.5.10"
+  },
+  "scripts": {
+    "lint": "biome check --config-path=../.. --error-on-warnings .",
+    "lint:fix": "biome check --write --config-path=../.. --error-on-warnings .",
+    "test": "bun test --preload ../../test/setup.ts",
+    "test:stress": "bun test --preload ../../test/setup.ts --isolate --randomize --rerun-each 5",
+    "typecheck": "tsc --project tsconfig.json"
+  }
+}

@@ -23,8 +23,5 @@ pattern async_callback() {
 `$callee($_, $callback)` where {
   $callback <: async_callback(),
   $callee <: describe_callee(),
-  register_diagnostic(
-    span = $callback,
-    message = "A `describe` callback must be synchronous. Move the asynchronous work into the leaf test that needs it, or into a lifecycle hook."
-  )
+  register_diagnostic(span=$callback, message="A `describe` callback must be synchronous. Move the asynchronous work into the leaf test that needs it, or into a lifecycle hook.")
 }

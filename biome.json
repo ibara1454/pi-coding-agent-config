@@ -2,12 +2,13 @@
   "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
   "plugins": [
     {
-      "path": "./biome-plugins/no-async-describe-callback.grit",
+      "path": "./packages/biome-rules/src/no-async-describe-callback.grit",
       "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
     },
-    "./biome-plugins/no-double-type-assertion.grit",
+    "./packages/biome-rules/src/no-double-type-assertion.grit",
+    "./packages/biome-rules/src/no-private-methods.grit",
     {
-      "path": "./biome-plugins/use-should-test-title.grit",
+      "path": "./packages/biome-rules/src/use-should-test-title.grit",
       "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
     }
   ],
