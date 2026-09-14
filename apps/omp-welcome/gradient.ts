@@ -134,11 +134,22 @@ export class IntroAnimation {
     this.clock = clock;
   }
 
+  /**
+   * Restarts the intro, requesting an immediate frame and owning one timer.
+   * Completion disposes the timer before requesting the resting frame.
+   * @throws If a clock operation or the render callback throws.
+   * @example With a clock starting at 0, start() requests a frame immediately;
+   * a tick at 3000 ms clears the timer before requesting the resting frame.
+   */
   start(): void {
     this.dispose();
     this.startedAt = this.clock.now();
     this.requestRender();
-    this.timer = this.clock.setInterval(() => this.tick(), INTRO_TICK_MS);
+    this.timer = this.clock.setInterval(() => {
+      const progress = this.progress();
+      if (progress !== undefined && progress >= 1) this.dispose();
+      this.requestRender();
+    }, INTRO_TICK_MS);
   }
 
   progress(): number | undefined {
@@ -159,11 +170,5 @@ export class IntroAnimation {
       this.timer = undefined;
     }
     this.startedAt = undefined;
-  }
-
-  private tick(): void {
-    const progress = this.progress();
-    if (progress !== undefined && progress >= 1) this.dispose();
-    this.requestRender();
   }
 }
