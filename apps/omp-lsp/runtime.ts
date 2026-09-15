@@ -433,30 +433,62 @@ class BoundedLspInput extends Transform {
   }
 }
 
+interface ServerState {
+  readonly lifetime: AbortController;
+  readonly documents: Map<string, DocumentSnapshot>;
+  readonly publications: Map<string, PublishedDiagnostics>;
+  readonly diagnosticErrors: Map<string, Error>;
+  readonly queues: Map<string, Promise<void>>;
+  readonly registrations: Map<string, Registration>;
+  readonly cancellationTimers: Set<NodeJS.Timeout>;
+  readonly progress: Set<string | number>;
+  baseCapabilities: ServerCapabilities;
+  effectiveCapabilities: ServerCapabilities;
+  version: number;
+  initialized: boolean;
+  shutdownPromise: Promise<void> | undefined;
+  failure: Error | undefined;
+  stderr: string;
+  activity: number;
+  busy: number;
+}
+
 class StdioLanguageServer implements LanguageServer {
   readonly config: ServerConfig;
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly input = new BoundedLspInput();
   private readonly options: PoolOptions;
   private readonly connection: MessageConnection;
-  private readonly lifetime = new AbortController();
-  private readonly documents = new Map<string, DocumentSnapshot>();
-  private readonly publications = new Map<string, PublishedDiagnostics>();
-  private readonly diagnosticErrors = new Map<string, Error>();
-  private readonly queues = new Map<string, Promise<void>>();
-  private readonly registrations = new Map<string, Registration>();
-  private readonly cancellationTimers = new Set<NodeJS.Timeout>();
-  private readonly progress = new Set<string | number>();
-  private baseCapabilities: ServerCapabilities = {};
-  private effectiveCapabilities: ServerCapabilities = {};
-  private version = 0;
-  private initialized = false;
-  private shutdownPromise: Promise<void> | undefined;
-  private failure: Error | undefined;
-  private stderr = "";
-  private activity = Date.now();
-  private busy = 0;
+  private readonly state: ServerState = {
+    lifetime: new AbortController(),
+    documents: new Map(),
+    publications: new Map(),
+    diagnosticErrors: new Map(),
+    queues: new Map(),
+    registrations: new Map(),
+    cancellationTimers: new Set(),
+    progress: new Set(),
+    baseCapabilities: {},
+    effectiveCapabilities: {},
+    version: 0,
+    initialized: false,
+    shutdownPromise: undefined,
+    failure: undefined,
+    stderr: "",
+    activity: Date.now(),
+    busy: 0,
+  };
 
+  /**
+   * Starts one stdio server and installs the stable listeners owned by its shutdown lifecycle.
+   * @param config - Resolved command, arguments, environment, and protocol configuration.
+   * @param options - Workspace root and workspace-edit callback retained by this client.
+   * @throws If process creation or transport setup fails.
+   * @example
+   * With config.command "typescript-language-server", args ["--stdio"], and root
+   * "/project", new StdioLanguageServer(config, options) launches that command in
+   * /project; it sends no initialize request until initialize() is called.
+   */
   constructor(config: ServerConfig, options: PoolOptions) {
     this.config = config;
     this.options = options;
@@ -479,16 +511,18 @@ class StdioLanguageServer implements LanguageServer {
     this.input.on("error", this.onProcessError);
     this.child.stdout.on("error", this.onProcessError);
     this.connection.onClose(() =>
-      this.fail(
+      fail(
+        this.state,
+        this,
         new Error(
-          `LSP ${config.name} closed its transport${this.stderrSuffix()}`,
+          `LSP ${config.name} closed its transport${stderrSuffix(this.state.stderr)}`,
         ),
       ),
     );
-    this.connection.onError(([error]) => this.fail(error));
+    this.connection.onError(([error]) => fail(this.state, this, error));
     this.connection.onNotification(
       "textDocument/publishDiagnostics",
-      (params: unknown) => this.publish(params),
+      (params: unknown) => publish(this.state, this, params),
     );
     this.connection.onNotification("$/progress", (params: unknown) => {
       if (!record(params)) return;
@@ -499,84 +533,106 @@ class StdioLanguageServer implements LanguageServer {
       )
         return;
       const { kind } = value;
-      if (kind === "begin") this.progress.add(token);
-      if (kind === "end") this.progress.delete(token);
+      if (kind === "begin") this.state.progress.add(token);
+      if (kind === "end") this.state.progress.delete(token);
     });
     this.connection.onRequest((method: string, params: unknown) =>
-      this.serverRequest(method, params),
+      serverRequest(this.state, this, this.options, method, params),
     );
     this.connection.listen();
     this.child.stdout.pipe(this.input);
   }
 
+  /**
+   * Exposes the current initialization capabilities with dynamic registrations overlaid.
+   * @returns The current effective capability object, not a detached copy.
+   * @example
+   * server.capabilities.hoverProvider; // Reflects an active textDocument/hover registration.
+   */
   get capabilities(): ServerCapabilities {
-    return this.effectiveCapabilities;
+    return this.state.effectiveCapabilities;
   }
+  /**
+   * Checks that neither lifetime cancellation nor process termination has occurred.
+   * @returns Whether the client can still accept work.
+   * @example
+   * server.isAlive; // Returns false after shutdown aborts the lifetime.
+   */
   get isAlive(): boolean {
     return (
-      !this.lifetime.signal.aborted &&
+      !this.state.lifetime.signal.aborted &&
       this.child.exitCode === null &&
       this.child.signalCode === null
     );
   }
 
+  /**
+   * Records activity using wall-clock milliseconds for pool idle expiry.
+   * @example
+   * server.touch(); // Restarts the idle interval after acquiring this client.
+   */
   touch(): void {
-    this.activity = Date.now();
+    this.state.activity = Date.now();
   }
+  /**
+   * Reports idle time only when no tracked operation is active.
+   * @param now - Current wall-clock timestamp in milliseconds.
+   * @returns Milliseconds since activity, or zero while busy.
+   * @example
+   * server.idleFor(Date.now()); // Returns 0 during an active request.
+   */
   idleFor(now: number): number {
-    return this.busy === 0 ? now - this.activity : 0;
+    return this.state.busy === 0 ? now - this.state.activity : 0;
   }
 
+  /**
+   * Retains the most recent 16,384 stderr characters using one stable stream listener.
+   * @param data - Stderr bytes or decoded text appended to the retained failure detail.
+   * @example
+   * child.stderr.emit("data", "denied\n"); // Later failures include "denied".
+   */
   private readonly onStderr = (data: Buffer | string): void => {
-    this.stderr = (this.stderr + String(data)).slice(-16_384);
+    this.state.stderr = (this.state.stderr + String(data)).slice(-16_384);
   };
+  /**
+   * Routes process and stream errors into owned shutdown using one stable listener identity.
+   * @param error - Original process or transport failure propagated to pending operations.
+   * @example
+   * child.emit("error", new Error("broken pipe")); // Cancels work and begins cleanup.
+   */
   private readonly onProcessError = (error: Error): void => {
-    this.fail(error);
+    fail(this.state, this, error);
   };
+  /**
+   * Converts process exit into a failure carrying its signal/code and retained stderr.
+   * @param code - Numeric exit status, or null when a signal ended the process.
+   * @param signal - Terminating signal, preferred over the numeric code when present.
+   * @example
+   * child.emit("exit", 1, null); // Pending work fails with an exit-status-1 message.
+   */
   private readonly onExit = (
     code: number | null,
     signal: NodeJS.Signals | null,
   ): void => {
-    this.fail(
+    fail(
+      this.state,
+      this,
       new Error(
-        `LSP ${this.config.name} exited (${signal ?? code ?? "unknown"})${this.stderrSuffix()}`,
+        `LSP ${this.config.name} exited (${signal ?? code ?? "unknown"})${stderrSuffix(this.state.stderr)}`,
       ),
     );
   };
 
-  private stderrSuffix(): string {
-    return this.stderr.trim() ? `: ${this.stderr.trim()}` : "";
-  }
-
-  private fail(error: Error): void {
-    if (this.lifetime.signal.aborted) return;
-    this.failure = error;
-    this.lifetime.abort(error);
-    void this.shutdown().catch((cleanupError: unknown) => {
-      this.failure = new AggregateError(
-        [error, cleanupError],
-        `LSP ${this.config.name} cleanup failed`,
-      );
-    });
-  }
-
-  private assertAlive(): void {
-    if (!this.isAlive)
-      throw this.failure ?? new Error(`LSP ${this.config.name} is stopped`);
-  }
-
-  private async active<T>(work: () => Promise<T>): Promise<T> {
-    this.assertAlive();
-    this.busy++;
-    this.touch();
-    try {
-      return await work();
-    } finally {
-      this.busy--;
-      this.touch();
-    }
-  }
-
+  /**
+   * Negotiates UTF-16 capabilities, sends initial settings, and waits for workspace readiness.
+   * @param signal - Startup owner's cancellation; cancellation does not belong to an individual pool waiter.
+   * @returns Completion after the initialized notification, configuration, and readiness checks.
+   * @throws On cancellation, protocol/encoding validation failure, or readiness/request failure.
+   * @example
+   * If the peer's initialize response selects positionEncoding: "utf-8",
+   * server.initialize(new AbortController().signal) rejects rather than accepting
+   * positions that this UTF-16 client would interpret incorrectly.
+   */
   async initialize(signal: AbortSignal): Promise<void> {
     const root = this.config.root || this.options.cwd;
     const params: InitializeParams = {
@@ -630,136 +686,59 @@ class StdioLanguageServer implements LanguageServer {
           `LSP ${this.config.name} returned invalid text synchronization options`,
         );
     }
-    this.baseCapabilities = capabilities as ServerCapabilities;
-    this.updateCapabilities();
+    this.state.baseCapabilities = capabilities as ServerCapabilities;
+    this.state.effectiveCapabilities = registeredCapabilities(
+      this.state.baseCapabilities,
+      this.state.registrations.values(),
+    );
     check(signal);
     await this.notify("initialized", {});
-    this.initialized = true;
+    this.state.initialized = true;
     await this.notify("workspace/didChangeConfiguration", {
       settings: this.config.settings ?? {},
     });
-    await this.waitForWorkspace(signal);
+    await waitForWorkspace(this.state, this, signal);
     check(signal);
-    this.assertAlive();
+    assertAlive(this, this.state.failure);
   }
 
-  private async waitForWorkspace(
-    signal?: AbortSignal,
-    timeoutMs = 10_000,
-  ): Promise<void> {
-    const rust = [this.config.command, this.config.resolvedCommand].some(
-      (command) =>
-        command !== undefined &&
-        /^rust-analyzer(?:\.exe)?$/.test(basename(command)),
-    );
-    const timings = this.config.workspaceReadyTimings;
-    const start = Date.now();
-    let quietSince = start;
-    const deadline =
-      start + Math.min(duration(timings?.timeoutMs, 10_000), timeoutMs);
-    while (Date.now() < deadline) {
-      check(signal);
-      if (rust) {
-        const status = await this.request<unknown>(
-          "rust-analyzer/analyzerStatus",
-          {},
-          signal,
-          Math.min(
-            duration(timings?.statusRequestTimeoutMs, 1_000),
-            Math.max(1, deadline - Date.now()),
-          ),
-        );
-        if (typeof status !== "string")
-          throw new Error("rust-analyzer returned an invalid workspace status");
-        if (
-          !status.startsWith("No workspaces") &&
-          this.progress.size === 0 &&
-          Date.now() - start >= duration(timings?.settleMs, 2_000)
-        )
-          return;
-      } else if (this.progress.size > 0) {
-        quietSince = Date.now();
-      } else if (Date.now() - quietSince >= duration(timings?.settleMs, 100))
-        return;
-      await pause(
-        Math.min(
-          duration(timings?.pollMs, 100),
-          Math.max(1, deadline - Date.now()),
-        ),
-        [signal, this.lifetime.signal],
-      );
-    }
-    throw new Error(`LSP ${this.config.name} workspace readiness timed out`);
-  }
-
-  private async rpc<T>(
-    method: string,
-    params: unknown,
-    signal: AbortSignal | undefined,
-    timeoutMs: number,
-    stopping = false,
-  ): Promise<T> {
-    check(signal);
-    if (!stopping) this.assertAlive();
-    const source = new CancellationTokenSource();
-    let settled = false;
-    let cleanupTimer: NodeJS.Timeout | undefined;
-    let work: Promise<T>;
-    try {
-      work = this.connection.sendRequest<T>(method, params, source.token);
-    } catch (error) {
-      source.dispose();
-      throw error;
-    }
-    const settle = () => {
-      settled = true;
-      if (cleanupTimer) {
-        clearTimeout(cleanupTimer);
-        this.cancellationTimers.delete(cleanupTimer);
-      }
-      source.dispose();
-    };
-    void work.then(settle, settle);
-    return bounded(
-      work,
-      [signal, ...(stopping ? [] : [this.lifetime.signal])],
-      timeoutMs,
-      `LSP ${this.config.name} ${method}`,
-      () => {
-        source.cancel();
-        // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
-        if (!settled && !this.lifetime.signal.aborted && !stopping) {
-          cleanupTimer = setTimeout(() => {
-            if (cleanupTimer) this.cancellationTimers.delete(cleanupTimer);
-            if (!settled)
-              this.fail(
-                new Error(
-                  `LSP ${this.config.name} ignored cancellation of ${method}`,
-                ),
-              );
-          }, 1_000);
-          this.cancellationTimers.add(cleanupTimer);
-        }
-      },
-    );
-  }
-
+  /**
+   * Sends a request while tracking activity and including workspace readiness in its deadline.
+   * @param method - Protocol request method; analyzerStatus avoids recursive readiness checks.
+   * @param params - Payload sent to the peer.
+   * @param signal - Optional cancellation for this caller's request.
+   * @param timeoutMs - Total wait in milliseconds, defaulting to 30,000.
+   * @returns The unvalidated response; callers still validate its protocol shape.
+   * @throws On cancellation, timeout, a stopped server, or peer request failure.
+   * @example
+   * With a.ts already synchronized and the peer returning { contents: "value: number" }:
+   * ```ts
+   * await server.request("textDocument/hover", {
+   *   textDocument: { uri: "file:///project/a.ts" },
+   *   position: { line: 0, character: 6 },
+   * });
+   * // { contents: "value: number" }; positions are sent unchanged, without one-based conversion.
+   * ```
+   */
   request<T = unknown>(
     method: string,
     params: unknown,
     signal?: AbortSignal,
     timeoutMs?: number,
   ): Promise<T> {
-    return this.active(async () => {
+    return active(this.state, this, async () => {
       const timeout = duration(timeoutMs, REQUEST_TIMEOUT_MS);
       const deadline = Date.now() + timeout;
       if (
-        this.initialized &&
-        this.progress.size > 0 &&
+        this.state.initialized &&
+        this.state.progress.size > 0 &&
         method !== "rust-analyzer/analyzerStatus"
       )
-        await this.waitForWorkspace(signal, timeout);
-      return this.rpc<T>(
+        await waitForWorkspace(this.state, this, signal, timeout);
+      return rpc<T>(
+        this.state,
+        this,
+        this.connection,
         method,
         params,
         signal,
@@ -768,64 +747,63 @@ class StdioLanguageServer implements LanguageServer {
     });
   }
 
+  /**
+   * Sends a notification under the write deadline, failing the server if transport writing fails.
+   * @param method - Protocol notification method.
+   * @param params - Notification payload sent to the peer.
+   * @returns Completion after the transport write settles.
+   * @throws On a stopped server, write failure, cancellation, or the 5,000 ms write deadline.
+   * @example
+   * ```ts
+   * await server.notify("workspace/didChangeConfiguration", {
+   *   settings: { typescript: { preferences: { quotePreference: "single" } } },
+   * });
+   * // Resolves after writing the settings notification, without waiting for a peer response.
+   * ```
+   */
   notify(method: string, params: unknown): Promise<void> {
-    return this.active(async () => {
+    return active(this.state, this, async () => {
       try {
         await bounded(
           this.connection.sendNotification(method, params),
-          [this.lifetime.signal],
+          [this.state.lifetime.signal],
           WRITE_TIMEOUT_MS,
           `LSP ${this.config.name} ${method}`,
         );
       } catch (error) {
-        this.fail(asError(error));
+        fail(this.state, this, asError(error));
         throw error;
       }
     });
   }
 
-  private syncOptions(): TextDocumentSyncOptions {
-    const sync = this.capabilities.textDocumentSync;
-    if (typeof sync === "number")
-      return { openClose: sync !== 0, change: sync };
-    return sync ?? {};
-  }
-
-  private queue<T>(
-    file: string,
-    signal: AbortSignal | undefined,
-    work: () => Promise<T>,
-  ): Promise<T> {
-    const key = fileKey(file);
-    const prior = this.queues.get(key) ?? Promise.resolve();
-    const result = prior.then(() => {
-      check(signal);
-      return this.active(work);
-    });
-    const barrier = result.then(
-      () => {},
-      () => {},
-    );
-    this.queues.set(key, barrier);
-    void barrier.then(() => {
-      if (this.queues.get(key) === barrier) this.queues.delete(key);
-    });
-    return bounded(result, [signal, this.lifetime.signal]);
-  }
-
+  /**
+   * Opens or updates a document in per-file order, preserving UTF-16 ranges and versioned diagnostics.
+   * @param file - Absolute path of the document to synchronize.
+   * @param content - Text to synchronize, or undefined to read the current file with cancellation.
+   * @param signal - Optional cancellation for this synchronization operation.
+   * @returns Completion after supported open/change notifications, or immediately for unchanged text.
+   * @throws On invalid paths, canceled/failed reads, unsupported changes, or transport errors.
+   * @example
+   * With openClose: true and a.ts not yet open:
+   * ```ts
+   * await server.syncFile("/project/a.ts", "const value = 1;\n"); // Sends didOpen.
+   * await server.syncFile("/project/a.ts", "const value = 1;\n"); // No notification or version bump.
+   * ```
+   */
   syncFile(
     file: string,
     content?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    return this.queue(file, signal, async () => {
+    return queue(this.state, this, file, signal, async () => {
       const key = fileKey(file);
       let text = content;
       if (text === undefined) {
         const readController = new AbortController();
         const readSignal = AbortSignal.any([
           readController.signal,
-          this.lifetime.signal,
+          this.state.lifetime.signal,
           ...(signal ? [signal] : []),
         ]);
         text = await bounded(
@@ -837,20 +815,20 @@ class StdioLanguageServer implements LanguageServer {
         );
       }
       check(signal);
-      const prior = this.documents.get(key);
+      const prior = this.state.documents.get(key);
       if (prior?.content === text) return;
-      const sync = this.syncOptions();
+      const sync = syncOptions(this.capabilities.textDocumentSync);
       if (prior && !sync.change && !sync.openClose)
         throw new Error(
           `LSP ${this.config.name} cannot synchronize changes to ${file}`,
         );
       const snapshot: DocumentSnapshot = {
-        version: ++this.version,
+        version: ++this.state.version,
         content: text,
       };
-      this.documents.set(key, snapshot);
-      this.publications.delete(key);
-      this.diagnosticErrors.delete(key);
+      this.state.documents.set(key, snapshot);
+      this.state.publications.delete(key);
+      this.state.diagnosticErrors.delete(key);
       const uri = pathToFileURL(file).href;
       if (!prior || !sync.change) {
         if (prior && sync.openClose)
@@ -900,10 +878,20 @@ class StdioLanguageServer implements LanguageServer {
     });
   }
 
+  /**
+   * Queues supported save and watched-file notifications after earlier operations on the file.
+   * @param file - Absolute path whose current snapshot supplies optional saved text.
+   * @returns Completion after applicable notifications are written.
+   * @throws On invalid paths, stopped lifetime, or notification failure.
+   * @example
+   * With a.ts synchronized to "let x = 1;" and textDocumentSync.save.includeText true,
+   * await server.saved("/project/a.ts") sends didSave with text: "let x = 1;".
+   * After closeFile("/project/a.ts"), saved("/project/a.ts") sends no didSave.
+   */
   saved(file: string): Promise<void> {
-    return this.queue(file, undefined, async () => {
-      const snapshot = this.documents.get(fileKey(file));
-      const save = this.syncOptions().save;
+    return queue(this.state, this, file, undefined, async () => {
+      const snapshot = this.state.documents.get(fileKey(file));
+      const save = syncOptions(this.capabilities.textDocumentSync).save;
       const uri = pathToFileURL(file).href;
       if (snapshot && save)
         await this.notify("textDocument/didSave", {
@@ -913,7 +901,7 @@ class StdioLanguageServer implements LanguageServer {
             : {}),
         });
       if (
-        [...this.registrations.values()].some(
+        [...this.state.registrations.values()].some(
           (registration) =>
             registration.method === "workspace/didChangeWatchedFiles",
         )
@@ -924,70 +912,51 @@ class StdioLanguageServer implements LanguageServer {
     });
   }
 
+  /**
+   * Removes a file's document and diagnostic state in order, notifying supported open/close peers.
+   * @param file - Absolute path of the document to close.
+   * @returns Completion after any required didClose notification.
+   * @throws On invalid paths, stopped lifetime, or notification failure.
+   * @example
+   * await server.closeFile("/project/a.ts"); // A later document(a.ts) lookup returns undefined.
+   */
   closeFile(file: string): Promise<void> {
-    return this.queue(file, undefined, async () => {
+    return queue(this.state, this, file, undefined, async () => {
       const key = fileKey(file);
-      const existed = this.documents.delete(key);
-      this.publications.delete(key);
-      this.diagnosticErrors.delete(key);
-      if (existed && this.syncOptions().openClose)
+      const existed = this.state.documents.delete(key);
+      this.state.publications.delete(key);
+      this.state.diagnosticErrors.delete(key);
+      if (existed && syncOptions(this.capabilities.textDocumentSync).openClose)
         await this.notify("textDocument/didClose", {
           textDocument: { uri: pathToFileURL(file).href },
         });
     });
   }
 
+  /**
+   * Returns a detached snapshot for checking edits against the last synchronized text and version.
+   * @param file - Absolute path used to look up the normalized document key.
+   * @returns A copied snapshot, or undefined when the document is not open.
+   * @throws If the file path is not absolute.
+   * @example
+   * server.document("/project/a.ts"); // Returns undefined before a.ts is synchronized.
+   */
   document(file: string): DocumentSnapshot | undefined {
-    const snapshot = this.documents.get(fileKey(file));
+    const snapshot = this.state.documents.get(fileKey(file));
     return snapshot ? { ...snapshot } : undefined;
   }
 
-  private publish(params: unknown): void {
-    if (!record(params)) {
-      this.fail(
-        new Error(
-          "Language server published diagnostics without a document URI",
-        ),
-      );
-      return;
-    }
-    const { uri, version, diagnostics } = params;
-    if (typeof uri !== "string") {
-      this.fail(
-        new Error(
-          "Language server published diagnostics without a document URI",
-        ),
-      );
-      return;
-    }
-    let key: string;
-    try {
-      key = fileKey(fileURLToPath(uri));
-    } catch {
-      return;
-    }
-    const document = this.documents.get(key);
-    if (!document) return;
-    if (
-      version !== undefined &&
-      version !== null &&
-      (!Number.isInteger(version) || version !== document.version)
-    )
-      return;
-    try {
-      this.publications.set(key, {
-        version: document.version,
-        items: diagnosticItems(diagnostics),
-        received: Date.now(),
-        versioned: version === document.version,
-      });
-      this.diagnosticErrors.delete(key);
-    } catch (error) {
-      this.publications.delete(key);
-      this.diagnosticErrors.set(key, asError(error));
-    }
-  }
-
+  /**
+   * Synchronizes a file and waits for a current pull or published diagnostic report with provenance.
+   * @param file - Absolute path whose synchronized version must remain current throughout the wait.
+   * @param signal - Optional caller cancellation, combined with lifetime and diagnostic timeout.
+   * @param timeoutMs - Total diagnostic deadline in milliseconds, defaulting to 10,000.
+   * @returns Diagnostic items labeled pull, versioned, or unversioned; silence is never a clean report.
+   * @throws On cancellation, timeout, invalid reports, changed/closed documents, or transport failure.
+   * @example
+   * await server.diagnostics("/project/a.ts", undefined, 1000);
+   * // Rejects after 1,000 ms if no usable report arrives instead of reporting a clean file.
+   */
   diagnostics(
     file: string,
     signal?: AbortSignal,
@@ -996,7 +965,7 @@ class StdioLanguageServer implements LanguageServer {
     const controller = new AbortController();
     const operationSignal = AbortSignal.any([
       controller.signal,
-      this.lifetime.signal,
+      this.state.lifetime.signal,
       ...(signal ? [signal] : []),
     ]);
     const timeout = duration(timeoutMs, DIAGNOSTIC_TIMEOUT_MS);
@@ -1004,12 +973,12 @@ class StdioLanguageServer implements LanguageServer {
       `LSP ${this.config.name} diagnostics timed out for ${file}; clean state is unverified`,
     );
     const timer = setTimeout(() => controller.abort(timeoutError), timeout);
-    return this.active<DiagnosticReport>(async () => {
+    return active<DiagnosticReport>(this.state, this, async () => {
       check(operationSignal);
       const deadline = Date.now() + timeout;
       await this.syncFile(file, undefined, operationSignal);
       const key = fileKey(file);
-      const snapshot = this.documents.get(key);
+      const snapshot = this.state.documents.get(key);
       if (!snapshot)
         throw new Error(
           `LSP document closed while requesting diagnostics: ${file}`,
@@ -1026,7 +995,7 @@ class StdioLanguageServer implements LanguageServer {
           operationSignal,
           Math.max(1, deadline - Date.now()),
         );
-        if (this.documents.get(key) !== snapshot)
+        if (this.state.documents.get(key) !== snapshot)
           throw new Error(`LSP diagnostics superseded by changes to ${file}`);
         if (!record(report))
           throw new Error(
@@ -1041,17 +1010,17 @@ class StdioLanguageServer implements LanguageServer {
       }
       while (Date.now() < deadline) {
         check(operationSignal);
-        this.assertAlive();
-        if (this.documents.get(key) !== snapshot)
+        assertAlive(this, this.state.failure);
+        if (this.state.documents.get(key) !== snapshot)
           throw new Error(`LSP diagnostics superseded by changes to ${file}`);
-        const error = this.diagnosticErrors.get(key);
+        const error = this.state.diagnosticErrors.get(key);
         if (error) throw error;
-        const published = this.publications.get(key);
+        const published = this.state.publications.get(key);
         if (
           published?.version === snapshot.version &&
           (published.versioned ||
             Date.now() - published.received >= DIAGNOSTIC_SETTLE_MS) &&
-          this.progress.size === 0
+          this.state.progress.size === 0
         ) {
           return {
             items: published.items,
@@ -1068,210 +1037,21 @@ class StdioLanguageServer implements LanguageServer {
     }).finally(() => clearTimeout(timer));
   }
 
-  private updateCapabilities(): void {
-    const capabilities = { ...this.baseCapabilities };
-    const names: Record<string, keyof ServerCapabilities> = {
-      "textDocument/hover": "hoverProvider",
-      "textDocument/definition": "definitionProvider",
-      "textDocument/typeDefinition": "typeDefinitionProvider",
-      "textDocument/implementation": "implementationProvider",
-      "textDocument/references": "referencesProvider",
-      "textDocument/documentSymbol": "documentSymbolProvider",
-      "textDocument/rename": "renameProvider",
-      "textDocument/codeAction": "codeActionProvider",
-      "textDocument/formatting": "documentFormattingProvider",
-      "textDocument/rangeFormatting": "documentRangeFormattingProvider",
-      "workspace/symbol": "workspaceSymbolProvider",
-      "workspace/executeCommand": "executeCommandProvider",
-    };
-    for (const registration of this.registrations.values()) {
-      if (registration.method === "textDocument/diagnostic") {
-        capabilities.diagnosticProvider = {
-          interFileDependencies: false,
-          workspaceDiagnostics: false,
-          ...registration.options,
-        };
-      } else if (
-        registration.method.startsWith("workspace/") &&
-        /\/(will|did)(Create|Rename|Delete)Files$/.test(registration.method)
-      ) {
-        const operation = registration.method.slice("workspace/".length);
-        capabilities.workspace = {
-          ...capabilities.workspace,
-          fileOperations: {
-            ...capabilities.workspace?.fileOperations,
-            [operation]: registration.options,
-          },
-        };
-      } else {
-        const name = names[registration.method];
-        if (name) Object.assign(capabilities, { [name]: registration.options });
-      }
-    }
-    this.effectiveCapabilities = capabilities;
-  }
-
-  private async serverRequest(
-    method: string,
-    params: unknown,
-  ): Promise<unknown> {
-    this.assertAlive();
-    switch (method) {
-      case "workspace/configuration": {
-        if (!record(params))
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Expected configuration items",
-          );
-        const { items } = params;
-        if (!Array.isArray(items))
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Expected configuration items",
-          );
-        return items.map((item: unknown) => {
-          if (!record(item))
-            throw new ResponseError(
-              ErrorCodes.InvalidParams,
-              "Invalid configuration item",
-            );
-          const { section } = item;
-          if (section !== undefined && typeof section !== "string")
-            throw new ResponseError(
-              ErrorCodes.InvalidParams,
-              "Invalid configuration item",
-            );
-          let value: unknown = this.config.settings ?? {};
-          if (typeof section === "string" && section) {
-            if (record(value) && Object.hasOwn(value, section))
-              return value[section];
-            for (const part of section.split("."))
-              value =
-                record(value) && Object.hasOwn(value, part)
-                  ? value[part]
-                  : undefined;
-          }
-          return value ?? null;
-        });
-      }
-      case "workspace/workspaceFolders": {
-        const root = this.config.root || this.options.cwd;
-        return [
-          {
-            uri: pathToFileURL(root).href,
-            name: basename(root) || "workspace",
-          },
-        ];
-      }
-      case "workspace/applyEdit": {
-        if (!record(params))
-          return { applied: false, failureReason: "Invalid workspace edit" };
-        const { edit } = params;
-        if (!record(edit))
-          return { applied: false, failureReason: "Invalid workspace edit" };
-        try {
-          return await this.options.onApplyEdit(edit as WorkspaceEdit, this);
-        } catch (error) {
-          return { applied: false, failureReason: asError(error).message };
-        }
-      }
-      case "client/registerCapability": {
-        if (!record(params))
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Expected registrations",
-          );
-        const { registrations } = params;
-        if (!Array.isArray(registrations))
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Expected registrations",
-          );
-        const additions: Registration[] = registrations.map(
-          (value: unknown) => {
-            if (!record(value))
-              throw new ResponseError(
-                ErrorCodes.InvalidParams,
-                "Invalid capability registration",
-              );
-            const { id, method, registerOptions } = value;
-            if (
-              typeof id !== "string" ||
-              typeof method !== "string" ||
-              (registerOptions !== undefined && !record(registerOptions))
-            )
-              throw new ResponseError(
-                ErrorCodes.InvalidParams,
-                "Invalid capability registration",
-              );
-            return {
-              id,
-              method,
-              options: registerOptions ?? {},
-            };
-          },
-        );
-        for (const entry of additions) this.registrations.set(entry.id, entry);
-        this.updateCapabilities();
-        return null;
-      }
-      case "client/unregisterCapability": {
-        if (!record(params))
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Expected unregistrations",
-          );
-        const { unregisterations, unregistrations } = params;
-        const entries = unregisterations ?? unregistrations;
-        if (
-          !Array.isArray(entries) ||
-          !entries.every((entry: unknown) => {
-            if (!record(entry)) return false;
-            const { id } = entry;
-            return typeof id === "string";
-          })
-        )
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Invalid capability unregistration",
-          );
-        for (const entry of entries as Array<{ id: string }>)
-          this.registrations.delete(entry.id);
-        this.updateCapabilities();
-        return null;
-      }
-      case "window/workDoneProgress/create":
-        return null;
-      case "window/showMessageRequest":
-        return null;
-      case "window/showDocument":
-        return { success: false };
-      case "workspace/diagnostic/refresh":
-        this.publications.clear();
-        this.diagnosticErrors.clear();
-        return null;
-      case "workspace/semanticTokens/refresh":
-      case "workspace/inlayHint/refresh":
-      case "workspace/codeLens/refresh":
-      case "workspace/codeAction/refresh":
-      case "workspace/inlineValue/refresh":
-      case "workspace/foldingRange/refresh":
-        return null;
-      default:
-        throw new ResponseError(
-          ErrorCodes.MethodNotFound,
-          `Unsupported client request: ${method}`,
-        );
-    }
-  }
-
+  /**
+   * Cancels work, attempts graceful shutdown, then releases transports, listeners, timers, and process ownership.
+   * @returns The shared shutdown promise; later calls reuse the first shutdown attempt.
+   * @throws If forced process cleanup fails; listener and document cleanup still runs.
+   * @example
+   * await server.shutdown(); await server.shutdown(); // Stops the owned process only once.
+   */
   shutdown(): Promise<void> {
-    if (this.shutdownPromise) return this.shutdownPromise;
-    const graceful = !this.lifetime.signal.aborted && this.initialized;
-    this.lifetime.abort(
-      this.failure ?? new Error(`LSP ${this.config.name} stopped`),
+    if (this.state.shutdownPromise) return this.state.shutdownPromise;
+    const graceful =
+      !this.state.lifetime.signal.aborted && this.state.initialized;
+    this.state.lifetime.abort(
+      this.state.failure ?? new Error(`LSP ${this.config.name} stopped`),
     );
-    this.shutdownPromise = (async () => {
+    this.state.shutdownPromise = (async () => {
       try {
         if (
           graceful &&
@@ -1284,7 +1064,16 @@ class StdioLanguageServer implements LanguageServer {
             this.child.once("exit", resolvePromise);
           });
           try {
-            await this.rpc("shutdown", null, undefined, 1_000, true);
+            await rpc(
+              this.state,
+              this,
+              this.connection,
+              "shutdown",
+              null,
+              undefined,
+              1_000,
+              true,
+            );
             await bounded(
               this.connection.sendNotification("exit"),
               [],
@@ -1299,8 +1088,8 @@ class StdioLanguageServer implements LanguageServer {
           }
         }
       } finally {
-        for (const timer of this.cancellationTimers) clearTimeout(timer);
-        this.cancellationTimers.clear();
+        for (const timer of this.state.cancellationTimers) clearTimeout(timer);
+        this.state.cancellationTimers.clear();
         this.connection.dispose();
         this.child.stdout.unpipe(this.input);
         this.input.destroy();
@@ -1316,16 +1105,565 @@ class StdioLanguageServer implements LanguageServer {
           this.child.stderr.off("error", this.onProcessError);
           this.child.off("error", this.onProcessError);
           this.child.off("exit", this.onExit);
-          this.documents.clear();
-          this.publications.clear();
-          this.diagnosticErrors.clear();
-          this.registrations.clear();
-          this.progress.clear();
-          this.queues.clear();
+          this.state.documents.clear();
+          this.state.publications.clear();
+          this.state.diagnosticErrors.clear();
+          this.state.registrations.clear();
+          this.state.progress.clear();
+          this.state.queues.clear();
         }
       }
     })();
-    return this.shutdownPromise;
+    return this.state.shutdownPromise;
+  }
+}
+
+/**
+ * Formats the retained stderr tail for a server failure message.
+ * @param stderr - Raw recent process output; surrounding whitespace is omitted.
+ * @returns A colon-prefixed detail, or an empty string for whitespace-only output.
+ * @example
+ * stderrSuffix(" denied\n"); // Returns ": denied".
+ */
+function stderrSuffix(stderr: string): string {
+  return stderr.trim() ? `: ${stderr.trim()}` : "";
+}
+
+/**
+ * Records the first transport failure, cancels outstanding work, and starts owned cleanup.
+ * @param state - Lifetime and failure state; repeated failures after abort are ignored.
+ * @param server - Owner whose idempotent shutdown releases transport and process resources.
+ * @param error - Initial failure, retained alongside any later cleanup failure.
+ * @example
+ * fail(state, server, new Error("broken pipe")); // Aborts pending work and starts shutdown.
+ */
+function fail(state: ServerState, server: LanguageServer, error: Error): void {
+  if (state.lifetime.signal.aborted) return;
+  state.failure = error;
+  state.lifetime.abort(error);
+  void server.shutdown().catch((cleanupError: unknown) => {
+    state.failure = new AggregateError(
+      [error, cleanupError],
+      `LSP ${server.config.name} cleanup failed`,
+    );
+  });
+}
+
+/**
+ * Rejects work against a terminated or canceled server using its recorded failure.
+ * @param server - Server whose lifetime and process status determine liveness.
+ * @param failure - Original failure to rethrow, if available.
+ * @throws The recorded failure, or a stopped-server error when the server is not alive.
+ * @example
+ * assertAlive(stoppedServer, new Error("broken pipe")); // Throws "broken pipe".
+ */
+function assertAlive(server: LanguageServer, failure: Error | undefined): void {
+  if (!server.isAlive)
+    throw failure ?? new Error(`LSP ${server.config.name} is stopped`);
+}
+
+/**
+ * Keeps the server non-idle while work runs and updates activity on both entry and completion.
+ * @param state - Shared active-operation count and failure state.
+ * @param server - Liveness and activity owner.
+ * @param work - Operation invoked only after the liveness check succeeds.
+ * @returns The operation's result without changing its rejection.
+ * @throws If the server is stopped or the operation rejects.
+ * @example
+ * On a live server with no other work, active(state, server, async () => {
+ * throw new Error("denied"); }) rejects with "denied" but still releases its busy
+ * count, so subsequent idleFor(now) calls can measure idle time again.
+ */
+async function active<T>(
+  state: ServerState,
+  server: StdioLanguageServer,
+  work: () => Promise<T>,
+): Promise<T> {
+  assertAlive(server, state.failure);
+  state.busy++;
+  server.touch();
+  try {
+    return await work();
+  } finally {
+    state.busy--;
+    server.touch();
+  }
+}
+
+/**
+ * Waits for quiet progress, also requiring a loaded workspace for rust-analyzer.
+ * @param state - Shared progress tokens and lifetime cancellation.
+ * @param server - Configuration and request owner used for readiness polling.
+ * @param signal - Optional caller cancellation, independent of server lifetime.
+ * @param timeoutMs - Maximum caller wait in milliseconds, capped by configured readiness timing.
+ * @returns Completion once the configured quiet/settle interval has passed.
+ * @throws On cancellation, timeout, or an invalid rust-analyzer status response.
+ * @example
+ * With a non-rust server whose progress token remains active throughout the wait,
+ * await waitForWorkspace(state, server, undefined, 500) rejects with a workspace
+ * readiness timeout instead of proceeding while indexing is still active.
+ */
+async function waitForWorkspace(
+  state: ServerState,
+  server: LanguageServer,
+  signal?: AbortSignal,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const rust = [server.config.command, server.config.resolvedCommand].some(
+    (command) =>
+      command !== undefined &&
+      /^rust-analyzer(?:\.exe)?$/.test(basename(command)),
+  );
+  const timings = server.config.workspaceReadyTimings;
+  const start = Date.now();
+  let quietSince = start;
+  const deadline =
+    start + Math.min(duration(timings?.timeoutMs, 10_000), timeoutMs);
+  while (Date.now() < deadline) {
+    check(signal);
+    if (rust) {
+      const status = await server.request<unknown>(
+        "rust-analyzer/analyzerStatus",
+        {},
+        signal,
+        Math.min(
+          duration(timings?.statusRequestTimeoutMs, 1_000),
+          Math.max(1, deadline - Date.now()),
+        ),
+      );
+      if (typeof status !== "string")
+        throw new Error("rust-analyzer returned an invalid workspace status");
+      if (
+        !status.startsWith("No workspaces") &&
+        state.progress.size === 0 &&
+        Date.now() - start >= duration(timings?.settleMs, 2_000)
+      )
+        return;
+    } else if (state.progress.size > 0) {
+      quietSince = Date.now();
+    } else if (Date.now() - quietSince >= duration(timings?.settleMs, 100))
+      return;
+    await pause(
+      Math.min(
+        duration(timings?.pollMs, 100),
+        Math.max(1, deadline - Date.now()),
+      ),
+      [signal, state.lifetime.signal],
+    );
+  }
+  throw new Error(`LSP ${server.config.name} workspace readiness timed out`);
+}
+
+/**
+ * Sends one bounded RPC, canceling its token on timeout and stopping peers that ignore cancellation.
+ * @param state - Shared lifetime, failure, and owned cancellation-cleanup timers.
+ * @param server - Owner used for liveness, error context, and failure cleanup.
+ * @param connection - JSON-RPC connection whose response and token lifetime are retained until settlement.
+ * @param method - Protocol request method.
+ * @param params - Request payload; the caller validates any returned peer data.
+ * @param signal - Optional cancellation for this request only.
+ * @param timeoutMs - Request deadline in milliseconds.
+ * @param stopping - Allows shutdown RPC after lifetime abort, without forced cancellation cleanup.
+ * @returns The unvalidated peer result.
+ * @throws On stopped transport, cancellation, timeout, or peer request failure.
+ * @example
+ * await rpc(state, server, connection, "shutdown", null, undefined, 1000, true);
+ * // Allows the graceful shutdown request despite an already-aborted server lifetime.
+ */
+async function rpc<T>(
+  state: ServerState,
+  server: LanguageServer,
+  connection: MessageConnection,
+  method: string,
+  params: unknown,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  stopping = false,
+): Promise<T> {
+  check(signal);
+  if (!stopping) assertAlive(server, state.failure);
+  const source = new CancellationTokenSource();
+  let settled = false;
+  let cleanupTimer: NodeJS.Timeout | undefined;
+  let work: Promise<T>;
+  try {
+    work = connection.sendRequest<T>(method, params, source.token);
+  } catch (error) {
+    source.dispose();
+    throw error;
+  }
+  const settle = () => {
+    settled = true;
+    if (cleanupTimer) {
+      clearTimeout(cleanupTimer);
+      state.cancellationTimers.delete(cleanupTimer);
+    }
+    source.dispose();
+  };
+  void work.then(settle, settle);
+  return bounded(
+    work,
+    [signal, ...(stopping ? [] : [state.lifetime.signal])],
+    timeoutMs,
+    `LSP ${server.config.name} ${method}`,
+    () => {
+      source.cancel();
+      // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
+      if (!settled && !state.lifetime.signal.aborted && !stopping) {
+        cleanupTimer = setTimeout(() => {
+          if (cleanupTimer) state.cancellationTimers.delete(cleanupTimer);
+          if (!settled)
+            fail(
+              state,
+              server,
+              new Error(
+                `LSP ${server.config.name} ignored cancellation of ${method}`,
+              ),
+            );
+        }, 1_000);
+        state.cancellationTimers.add(cleanupTimer);
+      }
+    },
+  );
+}
+
+/**
+ * Normalizes numeric synchronization capabilities without copying an existing options object.
+ * @param sync - Server-advertised synchronization kind or options; undefined means unsupported.
+ * @returns Options with numeric kinds expanded into change and open/close support.
+ * @example
+ * syncOptions(2); // Returns { openClose: true, change: 2 }.
+ */
+function syncOptions(
+  sync: ServerCapabilities["textDocumentSync"],
+): TextDocumentSyncOptions {
+  if (typeof sync === "number") return { openClose: sync !== 0, change: sync };
+  return sync ?? {};
+}
+
+/**
+ * Serializes operations for one normalized file while keeping later work usable after rejection.
+ * @param state - Per-file barriers and server lifetime cancellation.
+ * @param server - Owner kept active while the queued operation runs.
+ * @param file - Absolute path whose normalized key identifies the queue.
+ * @param signal - Caller cancellation; canceling the wait does not remove its shared barrier.
+ * @param work - Operation started after the previous operation settles and cancellation is checked.
+ * @returns A bounded wait for this operation; the barrier is removed only if still current.
+ * @throws For invalid paths, cancellation, a stopped server, or an operation failure.
+ * @example
+ * If an earlier syncFile("/project/a.ts") fails to read the file, but the server
+ * remains alive, queue(state, server, "/project/a.ts", undefined, async () => "next")
+ * still resolves to "next" after that failure; the file's queue is not poisoned.
+ */
+function queue<T>(
+  state: ServerState,
+  server: StdioLanguageServer,
+  file: string,
+  signal: AbortSignal | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  const key = fileKey(file);
+  const prior = state.queues.get(key) ?? Promise.resolve();
+  const result = prior.then(() => {
+    check(signal);
+    return active(state, server, work);
+  });
+  const barrier = result.then(
+    () => {},
+    () => {},
+  );
+  state.queues.set(key, barrier);
+  void barrier.then(() => {
+    if (state.queues.get(key) === barrier) state.queues.delete(key);
+  });
+  return bounded(result, [signal, state.lifetime.signal]);
+}
+
+/**
+ * Validates and caches diagnostics only for the currently open document version.
+ * @param state - Document snapshots, publication provenance, and per-document validation errors.
+ * @param server - Owner stopped when a publication has no usable document URI field.
+ * @param params - Untrusted publishDiagnostics payload; invalid file URIs and stale versions are ignored.
+ * @example
+ * publish(state, server, { uri: "file:///project/a.ts", version: 2, diagnostics: [] });
+ * // Records a versioned empty report only when the open document is version 2.
+ */
+function publish(
+  state: ServerState,
+  server: LanguageServer,
+  params: unknown,
+): void {
+  if (!record(params)) {
+    fail(
+      state,
+      server,
+      new Error("Language server published diagnostics without a document URI"),
+    );
+    return;
+  }
+  const { uri, version, diagnostics } = params;
+  if (typeof uri !== "string") {
+    fail(
+      state,
+      server,
+      new Error("Language server published diagnostics without a document URI"),
+    );
+    return;
+  }
+  let key: string;
+  try {
+    key = fileKey(fileURLToPath(uri));
+  } catch {
+    return;
+  }
+  const document = state.documents.get(key);
+  if (!document) return;
+  if (
+    version !== undefined &&
+    version !== null &&
+    (!Number.isInteger(version) || version !== document.version)
+  )
+    return;
+  try {
+    state.publications.set(key, {
+      version: document.version,
+      items: diagnosticItems(diagnostics),
+      received: Date.now(),
+      versioned: version === document.version,
+    });
+    state.diagnosticErrors.delete(key);
+  } catch (error) {
+    state.publications.delete(key);
+    state.diagnosticErrors.set(key, asError(error));
+  }
+}
+
+/**
+ * Overlays dynamic registrations on initialization capabilities without mutating the base snapshot.
+ * @param baseCapabilities - Capabilities returned during initialization.
+ * @param registrations - Current registrations in insertion order; later matching registrations win.
+ * @returns A new effective capability object, including diagnostic and file-operation registrations.
+ * @example
+ * registeredCapabilities({}, [{ id: "hover", method: "textDocument/hover", options: {} }]);
+ * // Returns { hoverProvider: {} }.
+ */
+function registeredCapabilities(
+  baseCapabilities: ServerCapabilities,
+  registrations: Iterable<Registration>,
+): ServerCapabilities {
+  const capabilities = { ...baseCapabilities };
+  const names: Record<string, keyof ServerCapabilities> = {
+    "textDocument/hover": "hoverProvider",
+    "textDocument/definition": "definitionProvider",
+    "textDocument/typeDefinition": "typeDefinitionProvider",
+    "textDocument/implementation": "implementationProvider",
+    "textDocument/references": "referencesProvider",
+    "textDocument/documentSymbol": "documentSymbolProvider",
+    "textDocument/rename": "renameProvider",
+    "textDocument/codeAction": "codeActionProvider",
+    "textDocument/formatting": "documentFormattingProvider",
+    "textDocument/rangeFormatting": "documentRangeFormattingProvider",
+    "workspace/symbol": "workspaceSymbolProvider",
+    "workspace/executeCommand": "executeCommandProvider",
+  };
+  for (const registration of registrations) {
+    if (registration.method === "textDocument/diagnostic") {
+      capabilities.diagnosticProvider = {
+        interFileDependencies: false,
+        workspaceDiagnostics: false,
+        ...registration.options,
+      };
+    } else if (
+      registration.method.startsWith("workspace/") &&
+      /\/(will|did)(Create|Rename|Delete)Files$/.test(registration.method)
+    ) {
+      const operation = registration.method.slice("workspace/".length);
+      capabilities.workspace = {
+        ...capabilities.workspace,
+        fileOperations: {
+          ...capabilities.workspace?.fileOperations,
+          [operation]: registration.options,
+        },
+      };
+    } else {
+      const name = names[registration.method];
+      if (name) Object.assign(capabilities, { [name]: registration.options });
+    }
+  }
+  return capabilities;
+}
+
+/**
+ * Validates and handles server-to-client requests using this client's configuration and registrations.
+ * @param state - Mutable registrations and diagnostic caches owned by the server.
+ * @param server - Live production client passed unchanged to workspace-edit handling.
+ * @param options - Workspace root and workspace-edit callback owned by the pool.
+ * @param method - Incoming protocol request method.
+ * @param params - Untrusted peer parameters validated for the selected method.
+ * @returns The protocol response, including explicit unsupported edit/document outcomes.
+ * @throws For stopped servers, invalid parameters, or unsupported request methods.
+ * @example
+ * await serverRequest(state, server, options, "window/showDocument", {});
+ * // Returns { success: false } without opening a document.
+ */
+async function serverRequest(
+  state: ServerState,
+  server: LanguageServer,
+  options: PoolOptions,
+  method: string,
+  params: unknown,
+): Promise<unknown> {
+  assertAlive(server, state.failure);
+  switch (method) {
+    case "workspace/configuration": {
+      if (!record(params))
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Expected configuration items",
+        );
+      const { items } = params;
+      if (!Array.isArray(items))
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Expected configuration items",
+        );
+      return items.map((item: unknown) => {
+        if (!record(item))
+          throw new ResponseError(
+            ErrorCodes.InvalidParams,
+            "Invalid configuration item",
+          );
+        const { section } = item;
+        if (section !== undefined && typeof section !== "string")
+          throw new ResponseError(
+            ErrorCodes.InvalidParams,
+            "Invalid configuration item",
+          );
+        let value: unknown = server.config.settings ?? {};
+        if (typeof section === "string" && section) {
+          if (record(value) && Object.hasOwn(value, section))
+            return value[section];
+          for (const part of section.split("."))
+            value =
+              record(value) && Object.hasOwn(value, part)
+                ? value[part]
+                : undefined;
+        }
+        return value ?? null;
+      });
+    }
+    case "workspace/workspaceFolders": {
+      const root = server.config.root || options.cwd;
+      return [
+        {
+          uri: pathToFileURL(root).href,
+          name: basename(root) || "workspace",
+        },
+      ];
+    }
+    case "workspace/applyEdit": {
+      if (!record(params))
+        return { applied: false, failureReason: "Invalid workspace edit" };
+      const { edit } = params;
+      if (!record(edit))
+        return { applied: false, failureReason: "Invalid workspace edit" };
+      try {
+        return await options.onApplyEdit(edit as WorkspaceEdit, server);
+      } catch (error) {
+        return { applied: false, failureReason: asError(error).message };
+      }
+    }
+    case "client/registerCapability": {
+      if (!record(params))
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Expected registrations",
+        );
+      const { registrations } = params;
+      if (!Array.isArray(registrations))
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Expected registrations",
+        );
+      const additions: Registration[] = registrations.map((value: unknown) => {
+        if (!record(value))
+          throw new ResponseError(
+            ErrorCodes.InvalidParams,
+            "Invalid capability registration",
+          );
+        const { id, method, registerOptions } = value;
+        if (
+          typeof id !== "string" ||
+          typeof method !== "string" ||
+          (registerOptions !== undefined && !record(registerOptions))
+        )
+          throw new ResponseError(
+            ErrorCodes.InvalidParams,
+            "Invalid capability registration",
+          );
+        return {
+          id,
+          method,
+          options: registerOptions ?? {},
+        };
+      });
+      for (const entry of additions) state.registrations.set(entry.id, entry);
+      state.effectiveCapabilities = registeredCapabilities(
+        state.baseCapabilities,
+        state.registrations.values(),
+      );
+      return null;
+    }
+    case "client/unregisterCapability": {
+      if (!record(params))
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Expected unregistrations",
+        );
+      const { unregisterations, unregistrations } = params;
+      const entries = unregisterations ?? unregistrations;
+      if (
+        !Array.isArray(entries) ||
+        !entries.every((entry: unknown) => {
+          if (!record(entry)) return false;
+          const { id } = entry;
+          return typeof id === "string";
+        })
+      )
+        throw new ResponseError(
+          ErrorCodes.InvalidParams,
+          "Invalid capability unregistration",
+        );
+      for (const entry of entries as Array<{ id: string }>)
+        state.registrations.delete(entry.id);
+      state.effectiveCapabilities = registeredCapabilities(
+        state.baseCapabilities,
+        state.registrations.values(),
+      );
+      return null;
+    }
+    case "window/workDoneProgress/create":
+      return null;
+    case "window/showMessageRequest":
+      return null;
+    case "window/showDocument":
+      return { success: false };
+    case "workspace/diagnostic/refresh":
+      state.publications.clear();
+      state.diagnosticErrors.clear();
+      return null;
+    case "workspace/semanticTokens/refresh":
+    case "workspace/inlayHint/refresh":
+    case "workspace/codeLens/refresh":
+    case "workspace/codeAction/refresh":
+    case "workspace/inlineValue/refresh":
+    case "workspace/foldingRange/refresh":
+      return null;
+    default:
+      throw new ResponseError(
+        ErrorCodes.MethodNotFound,
+        `Unsupported client request: ${method}`,
+      );
   }
 }
 
@@ -1345,6 +1683,14 @@ export class LanguageServerPool {
   private disposePromise: Promise<void> | undefined;
   private disposed = false;
 
+  /**
+   * Owns shared server entries and an optional unreferenced idle-expiry timer.
+   * @param options - Workspace, edit callback, and optional idle timeout in milliseconds.
+   * @example
+   * Constructing a pool with idleTimeoutMs: 60_000 starts no server. After pool.get(config),
+   * an initialized client idle for at least 60 seconds is stopped on an idle sweep;
+   * an active request prevents expiry. await pool.dispose() also clears the sweep timer.
+   */
   constructor(options: PoolOptions) {
     this.options = options;
     if (options.idleTimeoutMs !== undefined && options.idleTimeoutMs > 0) {
@@ -1357,7 +1703,7 @@ export class LanguageServerPool {
               !entry.stopping &&
               entry.server.idleFor(Date.now()) >= timeout
             )
-              void this.stopEntry(key, entry).catch(() => {});
+              void stopEntry(this.entries, key, entry).catch(() => {});
           }
         },
         Math.min(timeout, 1_000),
@@ -1367,8 +1713,18 @@ export class LanguageServerPool {
   }
 
   /**
-   * Reuses startup by effective configuration.
-   * Canceling one caller's wait leaves shared startup alive; stop/dispose owns cancellation.
+   * Reuses startup by effective configuration without transferring its cancellation to one caller.
+   * @param config - Effective server configuration used as the shared-entry identity.
+   * @param signal - Cancels only this caller's wait; stop and dispose own shared startup cancellation.
+   * @returns An initialized live client after any previous stopping entry has completed cleanup.
+   * @throws On canceled acquisition, disabled/disposed configuration, or startup/cleanup failure.
+   * @example
+   * For an installed server configuration and a pool that has not been disposed:
+   * ```ts
+   * const first = await pool.get(config);
+   * const second = await pool.get(config);
+   * // first === second while that client remains alive and has not begun stopping.
+   * ```
    */
   async get(
     config: ServerConfig,
@@ -1388,7 +1744,7 @@ export class LanguageServerPool {
     ]);
     let entry = this.entries.get(key);
     if (entry && (entry.stopping || !entry.server.isAlive)) {
-      await bounded(this.stopEntry(key, entry), [signal]);
+      await bounded(stopEntry(this.entries, key, entry), [signal]);
       return this.get(config, signal);
     }
     if (!entry) {
@@ -1444,24 +1800,14 @@ export class LanguageServerPool {
       .map((entry) => entry.server);
   }
 
-  private stopEntry(key: string, entry: PoolEntry): Promise<void> {
-    if (entry.stopping) return entry.stopping;
-    entry.controller.abort(
-      new Error(`LSP ${entry.server.config.name} startup was stopped`),
-    );
-    entry.stopping = (async () => {
-      const results = await Promise.allSettled([
-        entry.server.shutdown(),
-        entry.ready,
-      ]);
-      const shutdown = results[0];
-      if (shutdown?.status === "rejected") throw shutdown.reason;
-      if (this.entries.get(key) === entry) this.entries.delete(key);
-    })();
-    return entry.stopping;
-  }
-
-  /** Stops selected server names, or all servers, and reports aggregated shutdown failures. */
+  /**
+   * Stops selected shared entries and reports every process-shutdown failure together.
+   * @param names - Server names to stop, or undefined to stop every entry.
+   * @returns Completion after all selected entries finish their shared stop attempts.
+   * @throws An AggregateError if any selected server shutdown fails.
+   * @example
+   * await pool.stop(["typescript-native"]); // Stops only entries configured with that name.
+   */
   async stop(names?: readonly string[]): Promise<void> {
     const results = await Promise.allSettled(
       [...this.entries]
@@ -1469,7 +1815,7 @@ export class LanguageServerPool {
           ([, entry]) =>
             names === undefined || names.includes(entry.server.config.name),
         )
-        .map(([key, entry]) => this.stopEntry(key, entry)),
+        .map(([key, entry]) => stopEntry(this.entries, key, entry)),
     );
     const errors = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason as unknown] : [],
@@ -1486,4 +1832,37 @@ export class LanguageServerPool {
     this.disposePromise = this.stop();
     return this.disposePromise;
   }
+}
+
+/**
+ * Cancels shared startup and retains the entry until startup and process shutdown both settle.
+ * @param entries - Owning pool map; only this exact entry may be removed on successful shutdown.
+ * @param key - Effective-configuration key identifying the entry.
+ * @param entry - Entry whose stopping promise is reused across all callers.
+ * @returns Shared shutdown completion; a failed shutdown leaves the entry retained for the pool.
+ * @throws If server shutdown fails; startup rejection alone does not fail the stop.
+ * @example
+ * If entries.get("typescript:/project") is entry and its startup is still pending,
+ * stopEntry(entries, "typescript:/project", entry) cancels startup and stops its process.
+ * A second call reuses the same promise; successful cleanup removes that entry.
+ */
+function stopEntry(
+  entries: Map<string, PoolEntry>,
+  key: string,
+  entry: PoolEntry,
+): Promise<void> {
+  if (entry.stopping) return entry.stopping;
+  entry.controller.abort(
+    new Error(`LSP ${entry.server.config.name} startup was stopped`),
+  );
+  entry.stopping = (async () => {
+    const results = await Promise.allSettled([
+      entry.server.shutdown(),
+      entry.ready,
+    ]);
+    const shutdown = results[0];
+    if (shutdown?.status === "rejected") throw shutdown.reason;
+    if (entries.get(key) === entry) entries.delete(key);
+  })();
+  return entry.stopping;
 }

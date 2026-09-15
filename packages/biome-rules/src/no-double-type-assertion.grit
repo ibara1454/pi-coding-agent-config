@@ -13,8 +13,5 @@ pattern assertion_to_unknown() {
 
 `$value as $_` where {
   $value <: assertion_to_unknown(),
-  register_diagnostic(
-    span = $value,
-    message = "Double type assertion through `unknown` is not allowed. Narrow the declared type to the surface actually used, or build a value that satisfies the target type."
-  )
+  register_diagnostic(span=$value, message="Double type assertion through `unknown` is not allowed. Narrow the declared type to the surface actually used, or build a value that satisfies the target type.")
 }

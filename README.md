@@ -7,7 +7,7 @@ This repository contains personal configuration and customized extensions for
 
 - `apps/` contains **Pi extension packages only**. Each extension is a complete
   package with its own `package.json`, entrypoint, and supporting files.
-- `packages/` is reserved for shared libraries consumed by extensions.
+- `packages/` contains shared libraries and development tooling.
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
 
@@ -123,6 +123,9 @@ workspace:
 bun run lint
 ```
 
+See [the custom Biome rules guide](packages/biome-rules/README.md) for rule
+behavior, implementation, and testing guidance.
+
 Apply safe Biome fixes:
 
 ```bash
@@ -135,7 +138,7 @@ Run strict type checking for every workspace:
 bun run typecheck
 ```
 
-Run all extension tests through Turborepo:
+Run all workspace tests through Turborepo:
 
 ```bash
 bun run test

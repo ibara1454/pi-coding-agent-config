@@ -16,20 +16,13 @@ pattern test_leaf_callee() {
   }
 }
 
-pattern quoted_title() {
-  r"(?s)[\"'\x60].*"
-}
+pattern quoted_title() { r"(?s)[\"'\x60].*" }
 
-pattern should_prefixed_title() {
-  r"(?s)[\"'\x60]should .*"
-}
+pattern should_prefixed_title() { r"(?s)[\"'\x60]should .*" }
 
 `$callee($title, $...)` where {
   $callee <: test_leaf_callee(),
   $title <: quoted_title(),
   $title <: not should_prefixed_title(),
-  register_diagnostic(
-    span = $title,
-    message = "A leaf test title must start with `should `. Name the observable result after `should`, then add `when <condition>` or `if <condition>` when a condition distinguishes the case."
-  )
+  register_diagnostic(span=$title, message="A leaf test title must start with `should `. Name the observable result after `should`, then add `when <condition>` or `if <condition>` when a condition distinguishes the case.")
 }

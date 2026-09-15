@@ -1,0 +1,16 @@
+language js
+
+// Match declarations, including overloads, without treating private fields or
+// private members inside a nested class as methods of the enclosing class.
+or {
+  JsMethodClassMember(modifiers=$modifiers, name=$name),
+  TsMethodSignatureClassMember(modifiers=$modifiers, name=$name)
+} where {
+  or {
+    $name <: JsPrivateClassMemberName(),
+    $modifiers <: contains TsAccessibilityModifier() as $accessibility where {
+      $accessibility <: r"private"
+    }
+  },
+  register_diagnostic(span=$name, message="Private methods (`private` and `#method`) are not allowed. Move internal helpers to module scope instead of exposing them as public methods.", severity="error")
+}
