@@ -485,7 +485,9 @@ class StdioLanguageServer implements LanguageServer {
    * @param options - Workspace root and workspace-edit callback retained by this client.
    * @throws If process creation or transport setup fails.
    * @example
-   * new StdioLanguageServer(config, options); // Starts the configured process; initialize runs separately.
+   * With config.command "typescript-language-server", args ["--stdio"], and root
+   * "/project", new StdioLanguageServer(config, options) launches that command in
+   * /project; it sends no initialize request until initialize() is called.
    */
   constructor(config: ServerConfig, options: PoolOptions) {
     this.config = config;
@@ -627,7 +629,9 @@ class StdioLanguageServer implements LanguageServer {
    * @returns Completion after the initialized notification, configuration, and readiness checks.
    * @throws On cancellation, protocol/encoding validation failure, or readiness/request failure.
    * @example
-   * await server.initialize(controller.signal); // Makes the shared client ready for acquisition.
+   * If the peer's initialize response selects positionEncoding: "utf-8",
+   * server.initialize(new AbortController().signal) rejects rather than accepting
+   * positions that this UTF-16 client would interpret incorrectly.
    */
   async initialize(signal: AbortSignal): Promise<void> {
     const root = this.config.root || this.options.cwd;
@@ -707,7 +711,14 @@ class StdioLanguageServer implements LanguageServer {
    * @returns The unvalidated response; callers still validate its protocol shape.
    * @throws On cancellation, timeout, a stopped server, or peer request failure.
    * @example
-   * await server.request("textDocument/hover", params); // Returns the server's hover payload.
+   * With a.ts already synchronized and the peer returning { contents: "value: number" }:
+   * ```ts
+   * await server.request("textDocument/hover", {
+   *   textDocument: { uri: "file:///project/a.ts" },
+   *   position: { line: 0, character: 6 },
+   * });
+   * // { contents: "value: number" }; positions are sent unchanged, without one-based conversion.
+   * ```
    */
   request<T = unknown>(
     method: string,
@@ -743,7 +754,12 @@ class StdioLanguageServer implements LanguageServer {
    * @returns Completion after the transport write settles.
    * @throws On a stopped server, write failure, cancellation, or the 5,000 ms write deadline.
    * @example
-   * await server.notify("initialized", {}); // Sends the initialized notification once.
+   * ```ts
+   * await server.notify("workspace/didChangeConfiguration", {
+   *   settings: { typescript: { preferences: { quotePreference: "single" } } },
+   * });
+   * // Resolves after writing the settings notification, without waiting for a peer response.
+   * ```
    */
   notify(method: string, params: unknown): Promise<void> {
     return active(this.state, this, async () => {
@@ -769,7 +785,11 @@ class StdioLanguageServer implements LanguageServer {
    * @returns Completion after supported open/change notifications, or immediately for unchanged text.
    * @throws On invalid paths, canceled/failed reads, unsupported changes, or transport errors.
    * @example
-   * await server.syncFile("/project/a.ts", "const value = 1;\n"); // Opens or updates a.ts.
+   * With openClose: true and a.ts not yet open:
+   * ```ts
+   * await server.syncFile("/project/a.ts", "const value = 1;\n"); // Sends didOpen.
+   * await server.syncFile("/project/a.ts", "const value = 1;\n"); // No notification or version bump.
+   * ```
    */
   syncFile(
     file: string,
@@ -864,7 +884,9 @@ class StdioLanguageServer implements LanguageServer {
    * @returns Completion after applicable notifications are written.
    * @throws On invalid paths, stopped lifetime, or notification failure.
    * @example
-   * await server.saved("/project/a.ts"); // Sends didSave when the server supports saves.
+   * With a.ts synchronized to "let x = 1;" and textDocumentSync.save.includeText true,
+   * await server.saved("/project/a.ts") sends didSave with text: "let x = 1;".
+   * After closeFile("/project/a.ts"), saved("/project/a.ts") sends no didSave.
    */
   saved(file: string): Promise<void> {
     return queue(this.state, this, file, undefined, async () => {
@@ -1148,7 +1170,9 @@ function assertAlive(server: LanguageServer, failure: Error | undefined): void {
  * @returns The operation's result without changing its rejection.
  * @throws If the server is stopped or the operation rejects.
  * @example
- * await active(state, server, async () => 42); // Returns 42 and restores the busy count.
+ * On a live server with no other work, active(state, server, async () => {
+ * throw new Error("denied"); }) rejects with "denied" but still releases its busy
+ * count, so subsequent idleFor(now) calls can measure idle time again.
  */
 async function active<T>(
   state: ServerState,
@@ -1175,7 +1199,9 @@ async function active<T>(
  * @returns Completion once the configured quiet/settle interval has passed.
  * @throws On cancellation, timeout, or an invalid rust-analyzer status response.
  * @example
- * await waitForWorkspace(state, server, undefined, 500); // Waits at most 500 ms for readiness.
+ * With a non-rust server whose progress token remains active throughout the wait,
+ * await waitForWorkspace(state, server, undefined, 500) rejects with a workspace
+ * readiness timeout instead of proceeding while indexing is still active.
  */
 async function waitForWorkspace(
   state: ServerState,
@@ -1325,8 +1351,9 @@ function syncOptions(
  * @returns A bounded wait for this operation; the barrier is removed only if still current.
  * @throws For invalid paths, cancellation, a stopped server, or an operation failure.
  * @example
- * await queue(state, server, "/project/a.ts", undefined, async () => 42);
- * // Returns 42 after earlier operations for a.ts finish.
+ * If an earlier syncFile("/project/a.ts") fails to read the file, but the server
+ * remains alive, queue(state, server, "/project/a.ts", undefined, async () => "next")
+ * still resolves to "next" after that failure; the file's queue is not poisoned.
  */
 function queue<T>(
   state: ServerState,
@@ -1660,7 +1687,9 @@ export class LanguageServerPool {
    * Owns shared server entries and an optional unreferenced idle-expiry timer.
    * @param options - Workspace, edit callback, and optional idle timeout in milliseconds.
    * @example
-   * new LanguageServerPool({ ...options, idleTimeoutMs: 60000 }); // Expires idle initialized servers.
+   * Constructing a pool with idleTimeoutMs: 60_000 starts no server. After pool.get(config),
+   * an initialized client idle for at least 60 seconds is stopped on an idle sweep;
+   * an active request prevents expiry. await pool.dispose() also clears the sweep timer.
    */
   constructor(options: PoolOptions) {
     this.options = options;
@@ -1690,7 +1719,12 @@ export class LanguageServerPool {
    * @returns An initialized live client after any previous stopping entry has completed cleanup.
    * @throws On canceled acquisition, disabled/disposed configuration, or startup/cleanup failure.
    * @example
-   * const server = await pool.get(config); // Reuses a matching live client rather than spawning again.
+   * For an installed server configuration and a pool that has not been disposed:
+   * ```ts
+   * const first = await pool.get(config);
+   * const second = await pool.get(config);
+   * // first === second while that client remains alive and has not begun stopping.
+   * ```
    */
   async get(
     config: ServerConfig,
@@ -1808,7 +1842,9 @@ export class LanguageServerPool {
  * @returns Shared shutdown completion; a failed shutdown leaves the entry retained for the pool.
  * @throws If server shutdown fails; startup rejection alone does not fail the stop.
  * @example
- * await stopEntry(entries, "server-key", entry); // Stops once and removes this entry on success.
+ * If entries.get("typescript:/project") is entry and its startup is still pending,
+ * stopEntry(entries, "typescript:/project", entry) cancels startup and stops its process.
+ * A second call reuses the same promise; successful cleanup removes that entry.
  */
 function stopEntry(
   entries: Map<string, PoolEntry>,

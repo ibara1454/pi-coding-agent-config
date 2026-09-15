@@ -213,7 +213,11 @@ export class ExtensionManagerPanel implements Component {
    * Routes keyboard or SGR mouse input, ignoring events while committing or finished.
    * @param data - Raw terminal input; focused dialogs and inspectors constrain key actions.
    * @example
-   * panel.handleInput(" "); // Stages the selected row, or asks before disabling this manager.
+   * With the list focused on enabled non-manager row "alpha" and no staged edits:
+   * ```ts
+   * panel.handleInput(" "); // Alpha is staged off; nothing is saved yet.
+   * panel.handleInput(" "); // Alpha returns to enabled; the pending edit is removed.
+   * ```
    */
   handleInput(data: string): void {
     const state = this.#state;
@@ -272,7 +276,7 @@ export class ExtensionManagerPanel implements Component {
  * @param state - Owned panel state whose navigation or close dialog may change.
  * @param panel - Lifecycle owner used when closing without staged changes.
  * @example
- * handleEscape(state, panel); // With query "rev", clears search without closing.
+ * handleEscape(state, panel); // With details closed and query "rev", clears search without closing.
  */
 function handleEscape(state: PanelState, panel: ExtensionManagerPanel): void {
   if (state.model.detailsOpen) {
@@ -347,7 +351,7 @@ function handleDialogInput(
  * Stages the selected resource's opposite setting, asking before disabling the manager.
  * @param state - Selection and catalog to update; an empty selection is a no-op.
  * @example
- * requestToggle(state); // An enabled non-manager row "alpha" becomes staged off.
+ * requestToggle(state); // With enabled non-manager row "alpha" selected, stages alpha off.
  */
 function requestToggle(state: PanelState): void {
   const row = state.model.selectedRow();
@@ -371,8 +375,9 @@ function requestToggle(state: PanelState): void {
  * @param panel - Lifecycle owner notified only when a mouse event is handled.
  * @param mouse - Decoded SGR event with one-based screen coordinates.
  * @example
- * handleMouse(state, panel, { button: 65, column: 1, row: 1, pressed: true });
- * // Moves down three selectable rows and requests a redraw, even in fullscreen mode.
+ * With four selectable rows and the first selected:
+ * `handleMouse(state, panel, { button: 65, column: 1, row: 1, pressed: true })`
+ * selects the fourth row and requests redraw, even in fullscreen mode.
  */
 function handleMouse(
   state: PanelState,
@@ -687,7 +692,9 @@ function renderList(
  * @param height - Maximum inspection lines when inspection data is available.
  * @returns Inspection lines, or a message when selection or inspection is unavailable.
  * @example
- * renderInspector(catalog, undefined, theme, 60, 11); // Shows "No matching resources".
+ * With selected row "alpha" named "alpha\nbeta":
+ * `renderInspector(catalog, "alpha", theme, 60, 1)` returns only the styled
+ * heading "alpha beta"; the metadata newline cannot create a second screen line.
  */
 function renderInspector(
   catalog: ExtensionCatalog,

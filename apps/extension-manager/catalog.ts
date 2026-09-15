@@ -26,7 +26,11 @@ export type CatalogCommitter = (
  * @param baseParticipation - Participation retained after successful commits.
  * @param staged - Desired states overriding committed configuration.
  * @returns The winning row's enabled state, or `false` without a candidate.
- * @example resolveRows([], new Map(), new Map(), new Map()); // false
+ * @example
+ * For two enabled candidates at the same path, a project autoload delta has order 0
+ * and a global package has order 1. If the delta's `participatesWhenDisabled` is
+ * false, `resolveRows(rows, targets, baseParticipation, new Map([["project", false]]))`
+ * returns true: disabling the delta yields to the enabled global package.
  */
 function resolveRows(
   rows: readonly CatalogRow[],
@@ -58,7 +62,11 @@ function resolveRows(
  * @param baseParticipation - Participation retained after successful commits.
  * @param staged - Proposed configuration changes; untouched groups keep their resolution.
  * @returns Enabled states keyed by resource kind and canonical path.
- * @example projectResolved(new Map(), new Map(), new Map(), new Map(), new Map()).size; // 0
+ * @example
+ * With sole top-level candidates "alpha" and "beta" at separate paths, both
+ * initially resolved enabled, staging "alpha" off makes its path resolve false:
+ * `projectResolved(baseRows, rowKeys, targets, baseParticipation, new Map([["alpha", false]]))`.
+ * The result keeps beta's discovery-time true value; neither base row is changed.
  */
 function projectResolved(
   baseRows: ReadonlyMap<string, CatalogRow>,
@@ -94,7 +102,12 @@ function projectResolved(
  * @param targets - Discovery-time serialization policy for each row.
  * @param desired - Staged enabled state; `undefined` leaves the row unchanged.
  * @returns A projected row, or the original row when no change or target exists.
- * @example projectRow(row, new Map(), false) === row; // true: no serialization target
+ * @example
+ * For an enabled top-level row at /repo/extensions/shared.ts with filters
+ * ["extensions/**"] and a target based at /repo with filterPath "extensions/shared.ts",
+ * `projectRow(row, targets, false)`
+ * returns configured false with filters ["extensions/**", "-extensions/shared.ts"].
+ * The original row keeps its enabled state and include-only filters.
  */
 function projectRow(
   row: CatalogRow,
@@ -162,7 +175,12 @@ function projectRow(
  * @param row - Resource whose inspector or diagnostic count is being rendered.
  * @param seed - Discovered diagnostics and settings-document paths.
  * @returns Matching messages in discovery order; an empty array if none match.
- * @example diagnosticMessages(row, { ...seed, diagnostics: [] }); // []
+ * @example
+ * For a global row from "npm:first", let seed diagnostics in order be
+ * { scope: "global", source: "npm:second", message: "Package unavailable" } and
+ * { scope: "global", message: "Invalid settings" }.
+ * `diagnosticMessages(row, seed)` returns ["Invalid settings"]: scope-wide
+ * settings errors apply, but another package's source-specific error does not.
  */
 function diagnosticMessages(
   row: CatalogRow,
@@ -211,7 +229,15 @@ export class ExtensionCatalog {
   /**
    * Builds the current catalog view with staged filters, resolution, and diagnostics.
    * @returns A fresh view; committed rows and staged changes remain unchanged.
-   * @example catalog.discard(); catalog.view().stagedCount; // 0
+   * @example
+   * With no pending edits and a sole enabled top-level row "alpha":
+   * ```ts
+   * catalog.stage("alpha", false);
+   * const view = catalog.view();
+   * // view.stagedCount === 1; alpha is configured and resolvedAfterReload false.
+   * catalog.discard();
+   * // catalog.view() shows alpha enabled again; viewing did not save the edit.
+   * ```
    */
   view(): CatalogView {
     const resolvedByPath = projectResolved(
@@ -277,7 +303,15 @@ export class ExtensionCatalog {
    * Describes one row using its staged state and matching discovery diagnostics.
    * @param id - Catalog row ID, not a resource path.
    * @returns Inspector content, or `undefined` for an unknown ID.
-   * @example catalog.inspect("missing-row"); // undefined when that ID is absent
+   * @example
+   * Given enabled top-level row "shared" at /repo/extensions/shared.ts, with
+   * filters ["extensions/**"] and a target based at /repo with filterPath "extensions/shared.ts":
+   * ```ts
+   * catalog.stage("shared", false);
+   * const inspection = catalog.inspect("shared");
+   * // Configured: Disabled; Filters: "extensions/**", "-extensions/shared.ts".
+   * // Reason identifies the exact force-exclude, before settings are saved.
+   * ```
    */
   inspect(id: string): RowInspection | undefined {
     const row = this.view().rows.find((candidate) => candidate.id === id);
@@ -342,7 +376,14 @@ export class ExtensionCatalog {
    * @param id - Row receiving the proposed toggle.
    * @param enabled - Proposed configured state.
    * @returns `true` only for a currently resolved self-extension that becomes disabled.
-   * @example catalog.wouldDisableSelf("/manager.ts", "missing-row", false); // false
+   * @example
+   * With enabled project and global top-level rows for /repo/manager.ts,
+   * where project has higher precedence and the path resolves enabled:
+   * ```ts
+   * catalog.wouldDisableSelf("/repo/manager.ts", "global", false); // false
+   * catalog.wouldDisableSelf("/repo/manager.ts", "project", false); // true
+   * // These checks do not stage either toggle.
+   * ```
    */
   wouldDisableSelf(path: string, id: string, enabled: boolean): boolean {
     const canonical = canonicalizeResourcePath(path);
@@ -384,7 +425,13 @@ export class ExtensionCatalog {
    * @param path - Extension entry path to canonicalize.
    * @param includeStaged - Whether pending toggles participate in resolution.
    * @returns Whether that extension resolves to enabled.
-   * @example catalog.selfResolved("/missing-manager.ts", false); // false when absent
+   * @example
+   * With no pending edits and sole enabled top-level row "manager" at /repo/manager.ts:
+   * ```ts
+   * catalog.stage("manager", false);
+   * catalog.selfResolved("/repo/manager.ts", true); // false: includes pending disable
+   * catalog.selfResolved("/repo/manager.ts", false); // true: ignores pending disable
+   * ```
    */
   selfResolved(path: string, includeStaged: boolean): boolean {
     const canonical = canonicalizeResourcePath(path);
@@ -405,7 +452,17 @@ export class ExtensionCatalog {
    * Failed scopes retain their pending changes for another attempt.
    * @returns Per-scope persistence outcomes from the configured committer.
    * @throws If a staged row lacks a target or the committer rejects.
-   * @example await catalog.commit(); // After full success, catalog.hasChanges() is false.
+   * @example
+   * Start with enabled rows "global" and "project" in their respective scopes.
+   * If the committer saves global but reports project as failed:
+   * ```ts
+   * catalog.stage("global", false);
+   * catalog.stage("project", false);
+   * await catalog.commit();
+   * catalog.view().stagedCount; // 1: only project's disable remains pending
+   * catalog.discard();
+   * // Global stays configured false; project returns to configured true.
+   * ```
    */
   async commit(): Promise<CommitResult> {
     const mutations: SettingsMutation[] = [];

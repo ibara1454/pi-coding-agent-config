@@ -13,7 +13,12 @@ export type PanelListEntry =
  * @param rows - Filtered rows in catalog order.
  * @param selectedId - Previously selected row ID, if any.
  * @returns A visible row ID, or `undefined` when no rows remain.
- * @example selectedVisibleId([], "removed"); // undefined
+ * @example
+ * Given visible rows with IDs "alpha" then "beta":
+ * ```ts
+ * selectedVisibleId(rows, "beta"); // "beta": retain a selection still visible
+ * selectedVisibleId(rows, "hidden"); // "alpha": fall back to the first visible row
+ * ```
  */
 function selectedVisibleId(
   rows: readonly CatalogRow[],
@@ -32,7 +37,10 @@ export class ExtensionManagerPanelState {
   /**
    * Opens the All tab with the first visible row selected.
    * @param catalog - Catalog supplying live rows and staged configuration.
-   * @example new ExtensionManagerPanelState(catalog).query; // ""
+   * @example
+   * With catalog rows "alpha" (extension) then "review" (skill),
+   * `new ExtensionManagerPanelState(catalog)` opens All with "alpha" selected;
+   * both rows are visible without a search filter.
    */
   constructor(catalog: ExtensionCatalog) {
     this.#catalog = catalog;
@@ -153,7 +161,9 @@ export class ExtensionManagerPanelState {
   /**
    * Extends the search query, closes details, and selects a matching row.
    * @param text - Search text to append without normalization.
-   * @example state.appendSearch("beta"); // Empty query becomes "beta".
+   * @example
+   * With empty search, details open on "alpha", and only row "beta" matching "beta",
+   * `state.appendSearch("beta")` closes details and selects "beta".
    */
   appendSearch(text: string): void {
     this.#query += text;
@@ -163,7 +173,13 @@ export class ExtensionManagerPanelState {
 
   /**
    * Removes the final Unicode code point and keeps selection in the results.
-   * @example state.backspaceSearch(); // Query "beta" becomes "bet".
+   * @example
+   * ```ts
+   * state.clearSearch();
+   * state.appendSearch("na\u{1f600}");
+   * state.backspaceSearch();
+   * state.query; // "na": removes the whole astral code point, not half a surrogate pair
+   * ```
    */
   backspaceSearch(): void {
     this.#query = Array.from(this.#query).slice(0, -1).join("");
@@ -172,7 +188,9 @@ export class ExtensionManagerPanelState {
 
   /**
    * Clears the query while preserving the selected row when it remains visible.
-   * @example state.clearSearch(); // Query becomes ""; the active tab is unchanged.
+   * @example
+   * With the Extensions tab filtered to selected row "beta" by query "beta",
+   * `state.clearSearch()` shows all extensions again and keeps "beta" selected.
    */
   clearSearch(): void {
     this.#query = "";

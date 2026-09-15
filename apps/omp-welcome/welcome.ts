@@ -195,7 +195,10 @@ function logoFrame(
  * @param terminalRows - Terminal height used for the extension budget.
  * @param tipRows - Rows already reserved for the startup tip below the box.
  * @returns Styled section rows and a separator sized for the section width.
- * @example With an unstyled theme and empty lists, extensions contains " No extensions".
+ * @example
+ * In a 20-row wide terminal with 40-cell sections, one tip row, and one
+ * recent session, six extensions named "a" through "f" get five slots:
+ * rows for "a" through "d", then " … +2 more". The session stays visible.
  */
 function renderSections(
   theme: WelcomeTheme,
@@ -230,7 +233,11 @@ function renderSections(
  * @param tipRows - Wrapped startup-tip row count.
  * @param sessionRows - Rendered recent-session row count.
  * @returns Extension slots, including any overflow row.
- * @example extensionCapacity(true, 17, 1, 1) returns 4.
+ * @example
+ * ```ts
+ * extensionCapacity(true, 24, 1, 1); // 9 slots with side-by-side columns.
+ * extensionCapacity(false, 24, 1, 1); // 4 slots: the minimum, even if the header scrolls.
+ * ```
  */
 function extensionCapacity(
   isWide: boolean,
@@ -252,7 +259,11 @@ function extensionCapacity(
  * @param width - Row width in terminal cells.
  * @param capacity - Maximum slots, including the overflow row.
  * @returns Extension rows or a single empty-list placeholder.
- * @example With an unstyled theme, renderExtensions(theme, [], 20, 4) returns [" No extensions"].
+ * @example
+ * Five user-scoped extensions named "a" through "e", an unstyled theme,
+ * width 20, and capacity 4 produce:
+ * [" • a user", " • b user", " • c user", " … +2 more"].
+ * The overflow row occupies the fourth slot rather than adding a fifth.
  */
 function renderExtensions(
   theme: WelcomeTheme,
@@ -284,7 +295,12 @@ function renderExtensions(
  * @param extension - Sanitized extension name and scope.
  * @param width - Row width in terminal cells.
  * @returns Styled bullet, truncated name, and scope.
- * @example With an unstyled theme, renderExtension(theme, { name: "x", scope: "user" }, 20) returns " • x user".
+ * @example
+ * With an unstyled theme:
+ * ```ts
+ * renderExtension(theme, { name: "extension-manager", scope: "user" }, 16);
+ * // " • extensi… user": only the name is shortened; the scope stays visible.
+ * ```
  */
 function renderExtension(
   theme: WelcomeTheme,
@@ -308,7 +324,12 @@ function renderExtension(
  * @param recentSessions - Sanitized sessions in display order.
  * @param width - Row width in terminal cells.
  * @returns Session rows or a single empty-list placeholder.
- * @example With an unstyled theme, renderSessions(theme, [], 20) returns [" No recent sessions"].
+ * @example
+ * With an unstyled theme:
+ * ```ts
+ * renderSessions(theme, [{ name: "Investigate login", timeAgo: "2h" }], 16);
+ * // [" • Investi… (2h)"]: the age suffix keeps its cells when the name is long.
+ * ```
  */
 function renderSessions(
   theme: WelcomeTheme,
@@ -469,7 +490,13 @@ function renderBox(
  * @param selectedTip - Sanitized startup-tip text.
  * @param boxWidth - Available width in terminal cells.
  * @returns Styled tip rows, or none when fewer than eight body cells fit.
- * @example With an unstyled theme, renderTipLines(theme, "Hello", 30) returns [" Tip: Hello"].
+ * @example
+ * With an unstyled theme:
+ * ```ts
+ * renderTipLines(theme, "one two three", 14);
+ * // [" Tip: one two", "      three"]: continuation text aligns after "Tip: ".
+ * renderTipLines(theme, "one two three", 13); // []: fewer than eight body cells.
+ * ```
  */
 function renderTipLines(
   theme: WelcomeTheme,

@@ -87,7 +87,7 @@ bun test packages/biome-rules
 - Tests use `bun:test`; there is no Jest, Vitest, or root build command.
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
-- For changes to `packages/biome-rules/`, read the custom-rule testing notes in `README.md`.
+- For changes to `packages/biome-rules/`, read the custom-rule testing notes in `packages/biome-rules/README.md`.
 - Prefer lightweight fake Pi/UI/context objects over broad integration setup. For filesystem/configuration tests, create deterministic temp roots, restore environment variables, invoke shutdown/dispose paths, and remove temp data in `finally`/`afterEach`.
 - Run the affected workspace's test command before delivering a permanent behavior change.
 

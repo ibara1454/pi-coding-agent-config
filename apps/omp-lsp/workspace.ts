@@ -172,7 +172,12 @@ interface WorkspaceState {
  * @param idleTimeoutMs - Optional idle timeout passed through to the pool.
  * @param onApplyEdit - Trust-gated handler for server-requested workspace edits.
  * @returns A pool that the workspace must dispose or replace on reload.
- * @example With idleTimeoutMs 60000, the returned pool owns its idle sweep timer.
+ * @example
+ * ```ts
+ * const pool = createPool("/project", 60_000, async () => ({ applied: false }));
+ * // Idle clients are eligible for shutdown after 60 seconds without work.
+ * await pool.dispose(); // Stops acquired clients and clears the idle sweep timer.
+ * ```
  */
 function createPool(
   cwd: string,
@@ -331,7 +336,10 @@ function workspaceResult(
  * @param config - Effective server configuration.
  * @param file - Optional absolute file path used to filter matching servers.
  * @returns Eligible servers in configured order.
- * @example With no configured servers, selectedServers(config, "/project/a.ts") returns [].
+ * @example
+ * With installed .ts servers "typescript-native", disabled "eslint", and CLI linter
+ * "biome", plus "pyright" matching only .py, selectedServers(config, "/project/a.ts")
+ * selects only "typescript-native"; omitting the file also selects "pyright".
  */
 function selectedServers(config: LspConfig, file?: string): ServerConfig[] {
   const configured = file
@@ -398,7 +406,13 @@ async function openDocument(
  * @param knownFiles - Absolute paths known to this workspace.
  * @param server - Server supplying detached document versions and content.
  * @returns Snapshots only for paths currently open in that server.
- * @example With an empty knownFiles set, documentSnapshots(knownFiles, server) returns an empty map.
+ * @example
+ * With "/project/open.ts" open at version 3 containing "let x = 1;" and
+ * "/project/closed.ts" closed in server:
+ * ```ts
+ * documentSnapshots(new Set(["/project/open.ts", "/project/closed.ts"]), server);
+ * // Map { "/project/open.ts" => { version: 3, content: "let x = 1;" } }
+ * ```
  */
 function documentSnapshots(
   knownFiles: ReadonlySet<string>,
@@ -696,7 +710,10 @@ async function dispatchAction(
  * @param signal - Cancellation for document synchronization and the request.
  * @returns Serialized server output or an attributed protocol error.
  * @throws If the method, JSON, document, position, or server startup is invalid or unavailable.
- * @example A request with query "workspace/symbol" and payload "{}" sends an empty object as protocol params.
+ * @example
+ * In a workspace with an available language server, a request with action "request",
+ * query "workspace/symbol", and payload '{"query":"Widget"}' sends
+ * workspace/symbol with { query: "Widget" }, not the JSON string.
  */
 async function rawRequest(
   state: WorkspaceState,
@@ -908,7 +925,14 @@ async function diagnosticsResult(
  * @param cwd - Workspace root used to shorten display paths.
  * @param found - Normalized symbols in display order.
  * @returns At most 200 symbol rows followed by an overflow notice when necessary.
- * @example symbolLines("/project", []) returns []; a symbol on zero-based line 0 is displayed on line 1.
+ * @example
+ * ```ts
+ * symbolLines("/project", [{
+ *   name: "Widget", kind: 5, container: "", file: "/project/src/widget.ts",
+ *   position: { line: 0, character: 6 }, depth: 0,
+ * }]);
+ * // ["Widget [kind 5] src/widget.ts:1:7"]
+ * ```
  */
 function symbolLines(cwd: string, found: readonly DisplaySymbol[]): string[] {
   const lines = found
@@ -1995,7 +2019,9 @@ export class LspWorkspace {
   /**
    * Exposes configuration and eager-startup warnings without starting servers.
    * @returns Current warnings in their recorded order.
-   * @example A warning-free configuration returns an empty warnings array.
+   * @example
+   * With lazy: false, if "typescript-native" startup rejects with Error("not found"),
+   * workspace.warnings includes "typescript-native: eager startup failed: not found".
    */
   get warnings(): readonly string[] {
     return this.#state.config.warnings;
