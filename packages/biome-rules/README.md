@@ -1,8 +1,7 @@
 # Custom Biome rules
 
 Custom `.grit` rules and colocated integration tests live in `src/`. The root
-Biome configuration loads the rules by filesystem path; Biome 2.5.10 does not
-resolve package specifiers for plugins.
+Biome configuration loads these checked-in rules by filesystem path.
 
 The private-method rule rejects class methods written as `private method()` or
 `#method()`, including overload signatures. Private fields remain allowed. Move

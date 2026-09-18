@@ -1039,13 +1039,16 @@ class StdioLanguageServer implements LanguageServer {
 
   /**
    * Cancels work, attempts graceful shutdown, then releases transports, listeners, timers, and process ownership.
-   * @returns The shared shutdown promise; later calls reuse the first shutdown attempt.
+   * @returns The cached shutdown promise; repeated calls reuse it idempotently.
+   * The first completion promise is reused while pending and after settlement,
+   * including rejection; shutdown never retries.
    * @throws If forced process cleanup fails; listener and document cleanup still runs.
    * @example
    * await server.shutdown(); await server.shutdown(); // Stops the owned process only once.
    */
   shutdown(): Promise<void> {
-    if (this.state.shutdownPromise) return this.state.shutdownPromise;
+    if (this.state.shutdownPromise !== undefined)
+      return this.state.shutdownPromise;
     const graceful =
       !this.state.lifetime.signal.aborted && this.state.initialized;
     this.state.lifetime.abort(
@@ -1824,9 +1827,18 @@ export class LanguageServerPool {
       throw new AggregateError(errors, "Failed to stop language servers");
   }
 
-  /** Idempotently prevents new acquisitions, clears idle polling, and stops every owned server. */
+  /**
+   * Prevents new acquisitions, clears idle polling, and stops every owned server.
+   * The first call starts shutdown; later calls reuse that promise while pending
+   * and after settlement, including rejection.
+   * @returns Completion after all owned server shutdown attempts settle.
+   * @throws An AggregateError if one or more owned server shutdowns fail.
+   * @example
+   * const first = pool.dispose();
+   * pool.dispose() === first; // Reuses the first shutdown attempt.
+   */
   dispose(): Promise<void> {
-    if (this.disposePromise) return this.disposePromise;
+    if (this.disposePromise !== undefined) return this.disposePromise;
     this.disposed = true;
     clearInterval(this.idleTimer);
     this.disposePromise = this.stop();
@@ -1838,7 +1850,8 @@ export class LanguageServerPool {
  * Cancels shared startup and retains the entry until startup and process shutdown both settle.
  * @param entries - Owning pool map; only this exact entry may be removed on successful shutdown.
  * @param key - Effective-configuration key identifying the entry.
- * @param entry - Entry whose stopping promise is reused across all callers.
+ * @param entry - Entry whose first stopping promise is reused while pending and
+ *   after settlement, including rejection; failed stops are not retried.
  * @returns Shared shutdown completion; a failed shutdown leaves the entry retained for the pool.
  * @throws If server shutdown fails; startup rejection alone does not fail the stop.
  * @example
@@ -1851,7 +1864,7 @@ function stopEntry(
   key: string,
   entry: PoolEntry,
 ): Promise<void> {
-  if (entry.stopping) return entry.stopping;
+  if (entry.stopping !== undefined) return entry.stopping;
   entry.controller.abort(
     new Error(`LSP ${entry.server.config.name} startup was stopped`),
   );

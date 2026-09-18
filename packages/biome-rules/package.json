@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "devDependencies": {
-    "@biomejs/wasm-nodejs": "2.5.10"
+    "@biomejs/wasm-nodejs": "2.5.14"
   },
   "scripts": {
     "lint": "biome check --config-path=../.. --error-on-warnings .",

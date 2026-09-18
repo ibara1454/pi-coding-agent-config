@@ -514,12 +514,18 @@ async function serverCapabilities(
 }
 
 /**
- * Routes workspace actions before opening documents for position-based operations.
- * @param state - Session-owned configuration, document tracking, and server lifetime.
- * @param params - Action and target supplied by the tool caller.
- * @param signal - Combined caller, session, and deadline cancellation.
- * @returns Navigation, inspection, diagnostic, or mutation result for the requested action.
- * @throws If parameters, peer responses, file access, server requests, or cancellation prevent the action.
+ * Routes workspace actions, handling early routes before opening documents for
+ * position-based operations.
+ * Status, capabilities, raw requests, reloads, file renames, and diagnostics
+ * return before document setup; concrete-file actions are narrowed to document
+ * operations before dispatch.
+ * The fallback rejects unsupported runtime values instead of bypassing required
+ * prerequisites.
+ * @param state - Session-owned configuration, document tracking, server lifetime.
+ * @param params - Action target supplied by tool caller.
+ * @param signal - Combined caller, session, deadline cancellation.
+ * @returns Navigation, inspection, diagnostic, or mutation result requested action.
+ * @throws If parameters, peer responses, file access, server requests, or cancellation prevent action.
  * @example A status request inspects existing state without opening a document or starting a server.
  */
 async function dispatchAction(
@@ -545,6 +551,15 @@ async function dispatchAction(
       throw new Error(`${params.action} requires a concrete file`);
     return workspaceSymbols(state, params, signal);
   }
+  const action:
+    | "definition"
+    | "type_definition"
+    | "implementation"
+    | "references"
+    | "hover"
+    | "symbols"
+    | "rename"
+    | "code_actions" = params.action;
   const file = path.resolve(state.options.cwd, params.file);
   const server = await languageServerFor(state, file, signal);
   const content = await openDocument(state.knownFiles, server, file, signal);
@@ -553,17 +568,17 @@ async function dispatchAction(
     !server.config.isLinter &&
     params.line !== undefined &&
     !params.symbol &&
-    ["definition", "references", "rename"].includes(params.action)
+    ["definition", "references", "rename"].includes(action)
   )
     throw new Error(
-      `symbol is required for project-aware ${params.action}; pass the name, optionally symbol#N for repeated occurrences`,
+      `symbol is required for project-aware ${action}; pass the name, optionally symbol#N for repeated occurrences`,
     );
   const position =
-    params.action === "symbols"
+    action === "symbols"
       ? { line: 0, character: 0 }
       : resolvePosition(content, params.line, params.symbol);
   const target = { textDocument: { uri }, position };
-  switch (params.action) {
+  switch (action) {
     case "definition":
     case "type_definition":
     case "implementation":
@@ -576,14 +591,14 @@ async function dispatchAction(
       };
       const request = {
         ...target,
-        ...(params.action === "references"
+        ...(action === "references"
           ? { context: { includeDeclaration: true } }
           : {}),
       };
       let found = locations(
-        await server.request(methods[params.action], request, signal),
+        await server.request(methods[action], request, signal),
       );
-      if (params.action === "references" && !server.config.isLinter) {
+      if (action === "references" && !server.config.isLinter) {
         for (
           let attempt = 0;
           attempt < 2 &&
@@ -595,12 +610,11 @@ async function dispatchAction(
         ) {
           await delay(250, undefined, { signal });
           found = locations(
-            await server.request(methods[params.action], request, signal),
+            await server.request(methods[action], request, signal),
           );
         }
       }
-      const label =
-        params.action === "type_definition" ? "type definition" : params.action;
+      const label = action === "type_definition" ? "type definition" : action;
       if (found.length === 0)
         return workspaceResult(
           params,
@@ -608,7 +622,7 @@ async function dispatchAction(
           true,
           server.config.name,
         );
-      const limit = params.action === "references" ? 50 : 200;
+      const limit = action === "references" ? 50 : 200;
       const contexts = new Map<string, string[]>();
       const lines: string[] = [];
       for (const location of found.slice(0, limit)) {
@@ -631,7 +645,7 @@ async function dispatchAction(
       }
       return workspaceResult(
         params,
-        `${found.length} ${params.action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
+        `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
         true,
         server.config.name,
       );
@@ -699,7 +713,7 @@ async function dispatchAction(
     case "code_actions":
       return codeActions(state, params, server, file, position, signal);
     default:
-      throw new Error(`Unsupported LSP action: ${String(params.action)}`);
+      throw new Error(`Unsupported LSP action: ${String(action)}`);
   }
 }
 
