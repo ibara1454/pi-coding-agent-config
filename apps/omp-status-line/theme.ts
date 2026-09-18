@@ -95,12 +95,25 @@ export interface SeparatorDef {
   endCaps?: { left: string; right: string };
 }
 
+/**
+ * Returns the separators for a configured style, using ASCII separators when requested.
+ *
+ * @param style The configured separator style.
+ * @param ascii Whether the status line should override the configured style with ASCII separators.
+ * @returns The left and right separators, including end caps when the style uses them.
+ *
+ * @example
+ * getSeparator("powerline", true);
+ * // { left: ">", right: "<" }
+ */
 export function getSeparator(
   style: StatusLineSeparatorStyle,
   ascii: boolean,
 ): SeparatorDef {
-  if (ascii || style === "ascii") return { left: ">", right: "<" };
-  switch (style) {
+  const effectiveStyle = ascii ? "ascii" : style;
+  switch (effectiveStyle) {
+    case "ascii":
+      return { left: ">", right: "<" };
     case "powerline":
       return { left: "▶", right: "◀", endCaps: { left: "◀", right: "▶" } };
     case "powerline-thin":

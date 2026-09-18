@@ -4,7 +4,8 @@
     "test/setup.ts",
     "bunfig.toml",
     "biome.json",
-    "packages/biome-rules/src/*.grit"
+    "packages/biome-rules/src/*.grit",
+    "tsconfig.base.json"
   ],
   "tasks": {
     "lint": {
