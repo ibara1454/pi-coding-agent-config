@@ -1,3 +1,4 @@
+import { warn } from "node:console";
 import type {
   Api,
   Model,
@@ -12,6 +13,7 @@ import type {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider URLs must reject ASCII control bytes.
 const ASCII_CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/u;
 const HTTP_URL_PREFIX = /^https?:\/\/[^/?#]+(?:\/|$)/iu;
+const TRAILING_SLASHES = /\/+$/u;
 const AZURE_API = "azure-openai-responses";
 const WARNING_PREFIX = "[provider-base-url-overrides]";
 const PROVIDER_INSTALL_WARNING =
@@ -36,10 +38,6 @@ function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
 }
 
-function warn(message: string): void {
-  console.warn(`${WARNING_PREFIX} ${message}`);
-}
-
 function toNonNullRecord<T extends Record<string, unknown>>(
   record: T,
 ): NonNullRecord<T> {
@@ -55,11 +53,13 @@ function toNonNullRecord<T extends Record<string, unknown>>(
 function readProviderBaseUrl(): string | undefined {
   const { PROVIDER_BASE_URL } = process.env;
   const value = PROVIDER_BASE_URL?.trim();
-  if (!value) return undefined;
+  if (!value) {
+    return undefined;
+  }
 
   if (!isValidProviderBaseUrl(value)) {
     warn(
-      "Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.",
+      `${WARNING_PREFIX} Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.`,
     );
     return undefined;
   }
@@ -68,9 +68,15 @@ function readProviderBaseUrl(): string | undefined {
 }
 
 function isValidProviderBaseUrl(value: string): boolean {
-  if (ASCII_CONTROL_CHARACTER.test(value)) return false;
-  if (!HTTP_URL_PREFIX.test(value)) return false;
-  if (value.includes("?") || value.includes("#")) return false;
+  if (ASCII_CONTROL_CHARACTER.test(value)) {
+    return false;
+  }
+  if (!HTTP_URL_PREFIX.test(value)) {
+    return false;
+  }
+  if (value.includes("?") || value.includes("#")) {
+    return false;
+  }
 
   try {
     const url = new URL(value);
@@ -83,8 +89,12 @@ function isValidProviderBaseUrl(value: string): boolean {
   }
 }
 
+/**
+ * Builds API-specific routes while preserving the root for unmodified APIs.
+ * @example createProviderRoutes("https://proxy.test/").openAi // "https://proxy.test/v1"
+ */
 function createProviderRoutes(root: string): ProviderRoutes {
-  const suffixRoot = root.replace(/\/+$/u, "");
+  const suffixRoot = root.replace(TRAILING_SLASHES, "");
   return {
     root,
     openAi: `${suffixRoot}/v1`,
@@ -144,7 +154,9 @@ function routeTransportOptions(
   routedModelBaseUrl: string,
   options: ProviderRequestOptions | undefined,
 ): TransportOptions | undefined {
-  if (api !== AZURE_API) return options;
+  if (api !== AZURE_API) {
+    return options;
+  }
 
   const optionsSnapshot: ProviderRequestOptions = { ...options };
   return {
@@ -278,7 +290,9 @@ function installProviderOverrides(
 
   for (const providerId of providerIds) {
     const providerValue = registry.getProvider(providerId);
-    if (providerValue === undefined) continue;
+    if (providerValue === undefined) {
+      continue;
+    }
 
     const wrappedProvider = wrapProvider(providerValue, routes);
     try {
@@ -292,7 +306,9 @@ function installProviderOverrides(
 
 export default function providerBaseUrlOverrides(pi: ExtensionAPI): void {
   const providerBaseUrl = readProviderBaseUrl();
-  if (!providerBaseUrl) return;
+  if (!providerBaseUrl) {
+    return;
+  }
 
   const routes = createProviderRoutes(providerBaseUrl);
   pi.on("session_start", (_event, ctx) => {

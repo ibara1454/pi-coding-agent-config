@@ -39,7 +39,7 @@ export function registerExtensionManager(
 
       await ctx.waitForIdle();
       let seed: CatalogSeed;
-      while (true) {
+      for (;;) {
         try {
           seed = await runtime.discover({
             agentDir: runtime.agentDir(),

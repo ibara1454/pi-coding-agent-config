@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Spies must intercept live named imports of Node's process launcher.
 import * as childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { runCommand } from "./process";
+import { runCommand } from "./process.ts";
 
 const spawning: {
   spawn(

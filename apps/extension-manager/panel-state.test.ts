@@ -4,8 +4,8 @@ import { ExtensionManagerPanelState } from "./panel-state.ts";
 import { catalogRow, panelCatalogSeed } from "./panel-test-fixtures.ts";
 import type { CatalogRow, ResourceKind } from "./types.ts";
 
-function panelCatalog(rows: readonly CatalogRow[]): ExtensionCatalog {
-  return new ExtensionCatalog(panelCatalogSeed(rows), async () => ({
+function panelCatalog(candidates: readonly CatalogRow[]): ExtensionCatalog {
+  return new ExtensionCatalog(panelCatalogSeed(candidates), async () => ({
     scopes: [],
     committedScopes: [],
   }));

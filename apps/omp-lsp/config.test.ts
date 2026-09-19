@@ -1,8 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Spies must intercept the loader's live named filesystem imports.
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadLspConfig, serversForFile } from "./config";
+import { loadLspConfig, serversForFile } from "./config.ts";
 
 const cwd = "/project";
 const agentDir = "/agent";
@@ -42,26 +43,33 @@ function fixture(override?: unknown): void {
       }),
     ],
   ]);
-  if (override !== undefined)
+  if (override !== undefined) {
     files.set(projectConfig, JSON.stringify(override));
+  }
   const missing = () =>
     Object.assign(new Error("Not found"), { code: "ENOENT" });
-  spyOn(filesystem, "access").mockImplementation(async (file) => {
-    if (file !== join(cwd, "package.json") && file !== installed)
-      throw missing();
+  spyOn(filesystem, "access").mockImplementation((file) => {
+    if (file !== join(cwd, "package.json") && file !== installed) {
+      return Promise.reject(missing());
+    }
+    return Promise.resolve();
   });
-  spyOn(filesystem, "stat").mockImplementation(async (file) => {
-    if (file !== installed) throw missing();
-    return { isFile: () => true };
+  spyOn(filesystem, "stat").mockImplementation((file) => {
+    if (file !== installed) {
+      return Promise.reject(missing());
+    }
+    return Promise.resolve({ isFile: () => true });
   });
-  spyOn(filesystem, "open").mockImplementation(async (file) => {
+  spyOn(filesystem, "open").mockImplementation((file) => {
     const text = files.get(file);
-    if (text === undefined) throw missing();
+    if (text === undefined) {
+      return Promise.reject(missing());
+    }
     const content = Buffer.from(text);
     let position = 0;
-    return {
+    return Promise.resolve({
       stat: async () => ({ isFile: () => true, size: content.length }),
-      read: async (buffer, offset, length) => {
+      read: (buffer, offset, length) => {
         const bytesRead = content.copy(
           buffer,
           offset,
@@ -69,10 +77,10 @@ function fixture(override?: unknown): void {
           position + length,
         );
         position += bytesRead;
-        return { bytesRead };
+        return Promise.resolve({ bytesRead });
       },
-      close: async () => {},
-    };
+      close: () => Promise.resolve(),
+    });
   });
 }
 

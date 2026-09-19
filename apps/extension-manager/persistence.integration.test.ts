@@ -80,18 +80,19 @@ function fakeIo(
   return {
     events,
     io: {
-      async lock(path) {
+      lock(path) {
         events.push(`lock:${path}`);
         if (path === options.failLock) {
-          throw new Error("settings lock is held");
+          return Promise.reject(new Error("settings lock is held"));
         }
-        return async () => {
+        return Promise.resolve(() => {
           events.push(`release:${path}`);
-        };
+          return Promise.resolve();
+        });
       },
-      async read(path) {
+      read(path) {
         events.push(`read:${path}`);
-        return contents.get(path);
+        return Promise.resolve(contents.get(path));
       },
       async validateTarget(target) {
         events.push(`validate:${target.id}`);
@@ -100,12 +101,13 @@ function fakeIo(
         }
         await options.validateTarget?.(target);
       },
-      async writeAtomic(path, content) {
+      writeAtomic(path, content) {
         events.push(`write:${path}`);
         if (path === options.failWrite) {
-          throw new Error("disk full");
+          return Promise.reject(new Error("disk full"));
         }
         contents.set(path, content);
+        return Promise.resolve();
       },
     },
   };

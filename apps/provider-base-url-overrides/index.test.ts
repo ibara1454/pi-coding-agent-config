@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the extension's live warning import.
+import * as console from "node:console";
 import type {
   Api,
   AssistantMessageEventStream,
@@ -48,6 +50,7 @@ interface DeferredCancelCall {
 }
 
 interface ProviderCalls {
+  receivers: Provider[];
   getModels: number;
   stream: StreamCall[];
   streamSimple: StreamSimpleCall[];
@@ -97,10 +100,16 @@ interface ExtensionHarness {
   warnings: string[];
 }
 
+/**
+ * Requires a present fixture value and narrows its type for subsequent assertions.
+ * @throws If setup did not produce the expected value.
+ * @example required([42][0]) // 42
+ */
 function required<T>(value: T): NonNullable<T> {
-  expect(value).toBeDefined();
-  expect(value).not.toBeNull();
-  return value as NonNullable<T>;
+  if (value === undefined || value === null) {
+    throw new Error("Expected a present fixture value");
+  }
+  return value;
 }
 
 function makeModel(
@@ -123,12 +132,17 @@ function makeModel(
   };
 }
 
+/**
+ * Creates a provider that records routed requests and their method receivers.
+ * @example makeProvider("test", []).provider.getModels() // []
+ */
 function makeProvider(
   id: string,
   models: readonly TestModel[],
   includeOptionalMethods = false,
 ): { provider: Provider; calls: ProviderCalls; results: ProviderResults } {
   const calls: ProviderCalls = {
+    receivers: [],
     getModels: 0,
     stream: [],
     streamSimple: [],
@@ -146,8 +160,8 @@ function makeProvider(
   const auth: Provider["auth"] = {
     apiKey: {
       name: `${id} test auth`,
-      async resolve() {
-        return undefined;
+      resolve() {
+        return Promise.resolve(undefined);
       },
     },
   };
@@ -158,49 +172,51 @@ function makeProvider(
     headers,
     auth,
     getModels() {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.getModels += 1;
       return models;
     },
     stream(model, context, options) {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.stream.push({ model, context, options });
       return results.stream;
     },
     streamSimple(model, context, options) {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.streamSimple.push({ model, context, options });
       return results.streamSimple;
     },
   };
 
   if (includeOptionalMethods) {
-    provider.refreshModels = async function (this: Provider, context) {
-      expect(this).toBe(provider);
+    provider.refreshModels = function (this: Provider, context) {
+      calls.receivers.push(this);
       calls.refreshModels.push(context);
+      return Promise.resolve();
     };
     provider.filterModels = function (
       this: Provider,
       filterableModels,
       credential,
     ) {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.filterModels.push({ models: filterableModels, credential });
       return filterableModels.slice(0, 1);
     };
     provider.fetchDeferred = function (this: Provider, model, handle, options) {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.fetchDeferred.push({ model, handle, options });
       return results.fetchDeferred;
     };
-    provider.cancelDeferred = async function (
+    provider.cancelDeferred = function (
       this: Provider,
       model,
       handle,
       options,
     ) {
-      expect(this).toBe(provider);
+      calls.receivers.push(this);
       calls.cancelDeferred.push({ model, handle, options });
+      return Promise.resolve();
     };
   }
 
@@ -229,6 +245,11 @@ function makeHarness(behavior: HarnessBehavior = {}): {
   return { pi, state };
 }
 
+/**
+ * Loads the extension with isolated environment values and captured warnings.
+ * Both process resources are restored even when initialization throws.
+ * @example runExtension({}).warnings // []
+ */
 function runExtension(
   environment: Partial<Record<EnvironmentVariable, string>>,
   behavior: HarnessBehavior = {},
@@ -236,27 +257,33 @@ function runExtension(
   const previousEnvironment = Object.fromEntries(
     ENVIRONMENT_VARIABLES.map((name) => [name, process.env[name]]),
   ) as Record<EnvironmentVariable, string | undefined>;
-  const previousWarn = console.warn;
   const { pi, state } = makeHarness(behavior);
+  const warning = spyOn(console, "warn").mockImplementation(
+    (message: unknown) => {
+      state.warnings.push(String(message));
+    },
+  );
 
   try {
     for (const name of ENVIRONMENT_VARIABLES) {
       delete process.env[name];
     }
     for (const [name, value] of Object.entries(environment)) {
-      if (value !== undefined) process.env[name as EnvironmentVariable] = value;
+      if (value !== undefined) {
+        process.env[name as EnvironmentVariable] = value;
+      }
     }
 
-    console.warn = (...args: unknown[]) => {
-      state.warnings.push(args.map(String).join(" "));
-    };
     providerBaseUrlOverrides(pi);
   } finally {
-    console.warn = previousWarn;
+    warning.mockRestore();
     for (const name of ENVIRONMENT_VARIABLES) {
       const value = previousEnvironment[name];
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
     }
   }
 
@@ -282,6 +309,11 @@ function makeRegistry(
   };
 }
 
+/**
+ * Awaits session startup while capturing warnings and UI notifications.
+ * Restores warning interception on both fulfillment and rejection.
+ * @example await triggerSessionStart(harness, registry)
+ */
 async function triggerSessionStart(
   harness: ExtensionHarness,
   modelRegistry: TestModelRegistry,
@@ -289,12 +321,15 @@ async function triggerSessionStart(
   const handler = harness.handlers.find(
     ({ event }) => event === "session_start",
   )?.handler;
-  if (!handler) throw new Error("session_start handler was not registered");
-  const previousWarn = console.warn;
+  if (!handler) {
+    throw new Error("session_start handler was not registered");
+  }
+  const warning = spyOn(console, "warn").mockImplementation(
+    (message: unknown) => {
+      harness.warnings.push(String(message));
+    },
+  );
   try {
-    console.warn = (...args: unknown[]) => {
-      harness.warnings.push(args.map(String).join(" "));
-    };
     await handler(
       { type: "session_start", reason: "startup" },
       {
@@ -307,7 +342,7 @@ async function triggerSessionStart(
       },
     );
   } finally {
-    console.warn = previousWarn;
+    warning.mockRestore();
   }
 }
 
@@ -473,7 +508,9 @@ describe("providerBaseUrlOverrides", () => {
         enumerable: true,
         get() {
           streamReads += 1;
-          if (streamReads > 1) throw new Error("stream was read twice");
+          if (streamReads > 1) {
+            throw new Error("stream was read twice");
+          }
           return capturedStream;
         },
       },
@@ -550,7 +587,9 @@ describe("providerBaseUrlOverrides", () => {
         enumerable: true,
         get() {
           apiReads += 1;
-          if (apiReads > 1) throw new Error("api was read twice");
+          if (apiReads > 1) {
+            throw new Error("api was read twice");
+          }
           return originalModel.api;
         },
       },
@@ -559,7 +598,9 @@ describe("providerBaseUrlOverrides", () => {
         enumerable: true,
         get() {
           baseUrlReads += 1;
-          if (baseUrlReads > 1) throw new Error("baseUrl was read twice");
+          if (baseUrlReads > 1) {
+            throw new Error("baseUrl was read twice");
+          }
           return originalModel.baseUrl;
         },
       },
@@ -685,13 +726,14 @@ describe("providerBaseUrlOverrides", () => {
         "custom-api",
       ),
     ];
-    const { provider } = makeProvider("routing", models);
+    const { provider, calls } = makeProvider("routing", models);
     const harness = runExtension({ PROVIDER_BASE_URL: providerBaseUrl });
     const { registry } = makeRegistry(models, { routing: provider });
 
     await triggerSessionStart(harness, registry);
 
     const routedModels = required(harness.registrations[0]).getModels();
+    expect(calls.receivers).toEqual([provider]);
     expect(routedModels.map((model) => model.baseUrl)).toEqual([
       providerBaseUrl,
       `${providerBaseUrl}/v1`,
@@ -819,6 +861,7 @@ describe("providerBaseUrlOverrides", () => {
 
     expect(streamResult).toBe(results.stream);
     expect(simpleResult).toBe(results.streamSimple);
+    expect(calls.receivers).toEqual([provider, provider]);
     expect(required(calls.stream[0])).toEqual({
       model: { ...streamInput, baseUrl: "https://proxy.test/override/v1" },
       context,
@@ -882,6 +925,7 @@ describe("providerBaseUrlOverrides", () => {
     await wrapped.refreshModels?.(refreshContext);
     const filtered = wrapped.filterModels?.(filterInput, credential);
     const delegatedModels = required(calls.filterModels[0]).models;
+    expect(calls.receivers).toEqual([provider, provider]);
 
     expect(calls.refreshModels).toEqual([refreshContext]);
     expect(required(calls.filterModels[0]).credential).toBe(credential);
@@ -948,6 +992,7 @@ describe("providerBaseUrlOverrides", () => {
     );
     await wrapped.cancelDeferred?.(cancelInput, handle, cancelOptions);
 
+    expect(calls.receivers).toEqual([provider, provider]);
     expect(fetchResult).toBe(results.fetchDeferred);
     expect(required(calls.fetchDeferred[0])).toEqual({
       model: { ...fetchInput, baseUrl: "https://proxy.test/deferred/v1" },

@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Stats } from "node:fs";
-import * as fs from "node:fs/promises";
+import fs from "node:fs/promises";
+
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
+
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
-import { applyTextEdits, applyWorkspaceEdit, fileToUri } from "./edits";
+import { applyTextEdits, applyWorkspaceEdit, fileToUri } from "./edits.ts";
 
 function memoryFiles(initial: Record<string, string>) {
   const files = new Map(
@@ -17,12 +20,15 @@ function memoryFiles(initial: Record<string, string>) {
   let beforeLock: (() => void) | undefined;
   let failingWrite: string | undefined;
   let failRename = false;
-  spyOn(fs, "lstat").mockImplementation((async (value: unknown) => {
+  spyOn(fs, "lstat").mockImplementation(((value: unknown) => {
     const file = String(value);
     const content = files.get(file);
-    if (!content && !directories.has(file))
-      throw Object.assign(new Error(`Missing ${file}`), { code: "ENOENT" });
-    return {
+    if (!content && !directories.has(file)) {
+      return Promise.reject(
+        Object.assign(new Error(`Missing ${file}`), { code: "ENOENT" }),
+      );
+    }
+    return Promise.resolve({
       dev: 1,
       ino: file.length,
       size: content?.content.length ?? 0,
@@ -31,46 +37,59 @@ function memoryFiles(initial: Record<string, string>) {
       isSymbolicLink: () => false,
       isDirectory: () => directories.has(file),
       isFile: () => files.has(file),
-    } as Stats;
+    } as Stats);
   }) as typeof fs.lstat);
   spyOn(fs, "realpath").mockImplementation((async (file: unknown) =>
     String(file)) as typeof fs.realpath);
-  spyOn(fs, "readFile").mockImplementation((async (file: unknown) => {
+  spyOn(fs, "readFile").mockImplementation(((file: unknown) => {
     const value = files.get(String(file));
-    if (!value)
-      throw Object.assign(new Error(`Missing ${String(file)}`), {
-        code: "ENOENT",
-      });
-    return value.content;
+    if (!value) {
+      return Promise.reject(
+        Object.assign(new Error(`Missing ${String(file)}`), {
+          code: "ENOENT",
+        }),
+      );
+    }
+    return Promise.resolve(value.content);
   }) as typeof fs.readFile);
-  spyOn(fs, "writeFile").mockImplementation(async (file, content) => {
+  spyOn(fs, "writeFile").mockImplementation((file, content) => {
     const name = String(file);
-    if (name === failingWrite) throw new Error("Disk write failed");
+    if (name === failingWrite) {
+      return Promise.reject(new Error("Disk write failed"));
+    }
     writes.push(name);
     files.set(name, {
       content: String(content),
       revision: (files.get(name)?.revision ?? 0) + 1,
     });
+    return Promise.resolve();
   });
-  spyOn(fs, "mkdir").mockImplementation((async (file: unknown) => {
+  spyOn(fs, "mkdir").mockImplementation(((file: unknown) => {
     directories.add(String(file));
+    return Promise.resolve();
   }) as typeof fs.mkdir);
-  spyOn(fs, "rename").mockImplementation(async (source, destination) => {
-    if (failRename) throw new Error("Cross-device rename failed");
+  spyOn(fs, "rename").mockImplementation((source, destination) => {
+    if (failRename) {
+      return Promise.reject(new Error("Cross-device rename failed"));
+    }
     const file = files.get(String(source));
-    if (!file) throw new Error("Missing rename source");
+    if (!file) {
+      return Promise.reject(new Error("Missing rename source"));
+    }
     files.set(String(destination), file);
     files.delete(String(source));
+    return Promise.resolve();
   });
-  spyOn(fs, "rm").mockImplementation(async (file) => {
+  spyOn(fs, "rm").mockImplementation((file) => {
     files.delete(String(file));
+    return Promise.resolve();
   });
   spyOn(host, "withFileMutationQueue").mockImplementation(
     async (_file, work) => {
       const run = beforeLock;
       beforeLock = undefined;
       run?.();
-      return work();
+      return await work();
     },
   );
   return {

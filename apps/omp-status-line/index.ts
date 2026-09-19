@@ -1,6 +1,6 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import {
   CustomEditor,
@@ -87,10 +87,13 @@ const STATUS_KEYS: Record<string, true> = {
   usage: true,
 };
 const GIT_TTL_MS = 1_000;
+const EDITOR_BORDER_RE = /^─{3,}/;
+const GIT_BRANCH_COMMAND_RE =
+  /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/;
 
 function readJsonObject(filePath: string): Record<string, unknown> {
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
     return isObjectRecord(parsed) ? parsed : {};
   } catch {
     return {};
@@ -100,7 +103,7 @@ function readJsonObject(filePath: string): Record<string, unknown> {
 function agentDir(): string {
   const { PI_CODING_AGENT_DIR } = process.env;
   const configured = PI_CODING_AGENT_DIR?.trim();
-  return configured || path.join(os.homedir(), ".pi", "agent");
+  return configured || join(homedir(), ".pi", "agent");
 }
 
 function mergeOptions(
@@ -116,7 +119,9 @@ function mergeOptions(
 }
 
 function parseSegmentIds(value: unknown): StatusLineSegmentId[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
   return value.filter(
     (item): item is StatusLineSegmentId =>
       typeof item === "string" &&
@@ -145,12 +150,12 @@ function readSettings(
   cwd: string,
   projectTrusted: boolean,
 ): StatusLineSettings {
-  const global = readJsonObject(path.join(agentDir(), "settings.json"));
+  const global = readJsonObject(join(agentDir(), "settings.json"));
   // Pi does not expose its merged SettingsManager to extensions. Because this
   // extension reads settings directly, mirror Pi's trust gate before loading
   // project-local configuration.
   const project = projectTrusted
-    ? readJsonObject(path.join(cwd, ".pi", "settings.json"))
+    ? readJsonObject(join(cwd, ".pi", "settings.json"))
     : {};
   const { statusLine: globalValue } = global;
   const { statusLine: projectValue } = project;
@@ -226,9 +231,13 @@ function effectivePreset(settings: StatusLineSettings): PresetDef {
 }
 
 function messageUsage(message: unknown): Record<string, unknown> | undefined {
-  if (!isObjectRecord(message)) return undefined;
+  if (!isObjectRecord(message)) {
+    return undefined;
+  }
   const { role, usage } = message;
-  if (role !== "assistant" || !isObjectRecord(usage)) return undefined;
+  if (role !== "assistant" || !isObjectRecord(usage)) {
+    return undefined;
+  }
   return usage;
 }
 
@@ -250,9 +259,13 @@ function aggregateUsage(
     tokensPerSecond,
   };
   for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type !== "message") continue;
+    if (entry.type !== "message") {
+      continue;
+    }
     const usage = messageUsage(entry.message);
-    if (!usage) continue;
+    if (!usage) {
+      continue;
+    }
     const { input, output, cacheRead, cacheWrite, premiumRequests, cost } =
       usage;
     stats.input += numeric(input);
@@ -270,6 +283,13 @@ function aggregateUsage(
   return stats;
 }
 
+/**
+ * Registers the status-line renderer and session-owned refresh resources.
+ * Event effects run synchronously; handlers return promises and reject on failure.
+ * Shutdown cancels timers and commands and releases only UI slots still owned here.
+ * @param pi Host extension API used for events, UI state, and command execution.
+ * @example ompStatusLine(pi); // Installs UI on session_start in TUI mode.
+ */
 export default function ompStatusLine(pi: ExtensionAPI): void {
   let currentCtx: ExtensionContext | null = null;
   let settings: StatusLineSettings = readSettings(process.cwd(), false);
@@ -331,11 +351,15 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   ): Promise<void> => {
     const ctx = currentCtx;
     if (!ctx || !branch || branch === "detached" || prInFlight) {
-      if (!branch || branch === "detached") gitState.pr = null;
+      if (!branch || branch === "detached") {
+        gitState.pr = null;
+      }
       return;
     }
     const key = `${ctx.cwd}\0${branch}`;
-    if (!force && prBranchKey === key) return;
+    if (!force && prBranchKey === key) {
+      return;
+    }
     prBranchKey = key;
     prInFlight = true;
     const controller = new AbortController();
@@ -350,8 +374,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         prController !== controller ||
         currentCtx !== ctx ||
         prBranchKey !== key
-      )
+      ) {
         return;
+      }
       if (result.code !== 0) {
         gitState.pr = null;
       } else {
@@ -371,8 +396,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         prController === controller &&
         currentCtx === ctx &&
         prBranchKey === key
-      )
+      ) {
         gitState.pr = null;
+      }
     } finally {
       if (prController === controller) {
         prController = null;
@@ -388,8 +414,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       !ctx ||
       gitInFlight ||
       (!force && Date.now() - gitLastFetch < GIT_TTL_MS)
-    )
+    ) {
       return;
+    }
     gitInFlight = true;
     const controller = new AbortController();
     gitController = controller;
@@ -399,7 +426,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         ["status", "--porcelain=v1", "--untracked-files=normal"],
         { cwd: ctx.cwd, timeout: 2_000, signal: controller.signal },
       );
-      if (gitController !== controller || currentCtx !== ctx) return;
+      if (gitController !== controller || currentCtx !== ctx) {
+        return;
+      }
       if (result.code !== 0) {
         gitState = {
           branch: null,
@@ -414,15 +443,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         let unstaged = 0;
         let untracked = 0;
         for (const line of result.stdout.split("\n")) {
-          if (line.length < 2) continue;
+          if (line.length < 2) {
+            continue;
+          }
           const x = line[0];
           const y = line[1];
           if (x === "?" && y === "?") {
             untracked++;
             continue;
           }
-          if (x !== " " && x !== "?") staged++;
-          if (y !== " " && y !== "?") unstaged++;
+          if (x !== " " && x !== "?") {
+            staged++;
+          }
+          if (y !== " " && y !== "?") {
+            unstaged++;
+          }
         }
         const branch = footerData?.getGitBranch() ?? gitState.branch;
         const branchChanged = branch !== gitState.branch;
@@ -434,12 +469,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           untracked,
           pr: branchChanged ? null : gitState.pr,
         };
-        if (branchChanged) prBranchKey = null;
+        if (branchChanged) {
+          prBranchKey = null;
+        }
+        // biome-ignore lint/complexity/noVoid: PR refresh handles command errors and must not delay Git completion.
         void refreshPr(branch);
       }
       gitLastFetch = Date.now();
     } catch {
-      if (gitController === controller) gitLastFetch = Date.now();
+      if (gitController === controller) {
+        gitLastFetch = Date.now();
+      }
     } finally {
       if (gitController === controller) {
         gitController = null;
@@ -456,7 +496,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     let tokens = estimateTextTokens(ctx.getSystemPrompt());
     const activeTools = new Set(pi.getActiveTools());
     for (const tool of pi.getAllTools()) {
-      if (!activeTools.has(tool.name)) continue;
+      if (!activeTools.has(tool.name)) {
+        continue;
+      }
       tokens += estimateTextTokens(tool.name);
       tokens += estimateTextTokens(tool.description);
       try {
@@ -500,15 +542,19 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
     for (let index = branch.length - 1; index > boundary; index--) {
       const entry = branch[index];
-      if (entry?.type !== "message" || entry.message.role !== "assistant")
+      if (entry?.type !== "message" || entry.message.role !== "assistant") {
         continue;
+      }
       if (
         entry.message.stopReason === "aborted" ||
         entry.message.stopReason === "error"
-      )
+      ) {
         continue;
+      }
       const usage = messageUsage(entry.message);
-      if (!usage) continue;
+      if (!usage) {
+        continue;
+      }
       const { totalTokens, input, output, cacheRead, cacheWrite } = usage;
       const contextTokens =
         numeric(totalTokens) ||
@@ -516,7 +562,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           numeric(output) +
           numeric(cacheRead) +
           numeric(cacheWrite);
-      if (contextTokens > 0) return true;
+      if (contextTokens > 0) {
+        return true;
+      }
     }
     return false;
   };
@@ -525,7 +573,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     theme: Theme,
     options: StatusLineSegmentOptions,
   ): SegmentContext | null => {
-    if (!currentCtx) return null;
+    if (!currentCtx) {
+      return null;
+    }
     const context = currentCtx.getContextUsage();
     const contextWindow =
       context?.contextWindow ?? currentCtx.model?.contextWindow ?? 0;
@@ -561,11 +611,16 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   const buildStatusLine = (width: number, theme: Theme): string => {
-    if (width <= 0) return "";
+    if (width <= 0) {
+      return "";
+    }
+    // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not block rendering.
     void refreshGit();
     const preset = effectivePreset(settings);
     const segmentCtx = buildSegmentContext(theme, preset.segmentOptions);
-    if (!segmentCtx) return "";
+    if (!segmentCtx) {
+      return "";
+    }
     const separator = getSeparator(
       preset.separator,
       settings.preset === "ascii",
@@ -586,7 +641,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const right: string[] = [];
     for (const id of preset.rightSegments) {
       const rendered = renderSegment(id, segmentCtx);
-      if (rendered.visible && rendered.content) right.push(rendered.content);
+      if (rendered.visible && rendered.content) {
+        right.push(rendered.content);
+      }
     }
 
     const leftSeparatorWidth = visibleWidth(separator.left);
@@ -604,7 +661,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       capWidth: number,
       separatorWidth: number,
     ): number => {
-      if (parts.length === 0) return 0;
+      if (parts.length === 0) {
+        return 0;
+      }
       return (
         parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
         Math.max(0, parts.length - 1) * (separatorWidth + 2) +
@@ -648,15 +707,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
           for (let attempt = 0; attempt < 8; attempt++) {
             const saved = currentWidth - visibleWidth(adjusted.content);
-            if (saved >= shrinkBy) break;
+            if (saved >= shrinkBy) {
+              break;
+            }
             const correctedMaxLength = Math.max(
               4,
               nextMaxLength - (shrinkBy - saved),
             );
-            if (correctedMaxLength >= nextMaxLength) break;
+            if (correctedMaxLength >= nextMaxLength) {
+              break;
+            }
             nextMaxLength = correctedMaxLength;
             const rerendered = renderSegment("path", pathCtx(nextMaxLength));
-            if (!rerendered.visible || !rerendered.content) break;
+            if (!rerendered.visible || !rerendered.content) {
+              break;
+            }
             adjusted = rerendered;
           }
           left[pathIndex] = adjusted.content;
@@ -667,8 +732,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     while (totalWidth() > width && left.length > 0) {
       let dropIndex = leftIds.length - 1;
-      while (dropIndex >= 0 && leftIds[dropIndex] === "path") dropIndex--;
-      if (dropIndex < 0) dropIndex = left.length - 1;
+      while (dropIndex >= 0 && leftIds[dropIndex] === "path") {
+        dropIndex--;
+      }
+      if (dropIndex < 0) {
+        dropIndex = left.length - 1;
+      }
       left.splice(dropIndex, 1);
       leftIds.splice(dropIndex, 1);
       leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
@@ -678,7 +747,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       parts: string[],
       direction: "left" | "right",
     ): string => {
-      if (parts.length === 0) return "";
+      if (parts.length === 0) {
+        return "";
+      }
       const separatorText =
         direction === "left" ? separator.left : separator.right;
       const cap =
@@ -696,8 +767,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const leftGroup = renderGroup(left, "left");
     const rightGroup = renderGroup(right, "right");
-    if (!leftGroup && !rightGroup) return "";
-    if (!leftGroup || !rightGroup) return `${leftGroup}${rightGroup}`;
+    if (!leftGroup && !rightGroup) {
+      return "";
+    }
+    if (!leftGroup || !rightGroup) {
+      return `${leftGroup}${rightGroup}`;
+    }
 
     const gapWidth = Math.max(1, width - leftWidth - rightWidth);
     const sessionName = sanitizeInlineText(
@@ -720,15 +795,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         new CustomEditor(editorTui, editorTheme, keybindings);
       const originalRender = editor.render.bind(editor);
       editor.render = (width: number): string[] => {
-        if (width < 10 || !currentCtx) return [...originalRender(width)];
+        if (width < 10 || !currentCtx) {
+          return [...originalRender(width)];
+        }
         const chromeWidth = 3;
         const contentWidth = Math.max(1, width - chromeWidth * 2);
         const lines = [...originalRender(contentWidth)];
-        if (lines.length < 3) return lines;
+        if (lines.length < 3) {
+          return lines;
+        }
 
         let bottomBorderIndex = lines.length - 1;
         for (let index = lines.length - 1; index >= 1; index--) {
-          if (/^─{3,}/.test(stripVTControlCharacters(lines[index] ?? ""))) {
+          if (
+            EDITOR_BORDER_RE.test(stripVTControlCharacters(lines[index] ?? ""))
+          ) {
             bottomBorderIndex = index;
             break;
           }
@@ -771,13 +852,16 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     let ownsFooterSlot = false;
     let footerFactoryInvoked = false;
     const releaseInstalledUi = (): void => {
-      if (disposed) return;
+      if (disposed) {
+        return;
+      }
       if (ownsFooterSlot) {
         ownsFooterSlot = false;
         ctx.ui.setFooter(undefined);
       }
-      if (ctx.ui.getEditorComponent() === installedEditorFactory)
+      if (ctx.ui.getEditorComponent() === installedEditorFactory) {
         ctx.ui.setEditorComponent(previousEditorFactory);
+      }
       footerData = null;
       tui = null;
       disposed = true;
@@ -797,9 +881,11 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         prController?.abort();
         prController = null;
         prInFlight = false;
+        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and branch notifications stay nonblocking.
         void refreshGit(true);
       });
       footerUnsubscribe = unsubscribe;
+      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and footer installation stays synchronous.
       void refreshGit(true);
       return {
         dispose(): void {
@@ -817,7 +903,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           requestRender();
         },
         render(width: number): string[] {
-          if (!settings.showHookStatus) return [];
+          if (!settings.showHookStatus) {
+            return [];
+          }
           const preset = effectivePreset(settings);
           const usedSegments = new Set([
             ...preset.leftSegments,
@@ -838,10 +926,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         },
       };
     });
-    if (!footerFactoryInvoked) ownsFooterSlot = true;
+    if (!footerFactoryInvoked) {
+      ownsFooterSlot = true;
+    }
   };
 
-  pi.on("session_start", async (_event, ctx) => {
+  // Executors retain synchronous event effects and turn thrown failures into rejections.
+  pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
     settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
     activeMs = 0;
@@ -850,69 +941,91 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     tokensPerSecond = null;
     gitLastFetch = 0;
     prBranchKey = null;
-    gitState = { branch: null, staged: 0, unstaged: 0, untracked: 0, pr: null };
-    if (ctx.mode !== "tui") return;
+    gitState = {
+      branch: null,
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      pr: null,
+    };
+    if (ctx.mode !== "tui") {
+      return Promise.resolve();
+    }
 
     installUi(ctx);
     ticker = setInterval(() => {
+      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay this render tick.
       void refreshGit();
       requestRender();
     }, 1_000);
+    return Promise.resolve();
   });
 
   // ponytail: share one context-refresh callback across these five hooks.
-  pi.on("session_info_changed", async (_event, ctx) => {
+  pi.on("session_info_changed", (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("model_select", async (_event, ctx) => {
+  pi.on("model_select", (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("thinking_level_select", async (_event, ctx) => {
+  pi.on("thinking_level_select", (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("session_tree", async (_event, ctx) => {
+  pi.on("session_tree", (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("session_compact", async (_event, ctx) => {
+  pi.on("session_compact", (_event, ctx) => {
     currentCtx = ctx;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("agent_start", async (_event, ctx) => {
+  pi.on("agent_start", (_event, ctx) => {
     currentCtx = ctx;
-    if (activeStartedAt === null) activeStartedAt = Date.now();
+    if (activeStartedAt === null) {
+      activeStartedAt = Date.now();
+    }
     streamStartedAt = Date.now();
     requestRender();
+    return Promise.resolve();
   });
   // ponytail: share the identical message_update/message_end usage callback.
-  pi.on("message_update", async (event, ctx) => {
+  pi.on("message_update", (event, ctx) => {
     currentCtx = ctx;
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
       const { output } = usage;
       const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0)
+      if (elapsed > 0 && outputTokens > 0) {
         tokensPerSecond = outputTokens / elapsed;
+      }
     }
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("message_end", async (event, ctx) => {
+  pi.on("message_end", (event, ctx) => {
     currentCtx = ctx;
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
       const elapsed = (Date.now() - streamStartedAt) / 1000;
       const { output } = usage;
       const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0)
+      if (elapsed > 0 && outputTokens > 0) {
         tokensPerSecond = outputTokens / elapsed;
+      }
     }
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", (_event, ctx) => {
     currentCtx = ctx;
     if (activeStartedAt !== null) {
       activeMs += Date.now() - activeStartedAt;
@@ -920,48 +1033,48 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
     streamStartedAt = null;
     requestRender();
+    return Promise.resolve();
   });
-  pi.on("tool_result", async (event, ctx) => {
+  pi.on("tool_result", (event, ctx) => {
     currentCtx = ctx;
     if (event.toolName === "write" || event.toolName === "edit") {
       gitLastFetch = 0;
+      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
       void refreshGit(true);
-      return;
+      return Promise.resolve();
     }
-    if (event.toolName !== "bash" || !isObjectRecord(event.input)) return;
+    if (event.toolName !== "bash" || !isObjectRecord(event.input)) {
+      return Promise.resolve();
+    }
     const { command } = event.input;
-    if (
-      typeof command === "string" &&
-      /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(
-        command,
-      )
-    ) {
+    if (typeof command === "string" && GIT_BRANCH_COMMAND_RE.test(command)) {
       gitLastFetch = 0;
       prBranchKey = null;
       prController?.abort();
       prController = null;
       prInFlight = false;
+      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
       void refreshGit(true);
     }
+    return Promise.resolve();
   });
-  pi.on("user_bash", async (event, ctx) => {
+  pi.on("user_bash", (event, ctx) => {
     currentCtx = ctx;
-    if (
-      /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/.test(
-        event.command,
-      )
-    ) {
+    if (GIT_BRANCH_COMMAND_RE.test(event.command)) {
       clearTimeout(delayedRefresh);
       delayedRefresh = setTimeout(() => {
         delayedRefresh = undefined;
         prController?.abort();
         prController = null;
         prInFlight = false;
+        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and the coalescing timer stays nonblocking.
         void refreshGit(true);
       }, 150);
     }
+    return Promise.resolve();
   });
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", () => {
     releaseSessionResources();
+    return Promise.resolve();
   });
 }

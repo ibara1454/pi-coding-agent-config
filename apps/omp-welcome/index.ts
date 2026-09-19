@@ -53,7 +53,9 @@ export default function welcome(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (event, ctx) => {
     const start = ++lifecycle;
-    if (ctx.mode !== "tui") return;
+    if (ctx.mode !== "tui") {
+      return;
+    }
 
     const trusted = ctx.isProjectTrusted();
     if (effectiveQuietStartup(ctx.cwd, getAgentDir(), trusted)) {
@@ -80,12 +82,16 @@ export default function welcome(pi: ExtensionAPI): void {
       }),
       startupSessions(ctx),
     ]);
-    if (start !== lifecycle) return;
+    if (start !== lifecycle) {
+      return;
+    }
 
     state.selectedTip ??= pickStartupTip();
     const selectedTip = state.selectedTip;
     const playIntro = event.reason === "startup" && !state.introPlayed;
-    if (playIntro) state.introPlayed = true;
+    if (playIntro) {
+      state.introPlayed = true;
+    }
 
     // Pi owns replacement disposal: setting a header disposes the preceding
     // custom header before this factory creates the next welcome component.

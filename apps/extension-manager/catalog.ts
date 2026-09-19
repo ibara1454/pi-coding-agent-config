@@ -40,12 +40,20 @@ function resolveRows(
 ): boolean {
   const winner = rows
     .filter((row) => {
-      if (!row.resolutionCandidate) return false;
+      if (!row.resolutionCandidate) {
+        return false;
+      }
       const target = targets.get(row.id);
-      if (target?.type !== "package" || !target.autoloadDelta) return true;
+      if (target?.type !== "package" || !target.autoloadDelta) {
+        return true;
+      }
       const desired = staged.get(row.id);
-      if (desired === true) return target.participatesWhenEnabled;
-      if (desired === false) return target.participatesWhenDisabled;
+      if (desired === true) {
+        return target.participatesWhenEnabled;
+      }
+      if (desired === false) {
+        return target.participatesWhenDisabled;
+      }
       return baseParticipation.get(row.id) ?? target.participates;
     })
     .sort((left, right) => left.resolutionOrder - right.resolutionOrder)[0];
@@ -54,31 +62,33 @@ function resolveRows(
     : (staged.get(winner.id) ?? winner.configured);
 }
 
+interface CatalogBase {
+  readonly rows: Map<string, CatalogRow>;
+  readonly rowKeys: Map<string, string>;
+  readonly participation: Map<string, boolean>;
+}
+
 /**
  * Projects reload resolution without modifying committed rows or staged edits.
- * @param baseRows - Current committed rows indexed by ID.
- * @param rowKeys - Cached resource-kind/canonical-path keys for each row.
+ * @param base - Committed rows, cached resource keys, and package participation.
  * @param targets - Discovery-time toggle policies.
- * @param baseParticipation - Participation retained after successful commits.
- * @param staged - Proposed configuration changes; untouched groups keep their resolution.
+ * @param staged - Proposed configuration; untouched groups keep resolution.
  * @returns Enabled states keyed by resource kind and canonical path.
- * @example
- * With sole top-level candidates "alpha" and "beta" at separate paths, both
- * initially resolved enabled, staging "alpha" off makes its path resolve false:
- * `projectResolved(baseRows, rowKeys, targets, baseParticipation, new Map([["alpha", false]]))`.
- * The result keeps beta's discovery-time true value; neither base row is changed.
+ * @example With independently enabled "alpha" and "beta" rows,
+ * `projectResolved(base, targets, new Map([["alpha", false]]))` disables alpha's
+ * path while preserving beta's discovery-time resolution.
  */
 function projectResolved(
-  baseRows: ReadonlyMap<string, CatalogRow>,
-  rowKeys: ReadonlyMap<string, string>,
+  base: CatalogBase,
   targets: CatalogSeed["targets"],
-  baseParticipation: ReadonlyMap<string, boolean>,
   staged: ReadonlyMap<string, boolean>,
 ): ReadonlyMap<string, boolean> {
   const rowsByPath = new Map<string, CatalogRow[]>();
-  for (const row of baseRows.values()) {
-    const key = rowKeys.get(row.id);
-    if (key === undefined) continue;
+  for (const row of base.rows.values()) {
+    const key = base.rowKeys.get(row.id);
+    if (key === undefined) {
+      continue;
+    }
     const rows = rowsByPath.get(key) ?? [];
     rows.push(row);
     rowsByPath.set(key, rows);
@@ -89,7 +99,7 @@ function projectResolved(
     resolvedByPath.set(
       key,
       rows.some((row) => staged.has(row.id))
-        ? resolveRows(rows, targets, baseParticipation, staged)
+        ? resolveRows(rows, targets, base.participation, staged)
         : (rows[0]?.resolvedAfterReload ?? false),
     );
   }
@@ -114,9 +124,13 @@ function projectRow(
   targets: CatalogSeed["targets"],
   desired: boolean | undefined,
 ): CatalogRow {
-  if (desired === undefined) return row;
+  if (desired === undefined) {
+    return row;
+  }
   const target = targets.get(row.id);
-  if (target === undefined) return row;
+  if (target === undefined) {
+    return row;
+  }
 
   if (target.type === "top-level") {
     const filters = mutateExactPattern({
@@ -208,20 +222,22 @@ function diagnosticMessages(
 export class ExtensionCatalog {
   readonly #seed: CatalogSeed;
   readonly #committer: CatalogCommitter;
-  readonly #baseRows = new Map<string, CatalogRow>();
-  readonly #rowKeys = new Map<string, string>();
+  readonly #base: CatalogBase = {
+    rows: new Map<string, CatalogRow>(),
+    rowKeys: new Map<string, string>(),
+    participation: new Map<string, boolean>(),
+  };
   readonly #staged = new Map<string, boolean>();
-  readonly #baseParticipation = new Map<string, boolean>();
 
   constructor(seed: CatalogSeed, committer: CatalogCommitter) {
     this.#seed = seed;
     this.#committer = committer;
     for (const row of seed.rows) {
-      this.#baseRows.set(row.id, row);
-      this.#rowKeys.set(row.id, `${row.kind}:${row.canonicalPath}`);
+      this.#base.rows.set(row.id, row);
+      this.#base.rowKeys.set(row.id, `${row.kind}:${row.canonicalPath}`);
       const target = seed.targets.get(row.id);
       if (target?.type === "package" && target.autoloadDelta) {
-        this.#baseParticipation.set(row.id, target.participates);
+        this.#base.participation.set(row.id, target.participates);
       }
     }
   }
@@ -241,13 +257,11 @@ export class ExtensionCatalog {
    */
   view(): CatalogView {
     const resolvedByPath = projectResolved(
-      this.#baseRows,
-      this.#rowKeys,
+      this.#base,
       this.#seed.targets,
-      this.#baseParticipation,
       this.#staged,
     );
-    const rows = Array.from(this.#baseRows.values(), (row) => {
+    const rows = Array.from(this.#base.rows.values(), (row) => {
       const projected = projectRow(
         row,
         this.#seed.targets,
@@ -256,7 +270,7 @@ export class ExtensionCatalog {
       return {
         ...projected,
         resolvedAfterReload:
-          resolvedByPath.get(this.#rowKeys.get(row.id) ?? "") ?? false,
+          resolvedByPath.get(this.#base.rowKeys.get(row.id) ?? "") ?? false,
         diagnosticCount: diagnosticMessages(projected, this.#seed).length,
       };
     });
@@ -271,7 +285,7 @@ export class ExtensionCatalog {
   }
 
   stage(id: string, enabled: boolean): void {
-    const row = this.#baseRows.get(id);
+    const row = this.#base.rows.get(id);
     if (row === undefined) {
       throw new Error(`Unknown catalog row: ${id}`);
     }
@@ -387,7 +401,7 @@ export class ExtensionCatalog {
    */
   wouldDisableSelf(path: string, id: string, enabled: boolean): boolean {
     const canonical = canonicalizeResourcePath(path);
-    const row = this.#baseRows.get(id);
+    const row = this.#base.rows.get(id);
     if (
       row === undefined ||
       row.kind !== "extension" ||
@@ -397,26 +411,15 @@ export class ExtensionCatalog {
     }
     const key = `extension:${canonical}`;
     if (
-      projectResolved(
-        this.#baseRows,
-        this.#rowKeys,
-        this.#seed.targets,
-        this.#baseParticipation,
-        this.#staged,
-      ).get(key) !== true
+      projectResolved(this.#base, this.#seed.targets, this.#staged).get(key) !==
+      true
     ) {
       return false;
     }
     const staged = new Map(this.#staged);
     staged.set(id, enabled);
     return (
-      projectResolved(
-        this.#baseRows,
-        this.#rowKeys,
-        this.#seed.targets,
-        this.#baseParticipation,
-        staged,
-      ).get(key) === false
+      projectResolved(this.#base, this.#seed.targets, staged).get(key) === false
     );
   }
 
@@ -437,13 +440,9 @@ export class ExtensionCatalog {
     const canonical = canonicalizeResourcePath(path);
     const staged = includeStaged ? this.#staged : new Map<string, boolean>();
     return (
-      projectResolved(
-        this.#baseRows,
-        this.#rowKeys,
-        this.#seed.targets,
-        this.#baseParticipation,
-        staged,
-      ).get(`extension:${canonical}`) === true
+      projectResolved(this.#base, this.#seed.targets, staged).get(
+        `extension:${canonical}`,
+      ) === true
     );
   }
 
@@ -485,38 +484,38 @@ export class ExtensionCatalog {
     );
     const affectedKeys = new Set<string>();
     for (const [id, enabled] of this.#staged) {
-      const row = this.#baseRows.get(id);
+      const row = this.#base.rows.get(id);
       if (row === undefined || !completedScopes.has(row.scope)) {
         continue;
       }
-      this.#baseRows.set(id, projectRow(row, this.#seed.targets, enabled));
+      this.#base.rows.set(id, projectRow(row, this.#seed.targets, enabled));
       const target = this.#seed.targets.get(id);
       if (target?.type === "package" && target.autoloadDelta) {
-        this.#baseParticipation.set(
+        this.#base.participation.set(
           id,
           enabled
             ? target.participatesWhenEnabled
             : target.participatesWhenDisabled,
         );
       }
-      const key = this.#rowKeys.get(id);
+      const key = this.#base.rowKeys.get(id);
       if (key !== undefined) {
         affectedKeys.add(key);
       }
       this.#staged.delete(id);
     }
     for (const key of affectedKeys) {
-      const rows = Array.from(this.#baseRows.values()).filter(
-        (row) => this.#rowKeys.get(row.id) === key,
+      const rows = Array.from(this.#base.rows.values()).filter(
+        (row) => this.#base.rowKeys.get(row.id) === key,
       );
       const resolved = resolveRows(
         rows,
         this.#seed.targets,
-        this.#baseParticipation,
+        this.#base.participation,
         new Map(),
       );
       for (const row of rows) {
-        this.#baseRows.set(row.id, { ...row, resolvedAfterReload: resolved });
+        this.#base.rows.set(row.id, { ...row, resolvedAfterReload: resolved });
       }
     }
     return result;

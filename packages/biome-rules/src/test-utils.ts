@@ -62,7 +62,9 @@ export function lintRule(rule: string, source: string) {
     categories: ["syntax", "lint"],
     only: ["plugin"],
   });
-  if (diagnostics.length === 0) return [];
+  if (diagnostics.length === 0) {
+    return [];
+  }
   // A diagnostic span is [start, end) byte offsets into the UTF-8 input:
   // start is included and end is excluded. The rule chooses the range;
   // span=$name, for example, highlights a method name rather than its body.

@@ -10,7 +10,9 @@ function signalProcess(
   child: ChildProcessWithoutNullStreams,
   signal: NodeJS.Signals,
 ): void {
-  if (!child.pid) return;
+  if (!child.pid) {
+    return;
+  }
   if (process.platform !== "win32") {
     try {
       process.kill(-child.pid, signal);
@@ -51,7 +53,9 @@ export function spawnProcess(
   });
   // A crashed launcher must not leave its server descendants running.
   child.once("exit", () => {
-    if (process.platform === "win32" || !child.pid) return;
+    if (process.platform === "win32" || !child.pid) {
+      return;
+    }
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch {
@@ -68,8 +72,9 @@ export function spawnProcess(
 export async function stopProcess(
   child: ChildProcessWithoutNullStreams,
 ): Promise<void> {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null)
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
     return;
+  }
   await new Promise<void>((resolve, reject) => {
     let forceTimer: NodeJS.Timeout | undefined;
     let deadlineTimer: NodeJS.Timeout | undefined;
@@ -141,23 +146,27 @@ export async function runCommand(
   }>();
   const onStdout = (chunk: Buffer) => {
     outBytes += chunk.length;
-    if (outBytes > limit)
+    if (outBytes > limit) {
       stop(
         new Error(
           `Command stdout exceeded ${limit} bytes; output is incomplete`,
         ),
       );
-    else stdout.push(chunk);
+    } else {
+      stdout.push(chunk);
+    }
   };
   const onStderr = (chunk: Buffer) => {
     errBytes += chunk.length;
-    if (errBytes > limit)
+    if (errBytes > limit) {
       stop(
         new Error(
           `Command stderr exceeded ${limit} bytes; output is incomplete`,
         ),
       );
-    else stderr.push(chunk);
+    } else {
+      stderr.push(chunk);
+    }
   };
   const cleanup = () => {
     clearTimeout(timer);
@@ -169,25 +178,33 @@ export async function runCommand(
     child.stdin.off("error", onInputError);
   };
   const onError = (error: unknown) => {
-    if (settled) return;
+    if (settled) {
+      return;
+    }
     settled = true;
     cleanup();
     result.reject(error);
   };
   const stop = (reason: unknown) => {
-    if (settled || failure !== undefined) return;
+    if (settled || failure !== undefined) {
+      return;
+    }
     failure = reason;
-    void stopProcess(child).catch(onError);
+    stopProcess(child).catch(onError);
   };
   const onAbort = () => {
     stop(options.signal?.reason ?? new Error("Command cancelled"));
   };
   const onInputError = (error: NodeJS.ErrnoException) => {
     // A process may exit before consuming stdin; its exit status is authoritative.
-    if (error.code !== "EPIPE") stop(error);
+    if (error.code !== "EPIPE") {
+      stop(error);
+    }
   };
   const onClose = (code: number | null) => {
-    if (settled) return;
+    if (settled) {
+      return;
+    }
     settled = true;
     cleanup();
     if (failure !== undefined) {
@@ -210,7 +227,9 @@ export async function runCommand(
     () => stop(new Error(`Command timed out: ${command}`)),
     Math.max(1, options.timeoutMs ?? 30_000),
   );
-  if (options.signal?.aborted) onAbort();
+  if (options.signal?.aborted) {
+    onAbort();
+  }
   child.stdin.end(options.input ?? "");
-  return result.promise;
+  return await result.promise;
 }

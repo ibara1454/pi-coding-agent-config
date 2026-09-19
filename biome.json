@@ -13,7 +13,7 @@
     }
   ],
   "files": {
-    "includes": ["**", "!**/.turbo/**", "!**/node_modules/**"],
+    "includes": ["**", "!**/.turbo", "!**/node_modules"],
     "ignoreUnknown": true
   },
   "formatter": {
@@ -24,8 +24,14 @@
   },
   "linter": {
     "enabled": true,
+    "domains": {
+      "qwik": "none"
+    },
     "rules": {
-      "preset": "recommended",
+      "preset": "all",
+      "correctness": {
+        "noNodejsModules": "off"
+      },
       "nursery": {
         "noFloatingPromises": "error",
         "noMisusedPromises": "error",
@@ -73,6 +79,24 @@
       "quoteStyle": "double"
     }
   },
+  "overrides": [
+    {
+      "includes": ["apps/*/index.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.test.ts", "test/**"],
+      "javascript": {
+        "globals": ["Bun"]
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

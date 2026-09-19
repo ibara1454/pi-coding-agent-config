@@ -15,6 +15,7 @@ const LEFT = "\u001b[D";
 const ENTER = "\r";
 const CTRL_S = "\u0013";
 const SPACE = " ";
+const DISPLAYED_ROW = /^[ >] \[x\] [GP] (\S+)/;
 
 const openPanels: ExtensionManagerPanel[] = [];
 
@@ -49,7 +50,9 @@ function fakeTui(): { readonly tui: TUI; readonly writes: string[] } {
           writes.push(data);
         },
       },
-      requestRender() {},
+      requestRender() {
+        // Tests render frames explicitly; no host render loop is running.
+      },
     } as TUI,
   };
 }
@@ -117,8 +120,8 @@ describe("ExtensionManagerPanel.handleInput", () => {
       }
 
       const displayedRows = panel.render(70).flatMap((line) => {
-        const match = /^[ >] \[x\] [GP] (\S+)/.exec(line);
-        return match ? [match[1]] : [];
+        const match = line.match(DISPLAYED_ROW);
+        return match === null ? [] : [match[1]];
       });
       expect(displayedRows).toEqual([
         "beta-skill",
@@ -155,9 +158,9 @@ describe("ExtensionManagerPanel.handleInput", () => {
       committedScopes: ["global"],
     };
     const { finished, panel, writes } = makePanel({
-      commit: async (request) => {
+      commit: (request) => {
         requests.push(request);
-        return commitResult;
+        return Promise.resolve(commitResult);
       },
     });
     panel.render(70);
@@ -312,9 +315,11 @@ describe("ExtensionManagerPanel.handleInput", () => {
   type NoCommitCase = [
     entryPoint: string,
     outcome: string,
-    trigger: (panel: ExtensionManagerPanel) => void,
-    commit: () => Promise<CommitResult>,
-    expectedMessage: string,
+    scenario: {
+      readonly trigger: NoCommitEntryPoint["trigger"];
+      readonly commit: NoCommitOutcome["commit"];
+      readonly expectedMessage: string;
+    },
   ];
 
   const noCommitOutcomes: NoCommitOutcome[] = [
@@ -344,9 +349,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     },
     {
       label: "thrown",
-      commit: async () => {
-        throw new Error("commit exploded");
-      },
+      commit: () => Promise.reject(new Error("commit exploded")),
       expectedMessage: "commit exploded",
     },
   ];
@@ -375,18 +378,22 @@ describe("ExtensionManagerPanel.handleInput", () => {
         (outcome): NoCommitCase => [
           entryPoint.label,
           outcome.label,
-          entryPoint.trigger,
-          outcome.commit,
-          outcome.expectedMessage,
+          {
+            trigger: entryPoint.trigger,
+            commit: outcome.commit,
+            expectedMessage: outcome.expectedMessage,
+          },
         ],
       ),
   );
 
   test.each(noCommitCases)(
     "should keep the panel open and staged when using %s with %s",
-    async (_entryPoint: string, _outcome: string, trigger: (
-      panel: ExtensionManagerPanel,
-    ) => void, commit: () => Promise<CommitResult>, expectedMessage: string) => {
+    async (_entryPoint: string, _outcome: string, {
+      trigger,
+      commit,
+      expectedMessage,
+    }: NoCommitCase[2]) => {
       const { catalog, panel, results, writes } = makePanel({ commit });
       panel.render(70);
       panel.handleInput(SPACE);

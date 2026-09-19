@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the runtime's live filesystem imports.
 import * as fs from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -14,9 +15,11 @@ import type {
   Diagnostic,
   ServerCapabilities,
 } from "vscode-languageserver-protocol";
-import * as processes from "./process.js";
-import { LanguageServerPool } from "./runtime.js";
-import type { ServerConfig } from "./types.js";
+
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace to intercept and restore consumers.
+import * as processes from "./process.ts";
+import { LanguageServerPool } from "./runtime.ts";
+import type { ServerConfig } from "./types.ts";
 
 const resources: Array<{
   pool: LanguageServerPool;
@@ -24,6 +27,11 @@ const resources: Array<{
   release: () => void;
 }> = [];
 
+/**
+ * Creates a controllable in-memory server with restorable process spies.
+ * Options control initialization and capabilities; afterEach owns disposal.
+ * @example fixture({ holdInitialize: true }).release() // Allows initialization to finish.
+ */
 function fixture(
   options: { holdInitialize?: boolean; capabilities?: ServerCapabilities } = {},
 ) {
@@ -49,20 +57,17 @@ function fixture(
     new StreamMessageReader(stdin),
     new StreamMessageWriter(stdout),
   );
-  let started: () => void = () => {};
-  const initializing = new Promise<void>((resolvePromise) => {
-    started = resolvePromise;
-  });
-  let release: () => void = () => {};
-  const gate = new Promise<void>((resolvePromise) => {
-    release = resolvePromise;
-  });
+  const { promise: initializing, resolve: started } =
+    Promise.withResolvers<void>();
+  const { promise: gate, resolve: release } = Promise.withResolvers<void>();
   const capabilities: ServerCapabilities = options.capabilities ?? {
     textDocumentSync: { openClose: true, change: 2, save: true },
   };
   peer.onRequest("initialize", async () => {
     started();
-    if (options.holdInitialize) await gate;
+    if (options.holdInitialize) {
+      await gate;
+    }
     return { capabilities };
   });
   peer.onRequest("shutdown", () => null);
@@ -76,10 +81,11 @@ function fixture(
   const spawn = spyOn(processes, "spawnProcess").mockReturnValue(
     child as ChildProcessWithoutNullStreams,
   );
-  const stop = spyOn(processes, "stopProcess").mockImplementation(async () => {
+  const stop = spyOn(processes, "stopProcess").mockImplementation(() => {
     child.exitCode = 0;
     child.emit("exit", 0, null);
     child.emit("close", 0, null);
+    return Promise.resolve();
   });
   const pool = new LanguageServerPool({
     cwd: "/project",
@@ -146,7 +152,7 @@ describe("LanguageServerPool.get", () => {
     async (_label, bytes, error) => {
       const server = fixture({ holdInitialize: true });
       const pending = server.pool.get(server.config, AbortSignal.timeout(200));
-      const rejected = pending.catch((error: unknown) => error);
+      const rejected = pending.catch((failure: unknown) => failure);
       await server.initializing;
       server.output.write(bytes);
       expect(await rejected).toMatchObject({
@@ -193,17 +199,12 @@ describe("LanguageServer.diagnostics", () => {
       },
     });
     spyOn(fs, "readFile").mockResolvedValue("const value = 1;\n");
-    let started: () => void = () => {};
-    const pulling = new Promise<void>((resolvePromise) => {
-      started = resolvePromise;
-    });
-    let finish: (report: { kind: "full"; items: Diagnostic[] }) => void =
-      () => {};
-    const response = new Promise<{ kind: "full"; items: Diagnostic[] }>(
-      (resolvePromise) => {
-        finish = resolvePromise;
-      },
-    );
+    const { promise: pulling, resolve: started } =
+      Promise.withResolvers<void>();
+    const { promise: response, resolve: finish } = Promise.withResolvers<{
+      kind: "full";
+      items: Diagnostic[];
+    }>();
     server.peer.onRequest("textDocument/diagnostic", () => {
       started();
       return response;

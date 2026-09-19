@@ -71,7 +71,9 @@ function createDummyPanelHost(): PanelHost {
         writes.push(data);
       },
     },
-    requestRender() {},
+    requestRender() {
+      // This host verifies lifecycle writes, not frame rendering.
+    },
   } as TUI;
   const theme = {
     fg: (_color: string, text: string) => text,
@@ -82,7 +84,7 @@ function createDummyPanelHost(): PanelHost {
     inverse: (text: string) => text,
     strikethrough: (text: string) => text,
   } as Theme;
-  const custom = async <T>(
+  const custom = <T>(
     factory: (
       tui: TUI,
       theme: Theme,
@@ -94,12 +96,16 @@ function createDummyPanelHost(): PanelHost {
     options = customOptions;
     const pending = Promise.withResolvers<T>();
     finish = (result) => pending.resolve(result as T);
-    factory(tui, theme, undefined as never, pending.resolve);
+    try {
+      factory(tui, theme, undefined as never, pending.resolve);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return pending.promise;
   };
   const ctx = { ui: { custom } } as ExtensionCommandContext;
   return {
-    ctx: ctx,
+    ctx,
     finish: (result) => finish(result),
     customOptions: () => options,
     teardowns: () =>

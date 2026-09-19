@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import {
   collectWelcomeExtensions,
   effectiveQuietStartup,
@@ -12,22 +18,21 @@ import {
 const temporaryRoots: string[] = [];
 
 function temporaryDirectory(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-welcome-"));
+  const directory = mkdtempSync(join(tmpdir(), "pi-welcome-"));
   temporaryRoots.push(directory);
   return directory;
 }
 
 function write(filePath: string, content = "export default () => {};\n"): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content);
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, content);
 }
 
 function writePackage(root: string, extensions: readonly string[]): void {
-  write(
-    path.join(root, "package.json"),
-    JSON.stringify({ pi: { extensions } }),
-  );
-  for (const extension of extensions) write(path.join(root, extension));
+  write(join(root, "package.json"), JSON.stringify({ pi: { extensions } }));
+  for (const extension of extensions) {
+    write(join(root, extension));
+  }
 }
 
 function rowsByScope(
@@ -37,37 +42,36 @@ function rowsByScope(
   return rows.filter((row) => row.scope === scope).map((row) => row.name);
 }
 afterEach(() => {
-  for (const directory of temporaryRoots.splice(0))
-    fs.rmSync(directory, { recursive: true, force: true });
+  for (const directory of temporaryRoots.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe("collectWelcomeExtensions", () => {
   test("should honor root entries, ignored files, and symlink targets exactly once", () => {
     const root = temporaryDirectory();
-    const extensions = path.join(root, "extensions");
-    write(path.join(extensions, "first.ts"));
-    write(path.join(extensions, ".hidden.ts"));
-    write(path.join(extensions, "node_modules", "ignored.ts"));
-    write(path.join(extensions, "ignored-by-rule.ts"));
-    write(path.join(extensions, ".gitignore"), "ignored-by-rule.ts\n");
-    const linked = path.join(root, "linked");
-    write(path.join(linked, "index.js"));
-    fs.symlinkSync(linked, path.join(extensions, "linked"), "dir");
+    const extensions = join(root, "extensions");
+    write(join(extensions, "first.ts"));
+    write(join(extensions, ".hidden.ts"));
+    write(join(extensions, "node_modules", "ignored.ts"));
+    write(join(extensions, "ignored-by-rule.ts"));
+    write(join(extensions, ".gitignore"), "ignored-by-rule.ts\n");
+    const linked = join(root, "linked");
+    write(join(linked, "index.js"));
+    symlinkSync(linked, join(extensions, "linked"), "dir");
 
     const discovered = () =>
       collectWelcomeExtensions({
-        cwd: path.join(root, "project"),
+        cwd: join(root, "project"),
         agentDir: root,
         projectTrusted: false,
       })
-        .flatMap((row) =>
-          row.path ? [path.relative(extensions, row.path)] : [],
-        )
+        .flatMap((row) => (row.path ? [relative(extensions, row.path)] : []))
         .sort();
 
     expect(discovered()).toEqual(["first.ts", "linked/index.js"]);
 
-    write(path.join(extensions, "index.ts"));
+    write(join(extensions, "index.ts"));
     expect(discovered()).toEqual(["index.ts"]);
   });
 });
@@ -75,36 +79,34 @@ describe("collectWelcomeExtensions", () => {
 describe("welcome extension snapshot", () => {
   test("should use Pi scope precedence, filters, package deltas, and base directories", () => {
     const root = temporaryDirectory();
-    const agentDir = path.join(root, "agent");
-    const cwd = path.join(root, "project");
-    const projectDir = path.join(cwd, ".pi");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const projectDir = join(cwd, ".pi");
 
-    write(path.join(agentDir, "extensions", "user.ts"));
-    write(path.join(agentDir, "extensions", "disabled.ts"));
-    write(path.join(agentDir, "extensions", "user-dir", "index.ts"));
-    write(path.join(agentDir, "configured.ts"));
-    write(path.join(projectDir, "extensions", "project.ts"));
-    write(path.join(projectDir, "extensions", "project-dir", "index.js"));
-    write(path.join(projectDir, "configured.ts"));
+    write(join(agentDir, "extensions", "user.ts"));
+    write(join(agentDir, "extensions", "disabled.ts"));
+    write(join(agentDir, "extensions", "user-dir", "index.ts"));
+    write(join(agentDir, "configured.ts"));
+    write(join(projectDir, "extensions", "project.ts"));
+    write(join(projectDir, "extensions", "project-dir", "index.js"));
+    write(join(projectDir, "configured.ts"));
 
-    writePackage(path.join(agentDir, "npm", "node_modules", "@scope", "pkg"), [
+    writePackage(join(agentDir, "npm", "node_modules", "@scope", "pkg"), [
       "extensions/one.ts",
     ]);
-    writePackage(
-      path.join(projectDir, "npm", "node_modules", "@scope", "pkg"),
-      ["extensions/one.ts"],
-    );
-    writePackage(
-      path.join(agentDir, "npm", "node_modules", "@scope", "delta"),
-      ["extensions/one.ts", "extensions/two.ts"],
-    );
-    writePackage(
-      path.join(agentDir, "npm", "node_modules", "@scope", "filtered"),
-      ["extensions/hidden.ts"],
-    );
+    writePackage(join(projectDir, "npm", "node_modules", "@scope", "pkg"), [
+      "extensions/one.ts",
+    ]);
+    writePackage(join(agentDir, "npm", "node_modules", "@scope", "delta"), [
+      "extensions/one.ts",
+      "extensions/two.ts",
+    ]);
+    writePackage(join(agentDir, "npm", "node_modules", "@scope", "filtered"), [
+      "extensions/hidden.ts",
+    ]);
 
     write(
-      path.join(agentDir, "settings.json"),
+      join(agentDir, "settings.json"),
       JSON.stringify({
         extensions: ["configured.ts", "!extensions/disabled.ts"],
         packages: [
@@ -115,7 +117,7 @@ describe("welcome extension snapshot", () => {
       }),
     );
     write(
-      path.join(projectDir, "settings.json"),
+      join(projectDir, "settings.json"),
       JSON.stringify({
         extensions: ["configured.ts"],
         packages: [
@@ -133,7 +135,7 @@ describe("welcome extension snapshot", () => {
       cwd,
       agentDir,
       projectTrusted: true,
-      welcomePath: path.join(agentDir, "extensions", "welcome", "index.ts"),
+      welcomePath: join(agentDir, "extensions", "welcome", "index.ts"),
     });
     const project = rowsByScope(rows, "project");
     const user = rowsByScope(rows, "user");
@@ -154,7 +156,7 @@ describe("welcome extension snapshot", () => {
       {
         name: "npm:@scope/pkg:one",
         scope: "project",
-        path: path.join(
+        path: join(
           projectDir,
           "npm",
           "node_modules",
@@ -170,17 +172,17 @@ describe("welcome extension snapshot", () => {
 
   test("should use convention files for a filtered empty manifest and normalize glob entries", () => {
     const root = temporaryDirectory();
-    const agentDir = path.join(root, "agent");
-    const cwd = path.join(root, "project");
-    const packageRoot = path.join(agentDir, "pkg");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const packageRoot = join(agentDir, "pkg");
 
     write(
-      path.join(packageRoot, "package.json"),
+      join(packageRoot, "package.json"),
       JSON.stringify({ pi: { extensions: [] } }),
     );
-    write(path.join(packageRoot, "extensions", "enabled.ts"));
+    write(join(packageRoot, "extensions", "enabled.ts"));
     write(
-      path.join(agentDir, "settings.json"),
+      join(agentDir, "settings.json"),
       JSON.stringify({
         packages: [{ source: " ./pkg ", extensions: ["./extensions/*.ts"] }],
       }),
@@ -192,7 +194,7 @@ describe("welcome extension snapshot", () => {
       {
         name: "enabled",
         scope: "user",
-        path: path.join(packageRoot, "extensions", "enabled.ts"),
+        path: join(packageRoot, "extensions", "enabled.ts"),
         packageSource: " ./pkg ",
       },
     ]);
@@ -200,13 +202,13 @@ describe("welcome extension snapshot", () => {
 
   test("should omit all project-local settings, packages, and files when untrusted", () => {
     const root = temporaryDirectory();
-    const agentDir = path.join(root, "agent");
-    const cwd = path.join(root, "project");
-    write(path.join(agentDir, "extensions", "user.ts"));
-    write(path.join(cwd, ".pi", "extensions", "project.ts"));
-    write(path.join(cwd, ".pi", "configured.ts"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    write(join(agentDir, "extensions", "user.ts"));
+    write(join(cwd, ".pi", "extensions", "project.ts"));
+    write(join(cwd, ".pi", "configured.ts"));
     write(
-      path.join(cwd, ".pi", "settings.json"),
+      join(cwd, ".pi", "settings.json"),
       JSON.stringify({
         extensions: ["configured.ts"],
         packages: ["npm:@scope/project"],
@@ -225,14 +227,14 @@ describe("welcome extension snapshot", () => {
 
   test("should honor effective quiet startup and its verbose command-line override", () => {
     const root = temporaryDirectory();
-    const agentDir = path.join(root, "agent");
-    const cwd = path.join(root, "project");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
     write(
-      path.join(agentDir, "settings.json"),
+      join(agentDir, "settings.json"),
       JSON.stringify({ quietStartup: true }),
     );
     write(
-      path.join(cwd, ".pi", "settings.json"),
+      join(cwd, ".pi", "settings.json"),
       JSON.stringify({ quietStartup: false }),
     );
 

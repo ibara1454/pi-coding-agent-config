@@ -43,6 +43,7 @@ import type {
 } from "./types.ts";
 
 const RESOURCE_FIELDS = ["extensions", "skills"] as const;
+const EXTENSION_SUFFIX = /\.(?:[cm]?[jt]s)$/i;
 
 class SnapshotSettingsStorage {
   readonly #global: string;
@@ -70,6 +71,15 @@ interface DiscoveryOptions {
   readonly cwd: string;
   readonly projectTrusted: boolean;
   readonly reloadPending: boolean;
+}
+
+interface DiscoveryContext extends Pick<DiscoveryOptions, "cwd" | "agentDir"> {
+  readonly diagnostics: CatalogDiagnostic[];
+}
+
+interface PackageFilter {
+  readonly autoloadDisabled: boolean;
+  readonly patterns?: readonly string[];
 }
 
 interface ResourceDraft {
@@ -240,20 +250,30 @@ function expandTopLevelGlobs(
   return expanded;
 }
 
-async function resolveTopLevelSettings(
+/**
+ * Resolves one scope's expanded top-level entries without installing packages.
+ * @returns Resolved resources; setup and resolver errors reject the promise.
+ * @example `await resolveTopLevelSettings("global", {}, "/repo", "/agent")`
+ * discovers global autoload resources without changing settings.
+ */
+function resolveTopLevelSettings(
   scope: ResourceScope,
   settings: JsonObject,
   cwd: string,
   agentDir: string,
 ): Promise<ResolvedPaths> {
-  const expanded = expandTopLevelGlobs(scope, settings, cwd, agentDir);
-  const settingsManager = settingsManagerForScope(scope, expanded);
-  const packageManager = new DefaultPackageManager({
-    cwd,
-    agentDir,
-    settingsManager,
-  });
-  return packageManager.resolve(async () => "skip");
+  try {
+    const expanded = expandTopLevelGlobs(scope, settings, cwd, agentDir);
+    const settingsManager = settingsManagerForScope(scope, expanded);
+    const packageManager = new DefaultPackageManager({
+      cwd,
+      agentDir,
+      settingsManager,
+    });
+    return packageManager.resolve(async () => "skip");
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 function appendOrigin(
@@ -298,13 +318,20 @@ function resourceKey(
   return `${scope}:${kind}:${canonicalizeResourcePath(path)}`;
 }
 
+/**
+ * Discovers top-level resources and their settings origins for one scope.
+ * @param context - Resolution directories and the shared diagnostic sink.
+ * @returns Drafts recovered from successful resolutions; individual failures
+ * append diagnostics instead of hiding other resources.
+ * @example `await discoverTopLevelScope("global", document, context)` retains
+ * autoload rows even when one configured extension cannot be resolved.
+ */
 async function discoverTopLevelScope(
   scope: ResourceScope,
   document: SettingsDocument,
-  cwd: string,
-  agentDir: string,
-  diagnostics: CatalogDiagnostic[],
+  context: DiscoveryContext,
 ): Promise<ResourceDraft[]> {
+  const { cwd, agentDir, diagnostics } = context;
   const settings = scopedSettings(document.value, diagnostics, scope);
   const candidates = new Map<string, ResolvedResource>();
   const origins = new Map<string, ResourceOrigin[]>();
@@ -453,16 +480,19 @@ async function discoverTopLevelScope(
   });
 }
 
+/**
+ * Reads a package's kind filter, diagnosing invalid entries without throwing.
+ * @param origin - Scope and source attached to validation diagnostics.
+ * @example `packagePatterns("npm:kit", "skills", diagnostics, origin)` returns
+ * `{ autoloadDisabled: false }`, leaving package autoload enabled.
+ */
 function packagePatterns(
   entry: unknown,
   field: ResourceField,
   diagnostics: CatalogDiagnostic[],
-  scope: ResourceScope,
-  source: string,
-): {
-  readonly autoloadDisabled: boolean;
-  readonly patterns?: readonly string[];
-} {
+  origin: { readonly scope: ResourceScope; readonly source: string },
+): PackageFilter {
+  const { scope, source } = origin;
   if (typeof entry === "string") {
     return { autoloadDisabled: false };
   }
@@ -494,10 +524,7 @@ function packageResourceEnabled(
   resource: ResolvedResource,
   allPaths: readonly string[],
   packageRoot: string,
-  filter: {
-    readonly autoloadDisabled: boolean;
-    readonly patterns?: readonly string[];
-  },
+  filter: PackageFilter,
 ): boolean {
   if (filter.autoloadDisabled) {
     return filter.patterns === undefined
@@ -522,10 +549,7 @@ function packageResourceEnabled(
 function packageConfigurationReason(
   resource: ResolvedResource,
   packageRoot: string,
-  filter: {
-    readonly autoloadDisabled: boolean;
-    readonly patterns?: readonly string[];
-  },
+  filter: PackageFilter,
 ): string {
   if (filter.autoloadDisabled) {
     return explainFilterState(
@@ -549,17 +573,25 @@ function packageConfigurationReason(
   ).reason;
 }
 
+/**
+ * Projects whether an autoload-disabled package participates after a toggle.
+ * Does not mutate the package filter or write settings.
+ * @param projection - Package paths, resource kind, and current filter.
+ * @param desired - Optional staged state; omission uses current patterns.
+ * @example With autoload enabled, `packageResourceParticipation(resource,
+ * projection, false)` remains true: disabling affects resolution, not ownership.
+ */
 function packageResourceParticipation(
   resource: ResolvedResource,
-  allPaths: readonly string[],
-  packageRoot: string,
-  kind: ResourceKind,
-  filter: {
-    readonly autoloadDisabled: boolean;
-    readonly patterns?: readonly string[];
+  projection: {
+    readonly allPaths: readonly string[];
+    readonly packageRoot: string;
+    readonly kind: ResourceKind;
+    readonly filter: PackageFilter;
   },
   desired?: boolean,
 ): boolean {
+  const { allPaths, packageRoot, kind, filter } = projection;
   if (!filter.autoloadDisabled) {
     return true;
   }
@@ -579,14 +611,22 @@ function packageResourceParticipation(
   }
   return matchesAutoloadDisabledPattern(resource.path, patterns, packageRoot);
 }
+/**
+ * Discovers installed package resources with scope and duplicate precedence.
+ * @param context - Resolution directories and the shared diagnostic sink.
+ * @param globalDocument - Global package aliases available to project entries.
+ * @returns Drafts from usable packages; individual package failures are reported
+ * as diagnostics so discovery can continue without installing anything.
+ * @example `await discoverPackageScope("global", document, context)` returns
+ * an empty list when the document has no packages.
+ */
 async function discoverPackageScope(
   scope: ResourceScope,
   document: SettingsDocument,
-  cwd: string,
-  agentDir: string,
-  diagnostics: CatalogDiagnostic[],
+  context: DiscoveryContext,
   globalDocument?: SettingsDocument,
 ): Promise<ResourceDraft[]> {
+  const { cwd, agentDir, diagnostics } = context;
   const packageEntries = document.value.packages;
   if (packageEntries === undefined) {
     return [];
@@ -703,14 +743,12 @@ async function discoverPackageScope(
               metadata: fallbackMetadata,
             },
         );
-        const filter = packagePatterns(
-          entry,
-          field,
-          diagnostics,
+        const filter = packagePatterns(entry, field, diagnostics, {
           scope,
           source,
-        );
+        });
         const kind = kindForField(field);
+        const projection = { allPaths, packageRoot, kind, filter };
         for (const resource of resources) {
           const configured = packageResourceEnabled(
             resource,
@@ -720,10 +758,7 @@ async function discoverPackageScope(
           );
           const participates = packageResourceParticipation(
             resource,
-            allPaths,
-            packageRoot,
-            kind,
-            filter,
+            projection,
           );
           drafts.push({
             configured,
@@ -756,18 +791,12 @@ async function discoverPackageScope(
               participates,
               participatesWhenEnabled: packageResourceParticipation(
                 resource,
-                allPaths,
-                packageRoot,
-                kind,
-                filter,
+                projection,
                 true,
               ),
               participatesWhenDisabled: packageResourceParticipation(
                 resource,
-                allPaths,
-                packageRoot,
-                kind,
-                filter,
+                projection,
                 false,
               ),
               hadFilterField: filter.patterns !== undefined,
@@ -912,7 +941,7 @@ function rowName(path: string, kind: ResourceKind): string {
   if (kind === "skill" && basename(path) === "SKILL.md") {
     return basename(dirname(path));
   }
-  const stem = basename(path).replace(/\.(?:[cm]?[jt]s)$/i, "");
+  const stem = basename(path).replace(EXTENSION_SUFFIX, "");
   return kind === "extension" && stem === "index"
     ? basename(dirname(path))
     : stem;
@@ -939,17 +968,23 @@ function resolutionOrder(draft: ResourceDraft, draftIndex: number): number {
   return rank * 1_000_000_000_000 + draftIndex;
 }
 
+/**
+ * Materializes drafts into sorted rows and persistence targets without writes.
+ * @param context - Directories for skill metadata and its diagnostic sink.
+ * @param projectRegularPackages - Project winners that shadow global packages.
+ * @returns Catalog rows and targets sharing stable resource IDs.
+ * @example `materializeCatalog([], resolved, context, new Map())` produces no rows.
+ */
 function materializeCatalog(
   drafts: readonly ResourceDraft[],
   resolved: ResolvedPaths,
-  cwd: string,
-  agentDir: string,
-  diagnostics: CatalogDiagnostic[],
+  context: DiscoveryContext,
   projectRegularPackages: ReadonlyMap<string, string>,
 ): {
   readonly rows: CatalogRow[];
   readonly targets: Map<string, ToggleTarget>;
 } {
+  const { cwd, agentDir, diagnostics } = context;
   const resolvedByCanonical = aggregateResources(resolved);
   const skills = skillMetadata(drafts, cwd, agentDir, diagnostics);
   const allPathsByTargetGroup = new Map<string, string[]>();
@@ -1102,6 +1137,11 @@ export async function discoverCatalog(
   options: DiscoveryOptions,
 ): Promise<CatalogSeed> {
   const diagnostics: CatalogDiagnostic[] = [];
+  const context: DiscoveryContext = {
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    diagnostics,
+  };
   const globalDocument = readSettingsDocument(
     "global",
     options.cwd,
@@ -1137,21 +1177,8 @@ export async function discoverCatalog(
   const drafts: ResourceDraft[] = [];
   for (const [scope, document] of documents) {
     drafts.push(
-      ...(await discoverTopLevelScope(
-        scope,
-        document,
-        options.cwd,
-        options.agentDir,
-        diagnostics,
-      )),
-      ...(await discoverPackageScope(
-        scope,
-        document,
-        options.cwd,
-        options.agentDir,
-        diagnostics,
-        globalDocument,
-      )),
+      ...(await discoverTopLevelScope(scope, document, context)),
+      ...(await discoverPackageScope(scope, document, context, globalDocument)),
     );
   }
 
@@ -1181,9 +1208,7 @@ export async function discoverCatalog(
   const materialized = materializeCatalog(
     drafts,
     resolved,
-    options.cwd,
-    options.agentDir,
-    diagnostics,
+    context,
     regularProjectPackageWinners(
       documents.get("project"),
       options.cwd,

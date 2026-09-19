@@ -134,13 +134,14 @@ function commandHost(options: {
         notify(message: string, level: string) {
           notifications.push({ message, level });
         },
-        async select(message: string, choices: readonly string[]) {
+        select(message: string, choices: readonly string[]) {
           prompts.push({ message, options: choices });
-          return selections.shift();
+          return Promise.resolve(selections.shift());
         },
       },
-      async waitForIdle() {
+      waitForIdle() {
         options.trace?.push("wait");
+        return Promise.resolve();
       },
       isProjectTrusted() {
         return options.trusted ?? true;
@@ -187,14 +188,14 @@ describe("registerExtensionManager", () => {
     const inputs: DiscoverInput[] = [];
     const pi = piHarness(
       runtimeAdapter({
-        discover: async (input) => {
+        discover: (input) => {
           trace.push("discover");
           inputs.push(input);
-          return seed();
+          return Promise.resolve(seed());
         },
-        openPanel: async () => {
+        openPanel: () => {
           trace.push("open");
-          return { type: "closed" };
+          return Promise.resolve({ type: "closed" });
         },
       }),
     );
@@ -218,12 +219,14 @@ describe("registerExtensionManager", () => {
     const openPanel = mock(async () => ({ type: "closed" }) as const);
     const pi = piHarness(
       runtimeAdapter({
-        discover: async () => {
+        discover: () => {
           attempts += 1;
           if (attempts === 1) {
-            throw new PackageResolutionFailure("resolver failed");
+            return Promise.reject(
+              new PackageResolutionFailure("resolver failed"),
+            );
           }
-          return seed();
+          return Promise.resolve(seed());
         },
         openPanel,
       }),
@@ -244,9 +247,8 @@ describe("registerExtensionManager", () => {
     const openPanel = mock(async () => ({ type: "closed" }) as const);
     const pi = piHarness(
       runtimeAdapter({
-        discover: async () => {
-          throw new PackageResolutionFailure("resolver failed");
-        },
+        discover: () =>
+          Promise.reject(new PackageResolutionFailure("resolver failed")),
         openPanel,
       }),
     );
@@ -271,9 +273,7 @@ describe("registerExtensionManager", () => {
       const openPanel = mock(async () => ({ type: "closed" }) as const);
       const pi = piHarness(
         runtimeAdapter({
-          discover: async () => {
-            throw thrown;
-          },
+          discover: () => Promise.reject(thrown),
           openPanel,
         }),
       );
@@ -300,15 +300,15 @@ describe("registerExtensionManager", () => {
         }
       | undefined;
     const runtime = runtimeAdapter({
-      commit: async (request) => {
+      commit: (request) => {
         requests.push(request);
-        return { scopes: [], committedScopes: [] };
+        return Promise.resolve({ scopes: [], committedScopes: [] });
       },
       discover: async () =>
         seed({ settings, tuiMode: "fullscreen", projectTrusted: false }),
-      openPanel: async (ctx, catalog, selfPath) => {
+      openPanel: (ctx, catalog, selfPath) => {
         opened = { ctx, catalog, selfPath };
-        return { type: "closed" };
+        return Promise.resolve({ type: "closed" });
       },
     });
     const pi = piHarness(runtime);
@@ -335,9 +335,9 @@ describe("registerExtensionManager", () => {
     const pending: boolean[] = [];
     const pi = piHarness(
       runtimeAdapter({
-        discover: async (input) => {
+        discover: (input) => {
           pending.push(input.reloadPending);
-          return seed({ reloadPending: input.reloadPending });
+          return Promise.resolve(seed({ reloadPending: input.reloadPending }));
         },
       }),
     );
@@ -355,29 +355,31 @@ describe("registerExtensionManager", () => {
     let opens = 0;
     const pi = piHarness(
       runtimeAdapter({
-        discover: async (input) => {
+        discover: (input) => {
           pending.push(input.reloadPending);
-          return seed({ reloadPending: input.reloadPending });
+          return Promise.resolve(seed({ reloadPending: input.reloadPending }));
         },
-        openPanel: async () => {
+        openPanel: () => {
           opens += 1;
-          return opens === 1
-            ? {
-                type: "commit",
-                selfDisableCommitted: false,
-                result: {
-                  scopes: [
-                    { scope: "global", status: "committed" },
-                    {
-                      scope: "project",
-                      status: "failed",
-                      message: "disk full",
-                    },
-                  ],
-                  committedScopes: ["global"],
-                },
-              }
-            : { type: "closed" };
+          return Promise.resolve(
+            opens === 1
+              ? {
+                  type: "commit",
+                  selfDisableCommitted: false,
+                  result: {
+                    scopes: [
+                      { scope: "global", status: "committed" },
+                      {
+                        scope: "project",
+                        status: "failed",
+                        message: "disk full",
+                      },
+                    ],
+                    committedScopes: ["global"],
+                  },
+                }
+              : { type: "closed" },
+          );
         },
       }),
     );

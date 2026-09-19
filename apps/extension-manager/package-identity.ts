@@ -2,6 +2,13 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ResourceScope } from "./types.ts";
 
+const GIT_URL_SCHEME = /^(?:https?|ssh|git):\/\//i;
+const GIT_PROVIDER = /^(?:github|gitlab|bitbucket):/i;
+const PROVIDER_PATH = /:(.+)/;
+const SCP_GIT_URL = /^git@([^:]+):(.+)$/;
+const LEADING_SLASHES = /^\/+/;
+const GIT_SUFFIX = /\.git$/;
+
 function npmPackageName(spec: string): string {
   if (spec.startsWith("@")) {
     const separator = spec.indexOf("@", spec.indexOf("/") + 1);
@@ -15,11 +22,11 @@ function gitPackageIdentity(source: string): string | undefined {
   const trimmed = source.trim();
   const hasGitPrefix = trimmed.startsWith("git:");
   let candidate = hasGitPrefix ? trimmed.slice("git:".length).trim() : trimmed;
-  if (!hasGitPrefix && !/^(?:https?|ssh|git):\/\//i.test(candidate)) {
+  if (!hasGitPrefix && !GIT_URL_SCHEME.test(candidate)) {
     return undefined;
   }
-  if (/^(?:github|gitlab|bitbucket):/i.test(candidate)) {
-    const [provider, path] = candidate.split(/:(.+)/, 2);
+  if (GIT_PROVIDER.test(candidate)) {
+    const [provider, path] = candidate.split(PROVIDER_PATH, 2);
     const host =
       provider?.toLowerCase() === "github"
         ? "github.com"
@@ -29,7 +36,7 @@ function gitPackageIdentity(source: string): string | undefined {
     candidate = `${host}/${path ?? ""}`;
   }
 
-  const scp = candidate.match(/^git@([^:]+):(.+)$/);
+  const scp = candidate.match(SCP_GIT_URL);
   let host: string;
   let path: string;
   if (scp !== null) {
@@ -39,7 +46,7 @@ function gitPackageIdentity(source: string): string | undefined {
     try {
       const parsed = new URL(candidate);
       host = parsed.hostname;
-      path = parsed.pathname.replace(/^\/+/, "");
+      path = parsed.pathname.replace(LEADING_SLASHES, "");
     } catch {
       return undefined;
     }
@@ -51,7 +58,7 @@ function gitPackageIdentity(source: string): string | undefined {
     host = candidate.slice(0, slash);
     path = candidate.slice(slash + 1);
   }
-  path = path.split("@", 1)[0]?.replace(/\.git$/, "") ?? "";
+  path = path.split("@", 1)[0]?.replace(GIT_SUFFIX, "") ?? "";
   return host === "" || path === ""
     ? undefined
     : `git:${host.toLowerCase()}/${path.toLowerCase()}`;

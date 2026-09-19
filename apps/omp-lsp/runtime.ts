@@ -20,8 +20,8 @@ import {
   type TextDocumentSyncOptions,
   type WorkspaceEdit,
 } from "vscode-languageserver-protocol";
-import { spawnProcess, stopProcess } from "./process.js";
-import type { ServerConfig } from "./types.js";
+import { spawnProcess, stopProcess } from "./process.ts";
+import type { ServerConfig } from "./types.ts";
 
 export interface DiagnosticReport {
   items: Diagnostic[];
@@ -88,6 +88,12 @@ const WRITE_TIMEOUT_MS = 5_000;
 const DIAGNOSTIC_TIMEOUT_MS = 10_000;
 const DIAGNOSTIC_SETTLE_MS = 250;
 
+const CONTAINER_FILENAME = /^(dockerfile|containerfile)(\.|$)/;
+const CONTENT_LENGTH_HEADER = /^content-length:/i;
+const CONTENT_LENGTH_VALUE = /^content-length:\s*(\d+)\s*$/i;
+const RUST_ANALYZER_COMMAND = /^rust-analyzer(?:\.exe)?$/;
+const FILE_OPERATION_METHOD = /\/(will|did)(Create|Rename|Delete)Files$/;
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -103,7 +109,9 @@ function aborted(signal: AbortSignal): Error {
 }
 
 function check(signal?: AbortSignal): void {
-  if (signal?.aborted) throw aborted(signal);
+  if (signal?.aborted) {
+    throw aborted(signal);
+  }
 }
 
 function duration(value: number | undefined, fallback: number): number {
@@ -112,47 +120,71 @@ function duration(value: number | undefined, fallback: number): number {
     : fallback;
 }
 
-/** Bounds a wait, without transferring ownership of a shared operation to its caller. */
+/**
+ * Bounds a caller's wait without transferring ownership of shared work.
+ * @param work - Shared operation whose result remains observed after cancellation.
+ * @param signals - Caller and owner lifetimes that may cancel this wait.
+ * @param options - Optional timeout, error label, and cancellation callback.
+ * @returns The work result, or a rejection after cancellation or timeout.
+ * @example bounded(startup, [signal], { timeoutMs: 1000 }) cancels only this wait.
+ */
 function bounded<T>(
   work: Promise<T>,
   signals: readonly (AbortSignal | undefined)[],
-  timeoutMs?: number,
-  label = "LSP operation",
-  onCancel?: () => void,
+  options: {
+    timeoutMs?: number;
+    label?: string;
+    onCancel?: () => void;
+  } = {},
 ): Promise<T> {
+  const { timeoutMs, label = "LSP operation", onCancel } = options;
   return new Promise<T>((resolvePromise, reject) => {
     let done = false;
     let timer: NodeJS.Timeout | undefined;
     const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
     const finish = (): boolean => {
-      if (done) return false;
+      if (done) {
+        return false;
+      }
       done = true;
       clearTimeout(timer);
-      for (const entry of listeners)
+      for (const entry of listeners) {
         entry.signal.removeEventListener("abort", entry.listener);
+      }
       return true;
     };
     const cancel = (error: Error) => {
-      if (done) return;
+      if (done) {
+        return;
+      }
       try {
         onCancel?.();
       } catch (cleanupError) {
-        if (finish())
+        if (finish()) {
           reject(new AggregateError([error, cleanupError], error.message));
+        }
         return;
       }
-      if (finish()) reject(error);
+      if (finish()) {
+        reject(error);
+      }
     };
     work.then(
       (value) => {
-        if (finish()) resolvePromise(value);
+        if (finish()) {
+          resolvePromise(value);
+        }
       },
       (error: unknown) => {
-        if (finish()) reject(asError(error));
+        if (finish()) {
+          reject(asError(error));
+        }
       },
     );
     for (const signal of signals) {
-      if (!signal) continue;
+      if (!signal) {
+        continue;
+      }
       if (signal.aborted) {
         cancel(aborted(signal));
         return;
@@ -161,11 +193,12 @@ function bounded<T>(
       listeners.push({ signal, listener });
       signal.addEventListener("abort", listener, { once: true });
     }
-    if (timeoutMs !== undefined)
+    if (timeoutMs !== undefined) {
       timer = setTimeout(
         () => cancel(new Error(`${label} timed out after ${timeoutMs} ms`)),
         timeoutMs,
       );
+    }
   });
 }
 
@@ -181,8 +214,9 @@ function pause(
 }
 
 function fileKey(file: string): string {
-  if (!isAbsolute(file))
+  if (!isAbsolute(file)) {
     throw new Error(`LSP requires an absolute file path: ${file}`);
+  }
   const normalized = resolve(file);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
@@ -273,11 +307,19 @@ function languageId(config: ServerConfig, file: string): string {
     config.extensionToLanguage?.[extension] ??
     config.extensionToLanguage?.[extension.slice(1)] ??
     config.languageId;
-  if (explicit) return explicit;
+  if (explicit) {
+    return explicit;
+  }
   const name = basename(file).toLowerCase();
-  if (/^(dockerfile|containerfile)(\.|$)/.test(name)) return "dockerfile";
-  if (name === "cmakelists.txt") return "cmake";
-  if (["gemfile", "rakefile", "guardfile"].includes(name)) return "ruby";
+  if (CONTAINER_FILENAME.test(name)) {
+    return "dockerfile";
+  }
+  if (name === "cmakelists.txt") {
+    return "cmake";
+  }
+  if (["gemfile", "rakefile", "guardfile"].includes(name)) {
+    return "ruby";
+  }
   return aliases[extension.slice(1)] ?? (extension.slice(1) || "plaintext");
 }
 
@@ -363,8 +405,8 @@ function clientCapabilities(): ClientCapabilities {
 /** Validate framing before vscode-jsonrpc can grow its message buffer. */
 class BoundedLspInput extends Transform {
   private readonly header = Buffer.allocUnsafe(16 * 1024);
-  private headerBytes = 0;
-  private bodyRemaining = 0;
+  private headerBytes: number = 0;
+  private bodyRemaining: number = 0;
 
   override _transform(
     chunk: Buffer,
@@ -383,8 +425,9 @@ class BoundedLspInput extends Transform {
         }
         let complete = false;
         while (offset < chunk.length) {
-          if (this.headerBytes === this.header.length)
+          if (this.headerBytes === this.header.length) {
             throw new Error("LSP header exceeds 16 KiB");
+          }
           this.header.writeUInt8(chunk.readUInt8(offset++), this.headerBytes++);
           const size = this.headerBytes;
           if (
@@ -398,21 +441,25 @@ class BoundedLspInput extends Transform {
             break;
           }
         }
-        if (!complete) continue;
+        if (!complete) {
+          continue;
+        }
         const header = this.header.subarray(0, this.headerBytes);
         const lengths = header
           .toString("ascii")
           .split("\r\n")
-          .filter((line) => /^content-length:/i.test(line));
+          .filter((line) => CONTENT_LENGTH_HEADER.test(line));
         const rawLength =
           lengths.length === 1
-            ? lengths[0]?.match(/^content-length:\s*(\d+)\s*$/i)?.[1]
+            ? lengths[0]?.match(CONTENT_LENGTH_VALUE)?.[1]
             : undefined;
         const length = rawLength === undefined ? NaN : Number(rawLength);
-        if (!Number.isSafeInteger(length) || length <= 0)
+        if (!Number.isSafeInteger(length) || length <= 0) {
           throw new Error("Invalid LSP Content-Length header");
-        if (length > 16 * 1024 * 1024)
+        }
+        if (length > 16 * 1024 * 1024) {
           throw new Error("LSP message exceeds 16 MiB");
+        }
         // The header storage is reused; the downstream reader owns this copy.
         this.push(Buffer.from(header));
         this.headerBytes = 0;
@@ -457,9 +504,9 @@ class StdioLanguageServer implements LanguageServer {
   readonly config: ServerConfig;
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly input = new BoundedLspInput();
-  private readonly options: PoolOptions;
-  private readonly connection: MessageConnection;
-  private readonly state: ServerState = {
+  readonly options: PoolOptions;
+  readonly connection: MessageConnection;
+  readonly state: ServerState = {
     lifetime: new AbortController(),
     documents: new Map(),
     publications: new Map(),
@@ -525,19 +572,26 @@ class StdioLanguageServer implements LanguageServer {
       (params: unknown) => publish(this.state, this, params),
     );
     this.connection.onNotification("$/progress", (params: unknown) => {
-      if (!record(params)) return;
+      if (!record(params)) {
+        return;
+      }
       const { value, token } = params;
       if (
         !record(value) ||
         (typeof token !== "string" && typeof token !== "number")
-      )
+      ) {
         return;
+      }
       const { kind } = value;
-      if (kind === "begin") this.state.progress.add(token);
-      if (kind === "end") this.state.progress.delete(token);
+      if (kind === "begin") {
+        this.state.progress.add(token);
+      }
+      if (kind === "end") {
+        this.state.progress.delete(token);
+      }
     });
     this.connection.onRequest((method: string, params: unknown) =>
-      serverRequest(this.state, this, this.options, method, params),
+      serverRequest(this, method, params),
     );
     this.connection.listen();
     this.child.stdout.pipe(this.input);
@@ -652,28 +706,32 @@ class StdioLanguageServer implements LanguageServer {
       signal,
       duration(this.config.warmupTimeoutMs, REQUEST_TIMEOUT_MS),
     );
-    if (!record(result))
+    if (!record(result)) {
       throw new Error(
         `LSP ${this.config.name} returned an invalid initialize result`,
       );
+    }
     const { capabilities } = result;
-    if (!record(capabilities))
+    if (!record(capabilities)) {
       throw new Error(
         `LSP ${this.config.name} returned an invalid initialize result`,
       );
+    }
     const { positionEncoding, textDocumentSync: sync } = capabilities;
-    if (positionEncoding !== undefined && positionEncoding !== "utf-16")
+    if (positionEncoding !== undefined && positionEncoding !== "utf-16") {
       throw new Error(
         `LSP ${this.config.name} selected unsupported position encoding: ${String(positionEncoding)}`,
       );
+    }
     if (
       sync !== undefined &&
       !(typeof sync === "number" && [0, 1, 2].includes(sync)) &&
       !record(sync)
-    )
+    ) {
       throw new Error(
         `LSP ${this.config.name} returned invalid text synchronization capabilities`,
       );
+    }
     if (record(sync)) {
       const { change, openClose, save } = sync;
       if (
@@ -681,10 +739,11 @@ class StdioLanguageServer implements LanguageServer {
           (typeof change !== "number" || ![0, 1, 2].includes(change))) ||
         (openClose !== undefined && typeof openClose !== "boolean") ||
         (save !== undefined && typeof save !== "boolean" && !record(save))
-      )
+      ) {
         throw new Error(
           `LSP ${this.config.name} returned invalid text synchronization options`,
         );
+      }
     }
     this.state.baseCapabilities = capabilities as ServerCapabilities;
     this.state.effectiveCapabilities = registeredCapabilities(
@@ -733,17 +792,13 @@ class StdioLanguageServer implements LanguageServer {
         this.state.initialized &&
         this.state.progress.size > 0 &&
         method !== "rust-analyzer/analyzerStatus"
-      )
+      ) {
         await waitForWorkspace(this.state, this, signal, timeout);
-      return rpc<T>(
-        this.state,
-        this,
-        this.connection,
-        method,
-        params,
+      }
+      return rpc<T>(this, method, params, {
         signal,
-        Math.max(1, deadline - Date.now()),
-      );
+        timeoutMs: Math.max(1, deadline - Date.now()),
+      });
     });
   }
 
@@ -767,8 +822,10 @@ class StdioLanguageServer implements LanguageServer {
         await bounded(
           this.connection.sendNotification(method, params),
           [this.state.lifetime.signal],
-          WRITE_TIMEOUT_MS,
-          `LSP ${this.config.name} ${method}`,
+          {
+            timeoutMs: WRITE_TIMEOUT_MS,
+            label: `LSP ${this.config.name} ${method}`,
+          },
         );
       } catch (error) {
         fail(this.state, this, asError(error));
@@ -796,7 +853,7 @@ class StdioLanguageServer implements LanguageServer {
     content?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    return queue(this.state, this, file, signal, async () => {
+    return queue(this, file, signal, async () => {
       const key = fileKey(file);
       let text = content;
       if (text === undefined) {
@@ -809,19 +866,24 @@ class StdioLanguageServer implements LanguageServer {
         text = await bounded(
           readFile(file, { encoding: "utf8", signal: readSignal }),
           [readSignal],
-          WRITE_TIMEOUT_MS,
-          `Reading ${file}`,
-          () => readController.abort(),
+          {
+            timeoutMs: WRITE_TIMEOUT_MS,
+            label: `Reading ${file}`,
+            onCancel: () => readController.abort(),
+          },
         );
       }
       check(signal);
       const prior = this.state.documents.get(key);
-      if (prior?.content === text) return;
+      if (prior?.content === text) {
+        return;
+      }
       const sync = syncOptions(this.capabilities.textDocumentSync);
-      if (prior && !sync.change && !sync.openClose)
+      if (prior && !sync.change && !sync.openClose) {
         throw new Error(
           `LSP ${this.config.name} cannot synchronize changes to ${file}`,
         );
+      }
       const snapshot: DocumentSnapshot = {
         version: ++this.state.version,
         content: text,
@@ -831,9 +893,10 @@ class StdioLanguageServer implements LanguageServer {
       this.state.diagnosticErrors.delete(key);
       const uri = pathToFileURL(file).href;
       if (!prior || !sync.change) {
-        if (prior && sync.openClose)
+        if (prior && sync.openClose) {
           await this.notify("textDocument/didClose", { textDocument: { uri } });
-        if (sync.openClose)
+        }
+        if (sync.openClose) {
           await this.notify("textDocument/didOpen", {
             textDocument: {
               uri,
@@ -842,6 +905,7 @@ class StdioLanguageServer implements LanguageServer {
               text,
             },
           });
+        }
       } else {
         let change: {
           text: string;
@@ -856,8 +920,9 @@ class StdioLanguageServer implements LanguageServer {
           for (let index = 0; index < prior.content.length; index++) {
             const char = prior.content.charCodeAt(index);
             if (char === 13 || char === 10) {
-              if (char === 13 && prior.content.charCodeAt(index + 1) === 10)
+              if (char === 13 && prior.content.charCodeAt(index + 1) === 10) {
                 index++;
+              }
               line++;
               lineStart = index + 1;
             }
@@ -889,26 +954,28 @@ class StdioLanguageServer implements LanguageServer {
    * After closeFile("/project/a.ts"), saved("/project/a.ts") sends no didSave.
    */
   saved(file: string): Promise<void> {
-    return queue(this.state, this, file, undefined, async () => {
+    return queue(this, file, undefined, async () => {
       const snapshot = this.state.documents.get(fileKey(file));
       const save = syncOptions(this.capabilities.textDocumentSync).save;
       const uri = pathToFileURL(file).href;
-      if (snapshot && save)
+      if (snapshot && save) {
         await this.notify("textDocument/didSave", {
           textDocument: { uri },
           ...(typeof save === "object" && save.includeText
             ? { text: snapshot.content }
             : {}),
         });
+      }
       if (
         [...this.state.registrations.values()].some(
           (registration) =>
             registration.method === "workspace/didChangeWatchedFiles",
         )
-      )
+      ) {
         await this.notify("workspace/didChangeWatchedFiles", {
           changes: [{ uri, type: 2 }],
         });
+      }
     });
   }
 
@@ -921,15 +988,19 @@ class StdioLanguageServer implements LanguageServer {
    * await server.closeFile("/project/a.ts"); // A later document(a.ts) lookup returns undefined.
    */
   closeFile(file: string): Promise<void> {
-    return queue(this.state, this, file, undefined, async () => {
+    return queue(this, file, undefined, async () => {
       const key = fileKey(file);
       const existed = this.state.documents.delete(key);
       this.state.publications.delete(key);
       this.state.diagnosticErrors.delete(key);
-      if (existed && syncOptions(this.capabilities.textDocumentSync).openClose)
+      if (
+        existed &&
+        syncOptions(this.capabilities.textDocumentSync).openClose
+      ) {
         await this.notify("textDocument/didClose", {
           textDocument: { uri: pathToFileURL(file).href },
         });
+      }
     });
   }
 
@@ -979,10 +1050,11 @@ class StdioLanguageServer implements LanguageServer {
       await this.syncFile(file, undefined, operationSignal);
       const key = fileKey(file);
       const snapshot = this.state.documents.get(key);
-      if (!snapshot)
+      if (!snapshot) {
         throw new Error(
           `LSP document closed while requesting diagnostics: ${file}`,
         );
+      }
       check(operationSignal);
       if (this.capabilities.diagnosticProvider) {
         const provider = this.capabilities.diagnosticProvider;
@@ -995,26 +1067,32 @@ class StdioLanguageServer implements LanguageServer {
           operationSignal,
           Math.max(1, deadline - Date.now()),
         );
-        if (this.state.documents.get(key) !== snapshot)
+        if (this.state.documents.get(key) !== snapshot) {
           throw new Error(`LSP diagnostics superseded by changes to ${file}`);
-        if (!record(report))
+        }
+        if (!record(report)) {
           throw new Error(
             `LSP ${this.config.name} returned no complete diagnostic report for ${file}`,
           );
+        }
         const { kind, items } = report;
-        if (kind !== "full")
+        if (kind !== "full") {
           throw new Error(
             `LSP ${this.config.name} returned no complete diagnostic report for ${file}`,
           );
+        }
         return { items: diagnosticItems(items), freshness: "pull" };
       }
       while (Date.now() < deadline) {
         check(operationSignal);
         assertAlive(this, this.state.failure);
-        if (this.state.documents.get(key) !== snapshot)
+        if (this.state.documents.get(key) !== snapshot) {
           throw new Error(`LSP diagnostics superseded by changes to ${file}`);
+        }
         const error = this.state.diagnosticErrors.get(key);
-        if (error) throw error;
+        if (error) {
+          throw error;
+        }
         const published = this.state.publications.get(key);
         if (
           published?.version === snapshot.version &&
@@ -1047,8 +1125,9 @@ class StdioLanguageServer implements LanguageServer {
    * await server.shutdown(); await server.shutdown(); // Stops the owned process only once.
    */
   shutdown(): Promise<void> {
-    if (this.state.shutdownPromise !== undefined)
+    if (this.state.shutdownPromise !== undefined) {
       return this.state.shutdownPromise;
+    }
     const graceful =
       !this.state.lifetime.signal.aborted && this.state.initialized;
     this.state.lifetime.abort(
@@ -1067,31 +1146,30 @@ class StdioLanguageServer implements LanguageServer {
             this.child.once("exit", resolvePromise);
           });
           try {
-            await rpc(
-              this.state,
-              this,
-              this.connection,
-              "shutdown",
-              null,
-              undefined,
-              1_000,
-              true,
-            );
-            await bounded(
-              this.connection.sendNotification("exit"),
-              [],
-              500,
-              "LSP exit",
-            );
-            await bounded(exited, [], 500, "LSP graceful exit");
+            await rpc(this, "shutdown", null, {
+              timeoutMs: 1_000,
+              stopping: true,
+            });
+            await bounded(this.connection.sendNotification("exit"), [], {
+              timeoutMs: 500,
+              label: "LSP exit",
+            });
+            await bounded(exited, [], {
+              timeoutMs: 500,
+              label: "LSP graceful exit",
+            });
           } catch {
             /* A dead or non-cooperating server still gets process-group termination. */
           } finally {
-            if (exitListener) this.child.off("exit", exitListener);
+            if (exitListener) {
+              this.child.off("exit", exitListener);
+            }
           }
         }
       } finally {
-        for (const timer of this.state.cancellationTimers) clearTimeout(timer);
+        for (const timer of this.state.cancellationTimers) {
+          clearTimeout(timer);
+        }
         this.state.cancellationTimers.clear();
         this.connection.dispose();
         this.child.stdout.unpipe(this.input);
@@ -1141,10 +1219,12 @@ function stderrSuffix(stderr: string): string {
  * fail(state, server, new Error("broken pipe")); // Aborts pending work and starts shutdown.
  */
 function fail(state: ServerState, server: LanguageServer, error: Error): void {
-  if (state.lifetime.signal.aborted) return;
+  if (state.lifetime.signal.aborted) {
+    return;
+  }
   state.failure = error;
   state.lifetime.abort(error);
-  void server.shutdown().catch((cleanupError: unknown) => {
+  server.shutdown().catch((cleanupError: unknown) => {
     state.failure = new AggregateError(
       [error, cleanupError],
       `LSP ${server.config.name} cleanup failed`,
@@ -1161,8 +1241,9 @@ function fail(state: ServerState, server: LanguageServer, error: Error): void {
  * assertAlive(stoppedServer, new Error("broken pipe")); // Throws "broken pipe".
  */
 function assertAlive(server: LanguageServer, failure: Error | undefined): void {
-  if (!server.isAlive)
+  if (!server.isAlive) {
     throw failure ?? new Error(`LSP ${server.config.name} is stopped`);
+  }
 }
 
 /**
@@ -1214,8 +1295,7 @@ async function waitForWorkspace(
 ): Promise<void> {
   const rust = [server.config.command, server.config.resolvedCommand].some(
     (command) =>
-      command !== undefined &&
-      /^rust-analyzer(?:\.exe)?$/.test(basename(command)),
+      command !== undefined && RUST_ANALYZER_COMMAND.test(basename(command)),
   );
   const timings = server.config.workspaceReadyTimings;
   const start = Date.now();
@@ -1234,18 +1314,21 @@ async function waitForWorkspace(
           Math.max(1, deadline - Date.now()),
         ),
       );
-      if (typeof status !== "string")
+      if (typeof status !== "string") {
         throw new Error("rust-analyzer returned an invalid workspace status");
+      }
       if (
         !status.startsWith("No workspaces") &&
         state.progress.size === 0 &&
         Date.now() - start >= duration(timings?.settleMs, 2_000)
-      )
+      ) {
         return;
+      }
     } else if (state.progress.size > 0) {
       quietSince = Date.now();
-    } else if (Date.now() - quietSince >= duration(timings?.settleMs, 100))
+    } else if (Date.now() - quietSince >= duration(timings?.settleMs, 100)) {
       return;
+    }
     await pause(
       Math.min(
         duration(timings?.pollMs, 100),
@@ -1259,32 +1342,32 @@ async function waitForWorkspace(
 
 /**
  * Sends one bounded RPC, canceling its token on timeout and stopping peers that ignore cancellation.
- * @param state - Shared lifetime, failure, and owned cancellation-cleanup timers.
- * @param server - Owner used for liveness, error context, and failure cleanup.
- * @param connection - JSON-RPC connection whose response and token lifetime are retained until settlement.
+ * @param server - Owner of the connection, lifetime, failure state, and cleanup timers.
  * @param method - Protocol request method.
- * @param params - Request payload; the caller validates any returned peer data.
- * @param signal - Optional cancellation for this request only.
- * @param timeoutMs - Request deadline in milliseconds.
- * @param stopping - Allows shutdown RPC after lifetime abort, without forced cancellation cleanup.
+ * @param params - Request payload; the caller validates returned peer data.
+ * @param options - Request cancellation, deadline, and graceful-shutdown mode.
  * @returns The unvalidated peer result.
  * @throws On stopped transport, cancellation, timeout, or peer request failure.
  * @example
- * await rpc(state, server, connection, "shutdown", null, undefined, 1000, true);
+ * await rpc(server, "shutdown", null, { timeoutMs: 1000, stopping: true });
  * // Allows the graceful shutdown request despite an already-aborted server lifetime.
  */
 async function rpc<T>(
-  state: ServerState,
-  server: LanguageServer,
-  connection: MessageConnection,
+  server: StdioLanguageServer,
   method: string,
   params: unknown,
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-  stopping = false,
+  options: {
+    signal?: AbortSignal | undefined;
+    timeoutMs: number;
+    stopping?: boolean;
+  },
 ): Promise<T> {
+  const { signal, timeoutMs, stopping = false } = options;
+  const { state, connection } = server;
   check(signal);
-  if (!stopping) assertAlive(server, state.failure);
+  if (!stopping) {
+    assertAlive(server, state.failure);
+  }
   const source = new CancellationTokenSource();
   let settled = false;
   let cleanupTimer: NodeJS.Timeout | undefined;
@@ -1303,29 +1386,34 @@ async function rpc<T>(
     }
     source.dispose();
   };
-  void work.then(settle, settle);
-  return bounded(
+  work.then(settle, settle);
+  return await bounded(
     work,
     [signal, ...(stopping ? [] : [state.lifetime.signal])],
-    timeoutMs,
-    `LSP ${server.config.name} ${method}`,
-    () => {
-      source.cancel();
-      // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
-      if (!settled && !state.lifetime.signal.aborted && !stopping) {
-        cleanupTimer = setTimeout(() => {
-          if (cleanupTimer) state.cancellationTimers.delete(cleanupTimer);
-          if (!settled)
-            fail(
-              state,
-              server,
-              new Error(
-                `LSP ${server.config.name} ignored cancellation of ${method}`,
-              ),
-            );
-        }, 1_000);
-        state.cancellationTimers.add(cleanupTimer);
-      }
+    {
+      timeoutMs,
+      label: `LSP ${server.config.name} ${method}`,
+      onCancel: () => {
+        source.cancel();
+        // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
+        if (!settled && !state.lifetime.signal.aborted && !stopping) {
+          cleanupTimer = setTimeout(() => {
+            if (cleanupTimer) {
+              state.cancellationTimers.delete(cleanupTimer);
+            }
+            if (!settled) {
+              fail(
+                state,
+                server,
+                new Error(
+                  `LSP ${server.config.name} ignored cancellation of ${method}`,
+                ),
+              );
+            }
+          }, 1_000);
+          state.cancellationTimers.add(cleanupTimer);
+        }
+      },
     },
   );
 }
@@ -1340,13 +1428,14 @@ async function rpc<T>(
 function syncOptions(
   sync: ServerCapabilities["textDocumentSync"],
 ): TextDocumentSyncOptions {
-  if (typeof sync === "number") return { openClose: sync !== 0, change: sync };
+  if (typeof sync === "number") {
+    return { openClose: sync !== 0, change: sync };
+  }
   return sync ?? {};
 }
 
 /**
  * Serializes operations for one normalized file while keeping later work usable after rejection.
- * @param state - Per-file barriers and server lifetime cancellation.
  * @param server - Owner kept active while the queued operation runs.
  * @param file - Absolute path whose normalized key identifies the queue.
  * @param signal - Caller cancellation; canceling the wait does not remove its shared barrier.
@@ -1355,16 +1444,16 @@ function syncOptions(
  * @throws For invalid paths, cancellation, a stopped server, or an operation failure.
  * @example
  * If an earlier syncFile("/project/a.ts") fails to read the file, but the server
- * remains alive, queue(state, server, "/project/a.ts", undefined, async () => "next")
+ * remains alive, queue(server, "/project/a.ts", undefined, async () => "next")
  * still resolves to "next" after that failure; the file's queue is not poisoned.
  */
 function queue<T>(
-  state: ServerState,
   server: StdioLanguageServer,
   file: string,
   signal: AbortSignal | undefined,
   work: () => Promise<T>,
 ): Promise<T> {
+  const { state } = server;
   const key = fileKey(file);
   const prior = state.queues.get(key) ?? Promise.resolve();
   const result = prior.then(() => {
@@ -1372,12 +1461,14 @@ function queue<T>(
     return active(state, server, work);
   });
   const barrier = result.then(
-    () => {},
-    () => {},
+    () => undefined,
+    () => undefined,
   );
   state.queues.set(key, barrier);
-  void barrier.then(() => {
-    if (state.queues.get(key) === barrier) state.queues.delete(key);
+  barrier.then(() => {
+    if (state.queues.get(key) === barrier) {
+      state.queues.delete(key);
+    }
   });
   return bounded(result, [signal, state.lifetime.signal]);
 }
@@ -1420,13 +1511,16 @@ function publish(
     return;
   }
   const document = state.documents.get(key);
-  if (!document) return;
+  if (!document) {
+    return;
+  }
   if (
     version !== undefined &&
     version !== null &&
     (!Number.isInteger(version) || version !== document.version)
-  )
+  ) {
     return;
+  }
   try {
     state.publications.set(key, {
       version: document.version,
@@ -1478,7 +1572,7 @@ function registeredCapabilities(
       };
     } else if (
       registration.method.startsWith("workspace/") &&
-      /\/(will|did)(Create|Rename|Delete)Files$/.test(registration.method)
+      FILE_OPERATION_METHOD.test(registration.method)
     ) {
       const operation = registration.method.slice("workspace/".length);
       capabilities.workspace = {
@@ -1490,7 +1584,9 @@ function registeredCapabilities(
       };
     } else {
       const name = names[registration.method];
-      if (name) Object.assign(capabilities, { [name]: registration.options });
+      if (name) {
+        Object.assign(capabilities, { [name]: registration.options });
+      }
     }
   }
   return capabilities;
@@ -1498,59 +1594,62 @@ function registeredCapabilities(
 
 /**
  * Validates and handles server-to-client requests using this client's configuration and registrations.
- * @param state - Mutable registrations and diagnostic caches owned by the server.
- * @param server - Live production client passed unchanged to workspace-edit handling.
- * @param options - Workspace root and workspace-edit callback owned by the pool.
+ * @param server - Owner of the shared state, workspace options, and edit callback.
  * @param method - Incoming protocol request method.
  * @param params - Untrusted peer parameters validated for the selected method.
  * @returns The protocol response, including explicit unsupported edit/document outcomes.
  * @throws For stopped servers, invalid parameters, or unsupported request methods.
  * @example
- * await serverRequest(state, server, options, "window/showDocument", {});
+ * await serverRequest(server, "window/showDocument", {});
  * // Returns { success: false } without opening a document.
  */
 async function serverRequest(
-  state: ServerState,
-  server: LanguageServer,
-  options: PoolOptions,
+  server: StdioLanguageServer,
   method: string,
   params: unknown,
 ): Promise<unknown> {
+  const { state, options } = server;
   assertAlive(server, state.failure);
   switch (method) {
     case "workspace/configuration": {
-      if (!record(params))
+      if (!record(params)) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Expected configuration items",
         );
+      }
       const { items } = params;
-      if (!Array.isArray(items))
+      if (!Array.isArray(items)) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Expected configuration items",
         );
+      }
       return items.map((item: unknown) => {
-        if (!record(item))
+        if (!record(item)) {
           throw new ResponseError(
             ErrorCodes.InvalidParams,
             "Invalid configuration item",
           );
+        }
         const { section } = item;
-        if (section !== undefined && typeof section !== "string")
+        if (section !== undefined && typeof section !== "string") {
           throw new ResponseError(
             ErrorCodes.InvalidParams,
             "Invalid configuration item",
           );
+        }
         let value: unknown = server.config.settings ?? {};
         if (typeof section === "string" && section) {
-          if (record(value) && Object.hasOwn(value, section))
+          if (record(value) && Object.hasOwn(value, section)) {
             return value[section];
-          for (const part of section.split("."))
+          }
+          for (const part of section.split(".")) {
             value =
               record(value) && Object.hasOwn(value, part)
                 ? value[part]
                 : undefined;
+          }
         }
         return value ?? null;
       });
@@ -1565,11 +1664,13 @@ async function serverRequest(
       ];
     }
     case "workspace/applyEdit": {
-      if (!record(params))
+      if (!record(params)) {
         return { applied: false, failureReason: "Invalid workspace edit" };
+      }
       const { edit } = params;
-      if (!record(edit))
+      if (!record(edit)) {
         return { applied: false, failureReason: "Invalid workspace edit" };
+      }
       try {
         return await options.onApplyEdit(edit as WorkspaceEdit, server);
       } catch (error) {
@@ -1577,40 +1678,46 @@ async function serverRequest(
       }
     }
     case "client/registerCapability": {
-      if (!record(params))
+      if (!record(params)) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Expected registrations",
         );
+      }
       const { registrations } = params;
-      if (!Array.isArray(registrations))
+      if (!Array.isArray(registrations)) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Expected registrations",
         );
+      }
       const additions: Registration[] = registrations.map((value: unknown) => {
-        if (!record(value))
+        if (!record(value)) {
           throw new ResponseError(
             ErrorCodes.InvalidParams,
             "Invalid capability registration",
           );
-        const { id, method, registerOptions } = value;
+        }
+        const { id, method: registrationMethod, registerOptions } = value;
         if (
           typeof id !== "string" ||
-          typeof method !== "string" ||
+          typeof registrationMethod !== "string" ||
           (registerOptions !== undefined && !record(registerOptions))
-        )
+        ) {
           throw new ResponseError(
             ErrorCodes.InvalidParams,
             "Invalid capability registration",
           );
+        }
         return {
           id,
-          method,
+          method: registrationMethod,
           options: registerOptions ?? {},
         };
       });
-      for (const entry of additions) state.registrations.set(entry.id, entry);
+      for (const entry of additions) {
+        state.registrations.set(entry.id, entry);
+      }
       state.effectiveCapabilities = registeredCapabilities(
         state.baseCapabilities,
         state.registrations.values(),
@@ -1618,27 +1725,32 @@ async function serverRequest(
       return null;
     }
     case "client/unregisterCapability": {
-      if (!record(params))
+      if (!record(params)) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Expected unregistrations",
         );
+      }
       const { unregisterations, unregistrations } = params;
       const entries = unregisterations ?? unregistrations;
       if (
         !Array.isArray(entries) ||
         !entries.every((entry: unknown) => {
-          if (!record(entry)) return false;
+          if (!record(entry)) {
+            return false;
+          }
           const { id } = entry;
           return typeof id === "string";
         })
-      )
+      ) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
           "Invalid capability unregistration",
         );
-      for (const entry of entries as Array<{ id: string }>)
+      }
+      for (const entry of entries as Array<{ id: string }>) {
         state.registrations.delete(entry.id);
+      }
       state.effectiveCapabilities = registeredCapabilities(
         state.baseCapabilities,
         state.registrations.values(),
@@ -1684,7 +1796,7 @@ export class LanguageServerPool {
   private readonly entries = new Map<string, PoolEntry>();
   private readonly idleTimer: NodeJS.Timeout | undefined;
   private disposePromise: Promise<void> | undefined;
-  private disposed = false;
+  private disposed: boolean = false;
 
   /**
    * Owns shared server entries and an optional unreferenced idle-expiry timer.
@@ -1705,8 +1817,11 @@ export class LanguageServerPool {
               entry.initialized &&
               !entry.stopping &&
               entry.server.idleFor(Date.now()) >= timeout
-            )
-              void stopEntry(this.entries, key, entry).catch(() => {});
+            ) {
+              stopEntry(this.entries, key, entry).catch(() => {
+                // The retained stopping promise exposes cleanup failures to stop/dispose.
+              });
+            }
           }
         },
         Math.min(timeout, 1_000),
@@ -1734,8 +1849,12 @@ export class LanguageServerPool {
     signal?: AbortSignal,
   ): Promise<LanguageServer> {
     check(signal);
-    if (this.disposed) throw new Error("LSP pool is disposed");
-    if (config.disabled) throw new Error(`LSP ${config.name} is disabled`);
+    if (this.disposed) {
+      throw new Error("LSP pool is disposed");
+    }
+    if (config.disabled) {
+      throw new Error(`LSP ${config.name} is disabled`);
+    }
     const key = JSON.stringify([
       config.name,
       config.root || this.options.cwd,
@@ -1764,8 +1883,9 @@ export class LanguageServerPool {
       current.ready = server
         .initialize(controller.signal)
         .then(() => {
-          if (this.disposed || current.stopping || controller.signal.aborted)
+          if (this.disposed || current.stopping || controller.signal.aborted) {
             throw new Error(`LSP ${config.name} startup was stopped`);
+          }
           current.initialized = true;
           server.touch();
           return server;
@@ -1779,18 +1899,20 @@ export class LanguageServerPool {
               `LSP ${config.name} startup and cleanup failed`,
             );
           }
-          if (this.entries.get(key) === current && !current.stopping)
+          if (this.entries.get(key) === current && !current.stopping) {
             this.entries.delete(key);
+          }
           throw error;
         });
     }
     entry.server.touch();
     const server = await bounded(entry.ready, [signal]);
     check(signal);
-    if (this.disposed || entry.stopping || !server.isAlive)
+    if (this.disposed || entry.stopping || !server.isAlive) {
       throw new Error(
         `LSP ${config.name} was stopped before acquisition completed`,
       );
+    }
     return server;
   }
 
@@ -1823,8 +1945,9 @@ export class LanguageServerPool {
     const errors = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason as unknown] : [],
     );
-    if (errors.length)
+    if (errors.length) {
       throw new AggregateError(errors, "Failed to stop language servers");
+    }
   }
 
   /**
@@ -1838,7 +1961,9 @@ export class LanguageServerPool {
    * pool.dispose() === first; // Reuses the first shutdown attempt.
    */
   dispose(): Promise<void> {
-    if (this.disposePromise !== undefined) return this.disposePromise;
+    if (this.disposePromise !== undefined) {
+      return this.disposePromise;
+    }
     this.disposed = true;
     clearInterval(this.idleTimer);
     this.disposePromise = this.stop();
@@ -1864,7 +1989,9 @@ function stopEntry(
   key: string,
   entry: PoolEntry,
 ): Promise<void> {
-  if (entry.stopping !== undefined) return entry.stopping;
+  if (entry.stopping !== undefined) {
+    return entry.stopping;
+  }
   entry.controller.abort(
     new Error(`LSP ${entry.server.config.name} startup was stopped`),
   );
@@ -1874,8 +2001,12 @@ function stopEntry(
       entry.ready,
     ]);
     const shutdown = results[0];
-    if (shutdown?.status === "rejected") throw shutdown.reason;
-    if (entries.get(key) === entry) entries.delete(key);
+    if (shutdown?.status === "rejected") {
+      throw shutdown.reason;
+    }
+    if (entries.get(key) === entry) {
+      entries.delete(key);
+    }
   })();
   return entry.stopping;
 }

@@ -4,7 +4,9 @@ import {
   normalizeDiagnostics,
   resolvePosition,
   symbols,
-} from "./operations";
+} from "./operations.ts";
+
+const CLEAN_STATUS = /\bOK\b/;
 
 describe("resolvePosition", () => {
   test("should select the requested whole-identifier occurrence using UTF-16 columns", () => {
@@ -55,7 +57,7 @@ describe("diagnosticsText", () => {
     ]);
     expect(text).toContain("freshness-unverified");
     expect(text).toContain("legacy-server");
-    expect(text).not.toMatch(/\bOK\b/);
+    expect(text).not.toMatch(CLEAN_STATUS);
   });
 
   test("should retain findings when their publication freshness cannot be verified", () => {

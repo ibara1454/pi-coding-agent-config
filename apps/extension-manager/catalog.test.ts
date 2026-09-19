@@ -16,8 +16,8 @@ import type {
 const path = "/repo/extensions/shared.ts";
 const settingsPath = "/agent/settings.json";
 
-async function noCommit(): Promise<CommitResult> {
-  return { scopes: [], committedScopes: [] };
+function noCommit(): Promise<CommitResult> {
+  return Promise.resolve({ scopes: [], committedScopes: [] });
 }
 
 function target(id: string, scope: ResourceScope): ToggleTarget {
@@ -592,9 +592,9 @@ describe("ExtensionCatalog.commit", () => {
       row("global", "global", true),
       row("project", "project", true),
     ];
-    const catalog = new ExtensionCatalog(seed(rows), async (request) => {
+    const catalog = new ExtensionCatalog(seed(rows), (request) => {
       requests.push(request);
-      return result;
+      return Promise.resolve(result);
     });
     catalog.stage("global", false);
     catalog.stage("project", false);

@@ -54,6 +54,15 @@ export interface WelcomeHeaderOptions {
   playIntro?: boolean;
 }
 
+interface HeaderLayout {
+  boxWidth: number;
+  leftWidth: number;
+  rightWidth: number;
+  isWide: boolean;
+  terminalRows: number;
+  tipRows: number;
+}
+
 /** Pi TUI's ANSI- and terminal-cell-safe truncation with the welcome ellipsis. */
 function truncateToWidth(value: string, width: number): string {
   return truncateTerminalWidth(value, width, "…");
@@ -67,14 +76,18 @@ function pad(value: string, width: number): string {
 }
 
 function center(value: string, width: number): string {
-  if (visibleWidth(value) >= width) return truncateToWidth(value, width);
+  if (visibleWidth(value) >= width) {
+    return truncateToWidth(value, width);
+  }
   const remaining = width - visibleWidth(value);
   const left = Math.floor(remaining / 2);
   return `${" ".repeat(left)}${value}${" ".repeat(remaining - left)}`;
 }
 
 function wrapText(value: string, width: number): string[] {
-  if (width < 1) return [];
+  if (width < 1) {
+    return [];
+  }
   return wrapTextWithAnsi(value.replace(/\s+/g, " ").trim(), width);
 }
 
@@ -145,27 +158,19 @@ function renderLines(
     "",
   ];
   const tipLines = renderTipLines(options.theme, options.selectedTip, boxWidth);
-  const sections = renderSections(
-    options.theme,
-    options.extensions,
-    options.recentSessions,
-    isWide ? rightWidth : leftWidth,
+  const layout: HeaderLayout = {
+    boxWidth,
+    leftWidth,
+    rightWidth,
     isWide,
     terminalRows,
-    tipLines.length,
-  );
+    tipRows: tipLines.length,
+  };
+  const sections = renderSections(options, layout);
   const content = isWide
-    ? renderWideRows(options.theme, left, sections, leftWidth, rightWidth)
+    ? renderWideRows(options.theme, left, sections, layout)
     : renderNarrowRows(options.theme, left, sections, leftWidth);
-  return renderBox(
-    options.theme,
-    options.version,
-    boxWidth,
-    content,
-    tipLines,
-    isWide ? leftWidth : undefined,
-    isWide ? rightWidth : undefined,
-  );
+  return renderBox(options, layout, content, tipLines);
 }
 
 /**
@@ -187,13 +192,8 @@ function logoFrame(
 /**
  * Renders tips, capacity-limited extensions, sessions, and their separator.
  * Theme callback errors propagate to the caller.
- * @param theme - Text styling callbacks.
- * @param extensions - Sanitized extensions in display order.
- * @param recentSessions - Sanitized sessions in display order.
- * @param width - Section width in terminal cells.
- * @param isWide - Whether the sections share rows with the logo.
- * @param terminalRows - Terminal height used for the extension budget.
- * @param tipRows - Rows already reserved for the startup tip below the box.
+ * @param options - Sanitized extensions, sessions, and styling callbacks.
+ * @param layout - Column widths and terminal-height budget, including reserved tip rows.
  * @returns Styled section rows and a separator sized for the section width.
  * @example
  * In a 20-row wide terminal with 40-cell sections, one tip row, and one
@@ -201,19 +201,19 @@ function logoFrame(
  * rows for "a" through "d", then " … +2 more". The session stays visible.
  */
 function renderSections(
-  theme: WelcomeTheme,
-  extensions: readonly WelcomeExtension[],
-  recentSessions: readonly WelcomeSession[],
-  width: number,
-  isWide: boolean,
-  terminalRows: number,
-  tipRows: number,
+  {
+    theme,
+    extensions,
+    recentSessions,
+  }: Pick<WelcomeHeaderOptions, "theme" | "extensions" | "recentSessions">,
+  { isWide, leftWidth, rightWidth, terminalRows, tipRows }: HeaderLayout,
 ): {
   tips: string[];
   extensions: string[];
   sessions: string[];
   separator: string;
 } {
+  const width = isWide ? rightWidth : leftWidth;
   const separator = ` ${theme.fg("dim", BOX.horizontal.repeat(Math.max(0, width - 2)))}`;
   const tips = FIXED_TIP_ROWS.map((row) => ` ${theme.fg("muted", row)}`);
   const sessions = renderSessions(theme, recentSessions, width);
@@ -271,7 +271,9 @@ function renderExtensions(
   width: number,
   capacity: number,
 ): string[] {
-  if (extensions.length === 0) return [` ${theme.fg("dim", "No extensions")}`];
+  if (extensions.length === 0) {
+    return [` ${theme.fg("dim", "No extensions")}`];
+  }
   const shownCount =
     extensions.length > capacity
       ? Math.max(0, capacity - 1)
@@ -348,7 +350,9 @@ function renderSessions(
       `${theme.fg("dim", prefix)}${theme.fg("muted", name)}${theme.fg("dim", suffix)}`,
     );
   }
-  if (rows.length === 0) rows.push(` ${theme.fg("dim", "No recent sessions")}`);
+  if (rows.length === 0) {
+    rows.push(` ${theme.fg("dim", "No recent sessions")}`);
+  }
   return rows;
 }
 
@@ -358,8 +362,7 @@ function renderSessions(
  * @param theme - Heading styling callbacks.
  * @param left - Centered logo-column rows.
  * @param sections - Styled section contents and separator.
- * @param leftWidth - Left-column width in terminal cells.
- * @param rightWidth - Right-column width in terminal cells.
+ * @param layout - Left- and right-column widths in terminal cells.
  * @returns Bordered rows padded to the taller column, preserving bottom spacing.
  * @example Left width 26 and right width 71 produce rows measuring 100 terminal cells.
  */
@@ -372,8 +375,7 @@ function renderWideRows(
     sessions: string[];
     separator: string;
   },
-  leftWidth: number,
-  rightWidth: number,
+  { leftWidth, rightWidth }: HeaderLayout,
 ): string[] {
   const right = [
     "",
@@ -389,10 +391,11 @@ function renderWideRows(
   ];
   const rows: string[] = [];
   const count = Math.max(left.length, right.length);
-  for (let index = 0; index < count; index++)
+  for (let index = 0; index < count; index++) {
     rows.push(
       `${BOX.vertical}${pad(left[index] ?? "", leftWidth)}${BOX.vertical}${pad(right[index] ?? "", rightWidth)}${BOX.vertical}`,
     );
+  }
   return rows;
 }
 
@@ -438,24 +441,18 @@ function renderNarrowRows(
 /**
  * Adds the version border, optional column junction, and external startup tip.
  * Theme callback errors propagate to the caller.
- * @param theme - Border and title styling callbacks.
- * @param version - Sanitized version label.
- * @param boxWidth - Total box width in terminal cells.
+ * @param options - Sanitized version label and border/title styling callbacks.
+ * @param layout - Box and column widths, with wide mode selecting the column junction.
  * @param content - Rows already enclosed in vertical borders.
  * @param tipLines - Styled tip rows appended below the bottom border.
- * @param leftWidth - Left-column width, or undefined for a stacked box.
- * @param rightWidth - Right-column width, or undefined for a stacked box.
  * @returns Completed box and tip rows with themed vertical borders.
- * @example Width 30 with both column widths omitted produces a 30-cell bottom border without a junction.
+ * @example A 30-cell stacked layout produces a 30-cell bottom border without a junction.
  */
 function renderBox(
-  theme: WelcomeTheme,
-  version: string,
-  boxWidth: number,
+  { theme, version }: Pick<WelcomeHeaderOptions, "theme" | "version">,
+  { boxWidth, leftWidth, rightWidth, isWide }: HeaderLayout,
   content: readonly string[],
   tipLines: readonly string[],
-  leftWidth?: number,
-  rightWidth?: number,
 ): string[] {
   const dim = (value: string) => theme.fg("dim", value);
   const title = ` pi v${version} `;
@@ -466,10 +463,9 @@ function renderBox(
     titleWidth >= innerWidth
       ? truncateToWidth(`${dim(prefix)}${theme.fg("muted", title)}`, innerWidth)
       : `${dim(prefix)}${theme.fg("muted", title)}${dim(BOX.horizontal.repeat(innerWidth - titleWidth))}`;
-  const bottom =
-    leftWidth === undefined || rightWidth === undefined
-      ? `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(boxWidth - 2))}${dim(BOX.bottomRight)}`
-      : `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(leftWidth))}${dim(BOX.teeUp)}${dim(BOX.horizontal.repeat(rightWidth))}${dim(BOX.bottomRight)}`;
+  const bottom = !isWide
+    ? `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(boxWidth - 2))}${dim(BOX.bottomRight)}`
+    : `${dim(BOX.bottomLeft)}${dim(BOX.horizontal.repeat(leftWidth))}${dim(BOX.teeUp)}${dim(BOX.horizontal.repeat(rightWidth))}${dim(BOX.bottomRight)}`;
   return [
     `${dim(BOX.topLeft)}${topInner}${dim(BOX.topRight)}`,
     ...content.map(
@@ -505,7 +501,9 @@ function renderTipLines(
 ): string[] {
   const label = "Tip: ";
   const bodyWidth = boxWidth - 1 - visibleWidth(label);
-  if (bodyWidth < 8) return [];
+  if (bodyWidth < 8) {
+    return [];
+  }
   const body = wrapText(selectedTip, bodyWidth);
   const continuation = " ".repeat(visibleWidth(label));
   return body.map((line, index) => {
@@ -525,16 +523,20 @@ export class WelcomeHeader {
   private readonly animation: IntroAnimation;
   private readonly options: WelcomeHeaderOptions;
   private cache: { width: number; rows: number; lines: string[] } | undefined;
-  private disposed = false;
+  private disposed: boolean = false;
 
   constructor(options: WelcomeHeaderOptions) {
     this.options = sanitizeOptions(options);
     this.animation = new IntroAnimation(() => {
-      if (this.disposed) return;
+      if (this.disposed) {
+        return;
+      }
       this.invalidate();
       this.options.requestRender();
     });
-    if (this.options.playIntro) this.animation.start();
+    if (this.options.playIntro) {
+      this.animation.start();
+    }
   }
 
   invalidate(): void {
@@ -542,7 +544,9 @@ export class WelcomeHeader {
   }
 
   dispose(): void {
-    if (this.disposed) return;
+    if (this.disposed) {
+      return;
+    }
     this.disposed = true;
     this.cache = undefined;
     this.animation.dispose();
@@ -561,8 +565,9 @@ export class WelcomeHeader {
       !this.animation.isActive() &&
       this.cache?.width === terminalWidth &&
       this.cache.rows === terminalRows
-    )
+    ) {
       return this.cache.lines;
+    }
     const boxWidth = Math.min(MAX_BOX_WIDTH, Math.max(0, terminalWidth - 2));
     const lines =
       boxWidth < 4
@@ -573,8 +578,9 @@ export class WelcomeHeader {
             terminalRows,
             logoFrame(colorMode(this.options.theme), this.animation.progress()),
           );
-    if (!this.animation.isActive())
+    if (!this.animation.isActive()) {
       this.cache = { width: terminalWidth, rows: terminalRows, lines };
+    }
     return lines;
   }
 }

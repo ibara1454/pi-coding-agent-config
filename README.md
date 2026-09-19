@@ -116,8 +116,8 @@ Run all lint and type-check tasks through Turborepo:
 bun run check
 ```
 
-Check formatting, recommended lint rules, and import organization for every
-workspace:
+Check formatting, import organization, and the lint policy in `biome.json`
+(`all` preset with project-specific exceptions):
 
 ```bash
 bun run lint

@@ -1,8 +1,13 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { Position, TextEdit } from "vscode-languageserver-protocol";
+
+const APPLIED_PREFIX = /^Applied /;
+const CREATED_PREFIX = /^Created /;
+const DELETED_PREFIX = /^Deleted /;
+const RENAMED_PREFIX = /^Renamed /;
 
 export interface DocumentSnapshot {
   version: number;
@@ -67,8 +72,9 @@ interface PlannedChange {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Invalid ${label}`);
+  }
   return value as Record<string, unknown>;
 }
 
@@ -86,11 +92,13 @@ function message(error: unknown): string {
 }
 
 export function uriToFile(uri: string): string {
-  if (typeof uri !== "string")
+  if (typeof uri !== "string") {
     throw new Error("Workspace edit URI must be a string");
+  }
   const url = new URL(uri);
-  if (url.protocol !== "file:" || url.search || url.hash)
+  if (url.protocol !== "file:" || url.search || url.hash) {
     throw new Error(`Unsupported document URI: ${uri}`);
+  }
   return path.resolve(fileURLToPath(url));
 }
 
@@ -125,16 +133,19 @@ function textEdits(
   value: unknown,
   annotation: (value: unknown) => void,
 ): TextEdit[] {
-  if (!Array.isArray(value))
+  if (!Array.isArray(value)) {
     throw new Error("Workspace text edits must be an array");
+  }
   return value.map((item: unknown) => {
     const edit = record(item, "text edit");
     const { insertTextFormat } = edit;
-    if (insertTextFormat === 2 || "snippet" in edit)
+    if (insertTextFormat === 2 || "snippet" in edit) {
       throw new Error("Snippet-formatted workspace edits are not supported");
+    }
     const { newText } = edit;
-    if (typeof newText !== "string")
+    if (typeof newText !== "string") {
       throw new Error("Text edit newText must be a string");
+    }
     const { annotationId } = edit;
     annotation(annotationId);
     const { range } = edit;
@@ -154,25 +165,35 @@ export function applyTextEdits(
   const starts = [0];
   for (let index = 0; index < content.length; index++) {
     if (content[index] === "\r") {
-      if (content[index + 1] === "\n") index++;
+      if (content[index + 1] === "\n") {
+        index++;
+      }
       starts.push(index + 1);
-    } else if (content[index] === "\n") starts.push(index + 1);
+    } else if (content[index] === "\n") {
+      starts.push(index + 1);
+    }
   }
   const offset = (pos: Position): number => {
     position(pos);
     const start = starts[pos.line];
-    if (start === undefined)
+    if (start === undefined) {
       throw new Error(`Text edit line ${pos.line + 1} is outside the document`);
+    }
     let end = starts[pos.line + 1] ?? content.length;
     if (starts[pos.line + 1] !== undefined) {
-      if (content[end - 1] === "\n") end--;
-      if (content[end - 1] === "\r") end--;
+      if (content[end - 1] === "\n") {
+        end--;
+      }
+      if (content[end - 1] === "\r") {
+        end--;
+      }
     }
     const index = start + pos.character;
-    if (index > end)
+    if (index > end) {
       throw new Error(
         `Text edit character ${pos.character} is outside line ${pos.line + 1}`,
       );
+    }
     const previous = content.charCodeAt(index - 1);
     const next = content.charCodeAt(index);
     if (
@@ -180,8 +201,9 @@ export function applyTextEdits(
       previous <= 0xdbff &&
       next >= 0xdc00 &&
       next <= 0xdfff
-    )
+    ) {
       throw new Error("Text edit splits a UTF-16 surrogate pair");
+    }
     return index;
   };
   const sorted = edits
@@ -189,11 +211,14 @@ export function applyTextEdits(
       if (
         typeof edit.newText !== "string" ||
         ("insertTextFormat" in edit && edit.insertTextFormat === 2)
-      )
+      ) {
         throw new Error("Invalid or snippet-formatted text edit");
+      }
       const start = offset(edit.range.start);
       const end = offset(edit.range.end);
-      if (end < start) throw new Error("Text edit range ends before it starts");
+      if (end < start) {
+        throw new Error("Text edit range ends before it starts");
+      }
       return { start, end, text: edit.newText, index };
     })
     .sort((a, b) => a.start - b.start || a.end - b.end || a.index - b.index);
@@ -207,12 +232,14 @@ export function applyTextEdits(
       edit.end === previous.end &&
       edit.text === previous.text &&
       edit.end > edit.start
-    )
+    ) {
       continue;
-    if (edit.start < cursor)
+    }
+    if (edit.start < cursor) {
       throw new Error(
         "Overlapping workspace text edits; no files were changed",
       );
+    }
     pieces.push(content.slice(cursor, edit.start), edit.text);
     cursor = edit.end;
     previous = edit;
@@ -230,9 +257,12 @@ function operations(value: unknown): Operation[] {
       ? {}
       : record(changeAnnotations, "changeAnnotations");
   const annotation = (id: unknown): void => {
-    if (id === undefined) return;
-    if (typeof id !== "string" || !Object.hasOwn(annotations, id))
+    if (id === undefined) {
+      return;
+    }
+    if (typeof id !== "string" || !Object.hasOwn(annotations, id)) {
       throw new Error("Workspace edit references an unknown change annotation");
+    }
     const data = record(annotations[id], "change annotation");
     const { needsConfirmation } = data;
     if (needsConfirmation === true) {
@@ -249,33 +279,39 @@ function operations(value: unknown): Operation[] {
     pending.clear();
   };
   const add = (uri: unknown, edits: unknown, version: unknown): void => {
-    if (typeof uri !== "string")
+    if (typeof uri !== "string") {
       throw new Error("Workspace edit is missing its document URI");
+    }
     if (
       version !== null &&
       version !== undefined &&
       !Number.isSafeInteger(version)
-    )
+    ) {
       throw new Error("Invalid workspace edit document version");
+    }
     const file = uriToFile(uri);
     const parsed = textEdits(edits, annotation);
     const prior = pending.get(file);
     if (prior) {
-      if (prior.version !== (version ?? null))
+      if (prior.version !== (version ?? null)) {
         throw new Error(`Conflicting document versions for ${file}`);
+      }
       prior.edits.push(...parsed);
-    } else
+    } else {
       pending.set(file, {
         kind: "text",
         file,
         edits: parsed,
-        version: version == null ? null : Number(version),
+        version:
+          version === null || version === undefined ? null : Number(version),
       });
+    }
   };
   const { documentChanges } = edit;
   if (documentChanges !== undefined) {
-    if (!Array.isArray(documentChanges))
+    if (!Array.isArray(documentChanges)) {
       throw new Error("Workspace documentChanges must be an array");
+    }
     for (const item of documentChanges) {
       const change = record(item, "workspace change");
       const { textDocument } = change;
@@ -302,14 +338,16 @@ function operations(value: unknown): Operation[] {
         "recursive",
         "ignoreIfNotExists",
       ]) {
-        if (options[key] !== undefined && typeof options[key] !== "boolean")
+        if (options[key] !== undefined && typeof options[key] !== "boolean") {
           throw new Error(`Invalid resource operation option ${key}`);
+        }
       }
       const { kind } = change;
       if (kind === "rename") {
         const { oldUri, newUri } = change;
-        if (typeof oldUri !== "string" || typeof newUri !== "string")
+        if (typeof oldUri !== "string" || typeof newUri !== "string") {
           throw new Error("Rename requires oldUri and newUri");
+        }
         const { overwrite, ignoreIfExists } = options;
         result.push({
           kind: "rename",
@@ -320,8 +358,9 @@ function operations(value: unknown): Operation[] {
         });
       } else if (kind === "create" || kind === "delete") {
         const { uri } = change;
-        if (typeof uri !== "string")
+        if (typeof uri !== "string") {
           throw new Error("Resource operation requires a URI");
+        }
         const file = uriToFile(uri);
         if (kind === "create") {
           const { overwrite, ignoreIfExists } = options;
@@ -340,25 +379,28 @@ function operations(value: unknown): Operation[] {
             ignore: ignoreIfNotExists === true,
           });
         }
-      } else
+      } else {
         throw new Error(
           `Unsupported workspace resource operation: ${String(kind)}`,
         );
+      }
     }
   } else {
     const { changes } = edit;
     if (changes !== undefined) {
       for (const [uri, edits] of Object.entries(
         record(changes, "workspace changes"),
-      ))
+      )) {
         add(uri, edits, null);
+      }
     }
   }
   flush();
-  if (result.length > 2000)
+  if (result.length > 2000) {
     throw new Error(
       "Workspace edit exceeds 2000 operations; split it into smaller changes",
     );
+  }
   return result;
 }
 
@@ -372,16 +414,24 @@ async function entry(file: string): Promise<Entry | null> {
         : stat.isFile()
           ? "file"
           : undefined;
-    if (!kind) throw new Error(`Unsupported filesystem object: ${file}`);
+    if (!kind) {
+      throw new Error(`Unsupported filesystem object: ${file}`);
+    }
     const signature = `${kind}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
-    if (kind === "directory") return { kind, signature };
-    if (stat.size > 16 * 1024 * 1024)
+    if (kind === "directory") {
+      return { kind, signature };
+    }
+    if (stat.size > 16 * 1024 * 1024) {
       throw new Error(`File exceeds the 16 MiB workspace-edit limit: ${file}`);
-    if (kind === "link")
+    }
+    if (kind === "link") {
       return { kind, signature: `${signature}:${await fs.readlink(file)}` };
+    }
     return { kind, signature, content: await fs.readFile(file, "utf8") };
   } catch (error) {
-    if (missing(error)) return null;
+    if (missing(error)) {
+      return null;
+    }
     throw error;
   }
 }
@@ -398,23 +448,30 @@ export async function directoryFiles(
     const handle = await fs.opendir(current);
     for await (const item of handle) {
       signal?.throwIfAborted();
-      if (++visited > 10000)
+      if (++visited > 10000) {
         throw new Error(
           "Directory traversal exceeds 10000 entries; use smaller targets",
         );
+      }
       const file = path.join(current, item.name);
-      if (item.isDirectory()) await visit(file);
-      else if (item.isFile() || item.isSymbolicLink()) {
+      if (item.isDirectory()) {
+        await visit(file);
+      } else if (item.isFile() || item.isSymbolicLink()) {
         files.push(file);
-        if (files.length > 1000)
+        if (files.length > 1000) {
           throw new Error(
             "Directory contains more than 1000 files; rename in smaller batches",
           );
-      } else throw new Error(`Unsupported filesystem object: ${file}`);
+        }
+      } else {
+        throw new Error(`Unsupported filesystem object: ${file}`);
+      }
     }
   };
   await visit(directory);
-  return files.sort();
+  return files.sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
 }
 
 /** Builds a virtual-filesystem plan without writing disk and captures originals for the locked recheck. */
@@ -427,20 +484,27 @@ async function plan(
   const changes: PlannedChange[] = [];
   let snapshotBytes = 0;
   const load = async (file: string): Promise<Entry | null> => {
-    if (virtual.has(file)) return virtual.get(file) ?? null;
+    if (virtual.has(file)) {
+      return virtual.get(file) ?? null;
+    }
     const value = await entry(file);
     originals.set(file, value);
-    if (value?.content) snapshotBytes += Buffer.byteLength(value.content);
-    if (snapshotBytes > 64 * 1024 * 1024)
+    if (value?.content) {
+      snapshotBytes += Buffer.byteLength(value.content);
+    }
+    if (snapshotBytes > 64 * 1024 * 1024) {
       throw new Error(
         "Workspace edit snapshots exceed 64 MiB; use smaller changes",
       );
+    }
     virtual.set(file, value);
     return value;
   };
   const tree = async (file: string): Promise<string[]> => {
     const value = await load(file);
-    if (value?.kind !== "directory") return value ? [file] : [];
+    if (value?.kind !== "directory") {
+      return value ? [file] : [];
+    }
     // Include empty directories: they affect nonrecursive deletion and subtree locking.
     if (originals.get(file)?.kind === "directory") {
       let visited = 0;
@@ -449,17 +513,20 @@ async function plan(
         const handle = await fs.opendir(directory);
         for await (const item of handle) {
           options.signal?.throwIfAborted();
-          if (++visited > 10000)
+          if (++visited > 10000) {
             throw new Error(
               "Resource operation exceeds 10000 directory entries",
             );
+          }
           const child = path.join(directory, item.name);
           await load(child);
-          if (item.isDirectory()) await visit(child);
-          else if (++fileCount > 1000)
+          if (item.isDirectory()) {
+            await visit(child);
+          } else if (++fileCount > 1000) {
             throw new Error(
               "Resource operation exceeds 1000 files; use smaller changes",
             );
+          }
         }
       };
       await visit(file);
@@ -474,15 +541,17 @@ async function plan(
     while (parent !== path.dirname(parent)) {
       const value = await load(parent);
       if (value) {
-        if (value.kind !== "directory" && value.kind !== "link")
+        if (value.kind !== "directory" && value.kind !== "link") {
           throw new Error(`Parent is not a directory: ${parent}`);
+        }
         break;
       }
       absent.push(parent);
       parent = path.dirname(parent);
     }
-    for (const candidate of absent)
+    for (const candidate of absent) {
       virtual.set(candidate, { kind: "directory", signature: "created" });
+    }
   };
   const canonicalNames = new Map<string, string>();
   for (const op of operations(edit)) {
@@ -493,22 +562,30 @@ async function plan(
       try {
         op.file = await fs.realpath(documentFile);
       } catch (error) {
-        if (!missing(error) || !virtual.get(documentFile)) throw error;
+        if (!missing(error) || !virtual.get(documentFile)) {
+          throw error;
+        }
       }
       const priorName = canonicalNames.get(op.file);
-      if (priorName && priorName !== documentFile)
+      if (priorName && priorName !== documentFile) {
         throw new Error(
           `Workspace edit addresses one file through conflicting aliases: ${priorName}, ${documentFile}`,
         );
+      }
       canonicalNames.set(op.file, documentFile);
-      if (op.file !== documentFile) op.documentFile = documentFile;
+      if (op.file !== documentFile) {
+        op.documentFile = documentFile;
+      }
     }
     const before = await load(op.file);
     const label = path.relative(options.cwd, op.file) || op.file;
     if (op.kind === "text") {
-      if (op.edits.length === 0) continue;
-      if (before?.kind !== "file" || before.content === undefined)
+      if (op.edits.length === 0) {
+        continue;
+      }
+      if (before?.kind !== "file" || before.content === undefined) {
         throw new Error(`Text edit target is not a regular file: ${op.file}`);
+      }
       const snapshot = options.documents?.get(op.documentFile ?? op.file);
       const live = options.document?.(op.documentFile ?? op.file);
       if (
@@ -517,15 +594,17 @@ async function plan(
           !live ||
           op.version !== snapshot.version ||
           op.version !== live.version)
-      )
+      ) {
         throw new Error(`Stale or unknown document version for ${label}`);
-      if (snapshot && originals.get(op.file)?.content !== snapshot.content)
+      }
+      if (snapshot && originals.get(op.file)?.content !== snapshot.content) {
         throw new Error(
           `File changed since the language-server request: ${label}`,
         );
+      }
       const after = applyTextEdits(before.content, op.edits);
       virtual.set(op.file, { ...before, content: after });
-      if (after !== before.content)
+      if (after !== before.content) {
         changes.push({
           op,
           files: op.documentFile ? [op.file, op.documentFile] : [op.file],
@@ -533,44 +612,58 @@ async function plan(
           after,
           summary: `Applied ${op.edits.length} edit(s) to ${label}`,
         });
+      }
     } else if (op.kind === "create") {
       if (before && !op.overwrite) {
-        if (op.ignore) continue;
+        if (op.ignore) {
+          continue;
+        }
         throw new Error(`Create target already exists: ${label}`);
       }
-      if (before && before.kind !== "file")
+      if (before && before.kind !== "file") {
         throw new Error(
           `Create cannot overwrite a directory or symlink: ${label}`,
         );
+      }
       await parents(op.file);
       virtual.set(op.file, { kind: "file", signature: "created", content: "" });
       changes.push({ op, files: [op.file], summary: `Created ${label}` });
     } else if (op.kind === "delete") {
       if (!before) {
-        if (op.ignore) continue;
+        if (op.ignore) {
+          continue;
+        }
         throw new Error(`Delete target does not exist: ${label}`);
       }
       const subtree = await tree(op.file);
-      if (before.kind === "directory" && !op.recursive && subtree.length > 1)
+      if (before.kind === "directory" && !op.recursive && subtree.length > 1) {
         throw new Error(`Delete target is a nonempty directory: ${label}`);
+      }
       const files = subtree.filter(
         (file) => virtual.get(file)?.kind !== "directory",
       );
-      for (const file of subtree) virtual.set(file, null);
+      for (const file of subtree) {
+        virtual.set(file, null);
+      }
       changes.push({ op, files, summary: `Deleted ${label}` });
     } else {
-      if (!before) throw new Error(`Rename source does not exist: ${label}`);
+      if (!before) {
+        throw new Error(`Rename source does not exist: ${label}`);
+      }
       if (
         op.file === op.newFile ||
         within(op.newFile, op.file) ||
         within(op.file, op.newFile)
-      )
+      ) {
         throw new Error(
           "Rename source and destination must be distinct, non-nested paths",
         );
+      }
       const target = await load(op.newFile);
       if (target && !op.overwrite) {
-        if (op.ignore) continue;
+        if (op.ignore) {
+          continue;
+        }
         throw new Error(`Rename destination already exists: ${op.newFile}`);
       }
       const sourceTree = await tree(op.file);
@@ -582,7 +675,9 @@ async function plan(
         (file) => virtual.get(file)?.kind !== "directory",
       );
       await parents(op.newFile);
-      for (const candidate of targetTree) virtual.set(candidate, null);
+      for (const candidate of targetTree) {
+        virtual.set(candidate, null);
+      }
       for (const candidate of sourceTree) {
         const destination = path.join(
           op.newFile,
@@ -612,11 +707,16 @@ async function lockPaths<T>(
     try {
       canonical.add(await fs.realpath(file));
     } catch (error) {
-      if (missing(error)) canonical.add(path.resolve(file));
-      else throw error;
+      if (missing(error)) {
+        canonical.add(path.resolve(file));
+      } else {
+        throw error;
+      }
     }
   }
-  const keys = [...canonical].sort();
+  const keys = [...canonical].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
   const acquire = (index: number): Promise<T> => {
     const key = keys[index];
     return key === undefined
@@ -683,18 +783,19 @@ export async function applyWorkspaceEdit(
   const result: EditResult = { applied: false, summary: [], changes: [] };
   try {
     const planned = await plan(edit, options);
-    if (options.preview)
+    if (options.preview) {
       return {
         applied: true,
         summary: planned.changes.map((change) =>
           change.summary
-            .replace(/^Applied /, "Would apply ")
-            .replace(/^Created /, "Would create ")
-            .replace(/^Deleted /, "Would delete ")
-            .replace(/^Renamed /, "Would rename "),
+            .replace(APPLIED_PREFIX, "Would apply ")
+            .replace(CREATED_PREFIX, "Would create ")
+            .replace(DELETED_PREFIX, "Would delete ")
+            .replace(RENAMED_PREFIX, "Would rename "),
         ),
         changes: [],
       };
+    }
     await lockPaths([...planned.originals.keys()], async () => {
       options.signal?.throwIfAborted();
       for (const [file, original] of planned.originals) {
@@ -702,10 +803,11 @@ export async function applyWorkspaceEdit(
         if (
           original?.signature !== current?.signature ||
           original?.content !== current?.content
-        )
+        ) {
           throw new Error(
             `File changed while waiting to apply workspace edit: ${file}`,
           );
+        }
       }
       for (const change of planned.changes) {
         const { op } = change;
@@ -713,10 +815,11 @@ export async function applyWorkspaceEdit(
         try {
           if (op.kind === "text") {
             const live = options.document?.(op.documentFile ?? op.file);
-            if (op.version !== null && live?.version !== op.version)
+            if (op.version !== null && live?.version !== op.version) {
               throw new Error(
                 `Document version changed before mutation: ${op.file}`,
               );
+            }
             await fs.writeFile(op.file, change.after ?? "", "utf8");
           } else if (op.kind === "create") {
             await fs.mkdir(path.dirname(op.file), { recursive: true });
@@ -725,8 +828,11 @@ export async function applyWorkspaceEdit(
             });
           } else if (op.kind === "delete") {
             const stat = await fs.lstat(op.file);
-            if (stat.isDirectory() && !op.recursive) await fs.rmdir(op.file);
-            else await fs.rm(op.file, { recursive: op.recursive });
+            if (stat.isDirectory() && !op.recursive) {
+              await fs.rmdir(op.file);
+            } else {
+              await fs.rm(op.file, { recursive: op.recursive });
+            }
           } else {
             await fs.mkdir(path.dirname(op.newFile), { recursive: true });
             try {
@@ -744,14 +850,16 @@ export async function applyWorkspaceEdit(
                   if (
                     previous.op.kind !== "text" ||
                     previous.before === undefined
-                  )
+                  ) {
                     continue;
+                  }
                   try {
                     if (
                       (await fs.readFile(previous.op.file, "utf8")) !==
                       previous.after
-                    )
+                    ) {
                       throw new Error("content changed after edit");
+                    }
                     await fs.writeFile(
                       previous.op.file,
                       previous.before,
@@ -768,10 +876,11 @@ export async function applyWorkspaceEdit(
                   result.summary = [
                     "Reference edits rolled back after rename failure.",
                   ];
-                } else
+                } else {
                   result.summary.push(
                     `Rollback failures: ${failures.join("; ")}`,
                   );
+                }
               } else if (!(await entry(op.file)) && (await entry(op.newFile))) {
                 result.changes.push({
                   kind: "rename",
@@ -808,8 +917,11 @@ export async function applyWorkspaceEdit(
             }
           } else if (op.kind === "delete") {
             const removed: string[] = [];
-            for (const file of change.files)
-              if (!(await entry(file))) removed.push(file);
+            for (const file of change.files) {
+              if (!(await entry(file))) {
+                removed.push(file);
+              }
+            }
             if (removed.length) {
               result.changes.push({
                 kind: "delete",

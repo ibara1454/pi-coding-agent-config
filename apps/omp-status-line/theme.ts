@@ -100,7 +100,7 @@ export interface SeparatorDef {
  *
  * @param style The configured separator style.
  * @param ascii Whether the status line should override the configured style with ASCII separators.
- * @returns The left and right separators, including end caps when the style uses them.
+ * @returns The left and right separators, including caps when the style uses them.
  *
  * @example
  * getSeparator("powerline", true);
@@ -126,6 +126,8 @@ export function getSeparator(
       return { left: "▌", right: "▌" };
     case "none":
       return { left: " ", right: " " };
+    default:
+      throw new Error(`Unexpected value: ${effectiveStyle satisfies never}`);
   }
 }
 

@@ -53,14 +53,22 @@ export interface ResourceInventoryOverride {
 function patchRegistry(): PatchRegistry {
   const globalScope = globalThis as Record<PropertyKey, unknown>;
   const existing = globalScope[PATCH_REGISTRY] as PatchRegistry | undefined;
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
   const created: PatchRegistry = { patches: new WeakMap() };
   globalScope[PATCH_REGISTRY] = created;
   return created;
 }
 
 function unsupported(reason: string): ResourceInventoryOverride {
-  return { supported: false, reason, release() {} };
+  return {
+    supported: false,
+    reason,
+    release() {
+      // Unsupported hosts acquire no resources.
+    },
+  };
 }
 
 function acquiredPatch(
@@ -72,10 +80,14 @@ function acquiredPatch(
   return {
     supported: true,
     release() {
-      if (released) return;
+      if (released) {
+        return;
+      }
       released = true;
       state.owners--;
-      if (state.owners > 0) return;
+      if (state.owners > 0) {
+        return;
+      }
 
       if (
         Object.getOwnPropertyDescriptor(prototype, "showLoadedResources")
@@ -164,6 +176,7 @@ export function installResourceInventoryOverride(
       if (ownDescriptor) {
         Object.defineProperty(manager, "getQuietStartup", ownDescriptor);
       } else {
+        // biome-ignore lint/performance/noDelete: Assigning undefined would shadow the inherited method, and repository policy prohibits Reflect.
         delete manager.getQuietStartup;
       }
     }

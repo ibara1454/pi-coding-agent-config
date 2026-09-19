@@ -59,6 +59,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import deepMerge from "deepmerge";
 
+const GLOB_META_CHARACTERS = /[*?[\]{}]/;
+
 interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
 }
@@ -105,7 +107,9 @@ type RecursivePartial<T> = T extends readonly unknown[]
       : T;
 
 function readConfig(configPath: string): RecursivePartial<SandboxConfig> {
-  if (!existsSync(configPath)) return {};
+  if (!existsSync(configPath)) {
+    return {};
+  }
 
   // Config files are assumed to match RecursivePartial<SandboxConfig>. Keep
   // the assertion at this I/O seam so the rest of the extension receives typed
@@ -134,7 +138,9 @@ function loadConfig(cwd: string, projectTrusted: boolean): SandboxConfig {
   const globalConfigPath = join(getAgentDir(), "sandbox.json");
   const config = mergeConfig(DEFAULT_CONFIG, readConfig(globalConfigPath));
 
-  if (!projectTrusted) return config;
+  if (!projectTrusted) {
+    return config;
+  }
 
   const projectConfigPath = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
   return mergeConfig(config, readConfig(projectConfigPath));
@@ -160,16 +166,25 @@ interface FilesystemSymlinkWarnings {
   allowWritePaths: SymlinkedConfigPath[];
 }
 
+/**
+ * Finds literal policy paths whose resolved targets differ, skipping globs.
+ * Filesystem lookup failures leave the optional warning list unchanged.
+ * @example findSymlinkedConfigPaths(["src/**"], "/repo") // []
+ */
 function findSymlinkedConfigPaths(
   paths: string[] | undefined,
   cwd: string,
 ): SymlinkedConfigPath[] {
-  if (!paths) return [];
+  if (!paths) {
+    return [];
+  }
 
   const symlinks: SymlinkedConfigPath[] = [];
   for (const configuredPath of paths) {
     // Resolving a glob to one path would misrepresent the complete rule.
-    if (/[*?[\]{}]/.test(configuredPath)) continue;
+    if (GLOB_META_CHARACTERS.test(configuredPath)) {
+      continue;
+    }
 
     const expandedPath =
       configuredPath === "~"
@@ -272,7 +287,9 @@ function formatFilesystemSymlinkWarning(
     "Cross-boundary filesystem symlinks detected:",
   ];
   const addPaths = (heading: string, paths: SymlinkedConfigPath[]) => {
-    if (paths.length === 0) return;
+    if (paths.length === 0) {
+      return;
+    }
     lines.push(
       "",
       heading,
@@ -326,7 +343,11 @@ function createSandboxedBashOps(): BashOperations {
       const wrappedCommand = await SandboxManager.wrapWithSandbox(command);
 
       try {
-        const { promise, resolve, reject } = Promise.withResolvers<{
+        const {
+          promise,
+          resolve: resolveExecution,
+          reject,
+        } = Promise.withResolvers<{
           exitCode: number | null;
         }>();
         const child = spawn("bash", ["-c", wrappedCommand], {
@@ -340,7 +361,9 @@ function createSandboxedBashOps(): BashOperations {
         let timeoutHandle: NodeJS.Timeout | undefined;
 
         function terminateChild(): void {
-          if (!child.pid) return;
+          if (!child.pid) {
+            return;
+          }
 
           try {
             process.kill(-child.pid, "SIGKILL");
@@ -366,26 +389,32 @@ function createSandboxedBashOps(): BashOperations {
         }
 
         function beginSettlement(): boolean {
-          if (settled) return false;
+          if (settled) {
+            return false;
+          }
           settled = true;
           releaseExecutionResources();
           return true;
         }
 
         function onChildError(error: Error): void {
-          if (!beginSettlement()) return;
+          if (!beginSettlement()) {
+            return;
+          }
           reject(error);
         }
 
         function onChildClose(code: number | null): void {
-          if (!beginSettlement()) return;
+          if (!beginSettlement()) {
+            return;
+          }
 
           if (signal?.aborted) {
             reject(new Error("aborted"));
           } else if (timedOut) {
             reject(new Error(`timeout:${timeout}`));
           } else {
-            resolve({ exitCode: code });
+            resolveExecution({ exitCode: code });
           }
         }
 
@@ -402,7 +431,9 @@ function createSandboxedBashOps(): BashOperations {
         }
 
         signal?.addEventListener("abort", terminateChild, { once: true });
-        if (signal?.aborted) terminateChild();
+        if (signal?.aborted) {
+          terminateChild();
+        }
 
         return await promise;
       } finally {
@@ -422,6 +453,12 @@ function clearSandboxUi(ctx: Pick<ExtensionContext, "ui">): void {
   ctx.ui.setWidget(SANDBOX_SYMLINK_WIDGET_KEY, undefined);
 }
 
+/**
+ * Registers the sandboxed bash tool, policy lifecycle, and configuration command.
+ * The extension owns manager cleanup until session shutdown.
+ * @param pi - Pi host used to register tools, commands, and event handlers.
+ * @example sandbox(pi) // Enables sandbox policy on the next session_start.
+ */
 export default function sandbox(pi: ExtensionAPI): void {
   pi.registerFlag("no-sandbox", {
     description: "Disable OS-level sandboxing for bash commands",
@@ -437,7 +474,9 @@ export default function sandbox(pi: ExtensionAPI): void {
 
   async function releaseSandboxManager(): Promise<void> {
     sandboxState = "inactive";
-    if (!managerNeedsReset) return;
+    if (!managerNeedsReset) {
+      return;
+    }
 
     await SandboxManager.reset();
     managerNeedsReset = false;
@@ -446,20 +485,27 @@ export default function sandbox(pi: ExtensionAPI): void {
   pi.registerTool({
     ...localBash,
     label: "bash (sandboxed)",
-    async execute(id, params, signal, onUpdate, _ctx) {
+    /**
+     * Runs bash using the active sandbox policy and returns the host tool result.
+     * Execution failures reject without changing the original tool error.
+     * @example await tool.execute("id", { command: "pwd" }, signal, onUpdate)
+     */
+    async execute(id, params, signal, onUpdate) {
       if (sandboxState !== "active") {
-        return localBash.execute(id, params, signal, onUpdate);
+        return await localBash.execute(id, params, signal, onUpdate);
       }
 
       const sandboxedBash = createBashTool(localCwd, {
         operations: createSandboxedBashOps(),
       });
-      return sandboxedBash.execute(id, params, signal, onUpdate);
+      return await sandboxedBash.execute(id, params, signal, onUpdate);
     },
   });
 
   pi.on("user_bash", () => {
-    if (sandboxState !== "active") return;
+    if (sandboxState !== "active") {
+      return;
+    }
     return { operations: createSandboxedBashOps() };
   });
 
@@ -553,7 +599,7 @@ export default function sandbox(pi: ExtensionAPI): void {
 
   pi.registerCommand("sandbox", {
     description: "Show sandbox configuration",
-    handler: async (_args, ctx) => {
+    handler: (_args, ctx) => {
       const config = loadConfig(ctx.cwd, ctx.isProjectTrusted());
       const lines = [
         "Sandbox Configuration:",
@@ -582,6 +628,7 @@ export default function sandbox(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(lines.join("\n"), hasSymlinkWarnings ? "warning" : "info");
+      return Promise.resolve();
     },
   });
 }

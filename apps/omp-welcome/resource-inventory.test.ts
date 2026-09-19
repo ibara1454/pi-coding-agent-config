@@ -29,7 +29,11 @@ function host() {
       calls.push({ showListing: Boolean(showListing), showDiagnostics });
     }
 
-    loadedResourcesContainer = { clear() {} };
+    loadedResourcesContainer = {
+      clear() {
+        // The fixture has no rendered inventory to clear.
+      },
+    };
     options = { verbose: false };
   }
 
@@ -127,7 +131,9 @@ describe("native resource inventory override", () => {
     ).toBe(original);
 
     class ChangedHost {
-      showLoadedResources() {}
+      showLoadedResources() {
+        // Deliberately lacks the reviewed private-host method anchors.
+      }
     }
     const structureResult = installResourceInventoryOverride(
       "0.84.1",
@@ -143,10 +149,15 @@ describe("native resource inventory override", () => {
       showLoadedResources(options?: HostOptions) {
         this.loadedResourcesContainer.clear();
         const quiet = this.settingsManager.getQuietStartup();
-        if (options?.showDiagnosticsWhenQuiet === true || !quiet)
+        if (options?.showDiagnosticsWhenQuiet === true || !quiet) {
           calls.push(options ?? {});
+        }
       }
-      loadedResourcesContainer = { clear() {} };
+      loadedResourcesContainer = {
+        clear() {
+          // The fixture has no rendered inventory to clear.
+        },
+      };
       // Declaration-only by design: this fixture exercises an unavailable runtime settings-manager seam.
       declare settingsManager: { getQuietStartup(): boolean };
     }
