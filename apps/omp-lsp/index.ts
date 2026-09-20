@@ -18,6 +18,9 @@ const LEADING_AT = /^@/;
 const WINDOWS_MOUNT = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i;
 const FILE_URI = /^file:\/\//;
 const URI_SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
+// 64 * 1024 UTF-16 code units, not bytes.
+const MAX_OUTPUT_CHARACTERS = 65_536;
+const COMPACT_OUTPUT_LINE_LIMIT = 6;
 
 const actions = [
   "diagnostics",
@@ -100,9 +103,15 @@ function cleanText(text: string): string {
   );
 }
 
+/**
+ * Sanitizes tool output and clips the payload before adding a truncation notice.
+ * @param result - Workspace result whose text may contain terminal sequences.
+ * @returns Plain text limited to 65536 UTF-16 code units plus an optional notice, not a byte limit.
+ * @example outputText({ text: "ok\tready" }) returns "ok  ready".
+ */
 function outputText(result: LspResult): string {
   const text = cleanText(result.text);
-  const limit = 64 * 1024;
+  const limit = MAX_OUTPUT_CHARACTERS;
   return text.length <= limit
     ? text
     : `${text.slice(0, limit)}\n[LSP output truncated; narrow the request.]`;
@@ -143,7 +152,12 @@ interface WorkspaceState {
   ready: Promise<LspWorkspace>;
 }
 
-/** Registers the session-owned LSP tool and optional feedback for successful host mutations. */
+/**
+ * Registers the session-owned LSP tool and optional feedback for successful host mutations.
+ * @param pi - Host extension API providing tool registration, session events, and trust checks.
+ * Session changes abort old work and dispose its workspace; no server starts at registration.
+ * @example lsp(pi) registers the "lsp" tool; session shutdown releases its acquired workspace.
+ */
 export default function lsp(pi: ExtensionAPI): void {
   let state: WorkspaceState | undefined;
 
@@ -268,6 +282,15 @@ export default function lsp(pi: ExtensionAPI): void {
         0,
       );
     },
+    /**
+     * Renders sanitized text output, collapsing long results to six lines unless expanded.
+     * @param result - Tool result; non-text content is omitted.
+     * @param options - Expansion state controlling whether all lines are visible.
+     * @param theme - Host colors used for normal and failed output.
+     * @param context - Error state selecting the output color.
+     * @returns A Text component, with an omitted-line count for collapsed long results.
+     * @example Seven text lines with expanded: false show six lines and "… 1 more lines".
+     */
     renderResult(result, options, theme, context) {
       const text = cleanText(
         result.content
@@ -277,9 +300,9 @@ export default function lsp(pi: ExtensionAPI): void {
       );
       const lines = text.split("\n");
       const visible =
-        options.expanded || lines.length <= 6
+        options.expanded || lines.length <= COMPACT_OUTPUT_LINE_LIMIT
           ? text
-          : `${lines.slice(0, 6).join("\n")}\n… ${lines.length - 6} more lines`;
+          : `${lines.slice(0, COMPACT_OUTPUT_LINE_LIMIT).join("\n")}\n… ${lines.length - COMPACT_OUTPUT_LINE_LIMIT} more lines`;
       return new Text(
         theme.fg(context.isError ? "error" : "toolOutput", visible),
         0,

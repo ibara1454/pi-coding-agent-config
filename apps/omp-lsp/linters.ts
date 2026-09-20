@@ -11,6 +11,13 @@ import type { ServerConfig } from "./types.ts";
 
 const CLI_TIMEOUT_MS = 30_000;
 const MAX_DIAGNOSTICS = 1000;
+// 8 MiB (8 * 1024 * 1024 bytes).
+const MAX_SOURCE_BYTES = 8_388_608;
+const MAX_ERROR_OUTPUT_CHARS = 1500;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const MAX_FORMAT_OUTPUT_BYTES = 16_777_216;
+const DIAGNOSTIC_INFO_SEVERITY = 3;
+const DIAGNOSTIC_HINT_SEVERITY = 4;
 
 const MUTATING_FLAG =
   /^(?:--write|--fix|--unsafe|--autocorrect|--format)(?:=|$)/;
@@ -62,6 +69,15 @@ function cliArguments(
   return args;
 }
 
+/**
+ * Reads bounded UTF-8 source lines for validating CLI diagnostic offsets.
+ * @param file - Regular source file, no larger than 8 MiB at stat time.
+ * @param signal - Optional cancellation checked before opening and while reading.
+ * @returns Lines split at supported line breaks.
+ * @throws On cancellation, invalid file type/size, growth during reading, or I/O failure.
+ * The opened handle is closed in finally on success and failure.
+ * @example A file containing "a\nb" yields ["a", "b"].
+ */
 async function sourceLines(
   file: string,
   signal?: AbortSignal,
@@ -70,7 +86,7 @@ async function sourceLines(
   const handle = await open(file, "r");
   try {
     const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024) {
+    if (!metadata.isFile() || metadata.size > MAX_SOURCE_BYTES) {
       throw new Error(
         "CLI diagnostics require a regular source file no larger than 8 MiB",
       );
@@ -145,6 +161,14 @@ function position(
   return { line, character };
 }
 
+/**
+ * Converts a CLI severity label to the corresponding LSP severity.
+ * @param value - Case-insensitive fatal/error, warning, information/info, or hint label.
+ * @param source - Linter name used in invalid-value errors.
+ * @returns LSP severity 1 through 4; fatal is treated as error.
+ * @throws If the value is not a recognized string label.
+ * @example severity("INFO", "Biome") returns 3.
+ */
 function severity(value: unknown, source: string): DiagnosticSeverity {
   switch (typeof value === "string" ? value.toLowerCase() : value) {
     case "fatal":
@@ -154,9 +178,9 @@ function severity(value: unknown, source: string): DiagnosticSeverity {
       return 2;
     case "information":
     case "info":
-      return 3;
+      return DIAGNOSTIC_INFO_SEVERITY;
     case "hint":
-      return 4;
+      return DIAGNOSTIC_HINT_SEVERITY;
     default:
       throw new Error(
         `${source} returned an unrecognized diagnostic severity: ${String(value)}`,
@@ -303,7 +327,15 @@ function swiftlintDiagnostics(
   return diagnostics;
 }
 
-/** Runs a read-only CLI check and normalizes its findings; invalid output is never treated as clean. */
+/**
+ * Runs a read-only CLI check; malformed output or failed empty reports never mean clean.
+ * @param server - Enabled, resolved Biome or SwiftLint configuration and process environment.
+ * @param file - Target resolved relative to the server root.
+ * @param signal - Optional cancellation of source reading and the owned finite command.
+ * @returns Validated LSP diagnostics for the target, including ordinary violation exits.
+ * @throws For unavailable tools, invalid reports, abnormal exits, cancellation, or command limits.
+ * @example A successful Biome check reporting no diagnostics resolves to [] without file writes.
+ */
 export async function lintWithCli(
   server: ServerConfig,
   file: string,
@@ -344,7 +376,7 @@ export async function lintWithCli(
     report = JSON.parse(result.stdout) as unknown;
   } catch (error) {
     throw new Error(
-      `${server.name}: invalid or missing JSON diagnostics (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 1500) || result.stdout.trim().slice(0, 1500) || String(error)}`,
+      `${server.name}: invalid or missing JSON diagnostics (exit ${result.exitCode}): ${result.stderr.trim().slice(0, MAX_ERROR_OUTPUT_CHARS) || result.stdout.trim().slice(0, MAX_ERROR_OUTPUT_CHARS) || String(error)}`,
       { cause: error },
     );
   }
@@ -359,13 +391,22 @@ export async function lintWithCli(
     result.exitCode > (server.name === "swiftlint" ? 2 : 1)
   ) {
     throw new Error(
-      `${server.name} exited with code ${result.exitCode}; file was not verified: ${result.stderr.trim().slice(0, 1500) || "no usable diagnostics"}`,
+      `${server.name} exited with code ${result.exitCode}; file was not verified: ${result.stderr.trim().slice(0, MAX_ERROR_OUTPUT_CHARS) || "no usable diagnostics"}`,
     );
   }
   return diagnostics;
 }
 
-/** Formats the supplied snapshot through stdin without writing files; SwiftLint remains lint-only. */
+/**
+ * Formats a snapshot through Biome stdin without writing files; SwiftLint remains lint-only.
+ * @param server - Formatter configuration; SwiftLint returns the input unchanged.
+ * @param file - Path resolved against the server root to select formatting rules.
+ * @param content - Original UTF-8 snapshot sent to the owned finite command.
+ * @param signal - Optional cancellation; command output is bounded to 16 MiB per stream.
+ * @returns Formatted stdout, or the unchanged content for SwiftLint.
+ * @throws For unavailable/unsupported tools, failed or empty formatting, cancellation, or command limits.
+ * @example With a SwiftLint configuration, formatWithCli(server, "a.swift", "let x=1") returns "let x=1".
+ */
 export async function formatWithCli(
   server: ServerConfig,
   file: string,
@@ -393,12 +434,12 @@ export async function formatWithCli(
     ...(server.env ? { env: server.env } : {}),
     ...(signal ? { signal } : {}),
     timeoutMs: CLI_TIMEOUT_MS,
-    maxOutputBytes: 16 * 1024 * 1024,
+    maxOutputBytes: MAX_FORMAT_OUTPUT_BYTES,
   });
   signal?.throwIfAborted();
   if (result.exitCode !== 0) {
     throw new Error(
-      `Biome formatting failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 1500) || "no error output"}`,
+      `Biome formatting failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, MAX_ERROR_OUTPUT_CHARS) || "no error output"}`,
     );
   }
   if (content.trim() && !result.stdout.trim()) {

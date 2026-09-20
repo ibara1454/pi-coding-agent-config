@@ -16,6 +16,7 @@ const ENTER = "\r";
 const CTRL_S = "\u0013";
 const SPACE = " ";
 const DISPLAYED_ROW = /^[ >] \[x\] [GP] (\S+)/;
+const NARROW_PANEL_WIDTH = 70;
 
 const openPanels: ExtensionManagerPanel[] = [];
 
@@ -113,13 +114,13 @@ describe("ExtensionManagerPanel.handleInput", () => {
           catalogRow("delta-skill", kind, "npm:kit"),
         ],
       });
-      panel.render(70);
+      panel.render(NARROW_PANEL_WIDTH);
       panel.handleInput(tabKey);
       for (const character of query) {
         panel.handleInput(character);
       }
 
-      const displayedRows = panel.render(70).flatMap((line) => {
+      const displayedRows = panel.render(NARROW_PANEL_WIDTH).flatMap((line) => {
         const match = line.match(DISPLAYED_ROW);
         return match === null ? [] : [match[1]];
       });
@@ -135,19 +136,23 @@ describe("ExtensionManagerPanel.handleInput", () => {
       }
       for (const name of displayedRows) {
         expect(
-          panel.render(70).find((line) => line.startsWith("> ")),
+          panel
+            .render(NARROW_PANEL_WIDTH)
+            .find((line) => line.startsWith("> ")),
         ).toContain(name);
         panel.handleInput("\u001b[B");
       }
       for (const name of displayedRows.toReversed()) {
         expect(
-          panel.render(70).find((line) => line.startsWith("> ")),
+          panel
+            .render(NARROW_PANEL_WIDTH)
+            .find((line) => line.startsWith("> ")),
         ).toContain(name);
         panel.handleInput("\u001b[A");
       }
-      expect(panel.render(70).find((line) => line.startsWith("> "))).toContain(
-        displayedRows[0],
-      );
+      expect(
+        panel.render(NARROW_PANEL_WIDTH).find((line) => line.startsWith("> ")),
+      ).toContain(displayedRows[0]);
     },
   );
 
@@ -163,10 +168,12 @@ describe("ExtensionManagerPanel.handleInput", () => {
         return Promise.resolve(commitResult);
       },
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(SPACE);
     panel.handleInput(ESCAPE);
-    expect(panel.render(70).join("\n")).toContain("Apply staged changes");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "Apply staged changes",
+    );
 
     panel.handleInput(LEFT);
     panel.handleInput(LEFT);
@@ -198,10 +205,10 @@ describe("ExtensionManagerPanel.handleInput", () => {
       selfPath,
       commit: async () => commitResult,
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(SPACE);
 
-    const warning = panel.render(70).join("\n");
+    const warning = panel.render(NARROW_PANEL_WIDTH).join("\n");
     expect(warning).toContain("Disable Extension Manager?");
     expect(warning).toContain(
       "The command remains available until you run /reload.",
@@ -264,11 +271,11 @@ describe("ExtensionManagerPanel.handleInput", () => {
       ],
       selfPath,
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
 
     panel.handleInput(SPACE);
 
-    expect(panel.render(70).join("\n")).not.toContain(
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).not.toContain(
       "Disable Extension Manager?",
     );
     expect(
@@ -287,7 +294,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     const { finished, panel, results, writes } = makePanel({
       commit: async () => commitResult,
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(SPACE);
 
     panel.handleInput(CTRL_S);
@@ -395,14 +402,16 @@ describe("ExtensionManagerPanel.handleInput", () => {
       expectedMessage,
     }: NoCommitCase[2]) => {
       const { catalog, panel, results, writes } = makePanel({ commit });
-      panel.render(70);
+      panel.render(NARROW_PANEL_WIDTH);
       panel.handleInput(SPACE);
       trigger(panel);
       await Bun.sleep(0);
 
       expect(results).toEqual([]);
       expect(catalog.hasChanges()).toBe(true);
-      expect(panel.render(70).join("\n")).toContain(expectedMessage);
+      expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+        expectedMessage,
+      );
       expect(writes.some((write) => write.includes("?1000l"))).toBe(false);
 
       panel.dispose();

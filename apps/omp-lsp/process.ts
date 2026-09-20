@@ -2,6 +2,14 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import process from "node:process";
 
+const PROCESS_FORCE_KILL_DELAY_MS = 1000;
+const PROCESS_FORCE_KILL_DEADLINE_MS = 2000;
+// 512 KiB (512 * 1024 bytes).
+const DEFAULT_COMMAND_OUTPUT_BYTES = 524_288;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const MAX_COMMAND_OUTPUT_BYTES = 16_777_216;
+const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+
 interface ProcessOptions {
   cwd: string;
   env?: Record<string, string>;
@@ -69,6 +77,10 @@ export function spawnProcess(
 /**
  * Terminates an owned process, escalating from SIGTERM to SIGKILL after one second.
  * Owners must coalesce concurrent calls; failure to observe exit rejects the promise.
+ * @param child - Owned child/process group; already-exited children need no signal.
+ * @returns Completion when exit is observed, clearing escalation timers and listeners.
+ * @throws If signaling fails or exit remains unobserved two seconds after SIGKILL.
+ * @example await stopProcess(child) sends SIGTERM to a running child and resolves on exit.
  */
 export async function stopProcess(
   child: ChildProcessWithoutNullStreams,
@@ -107,8 +119,8 @@ export async function stopProcess(
       deadlineTimer = setTimeout(() => {
         cleanup();
         reject(new Error("Language-server process did not exit after SIGKILL"));
-      }, 2000);
-    }, 1000);
+      }, PROCESS_FORCE_KILL_DEADLINE_MS);
+    }, PROCESS_FORCE_KILL_DELAY_MS);
   });
 }
 
@@ -116,6 +128,13 @@ export async function stopProcess(
  * Runs a finite command, closes stdin, and captures at most 512 KiB per stream by default.
  * Cancellation, timeout, and overflow stop it once and reject; truncated output is never returned.
  * Nonzero exit codes are returned for the caller to interpret.
+ * @param command - Executable to spawn without a shell.
+ * @param args - Arguments passed directly to the executable.
+ * @param options - Working directory/environment, optional stdin, cancellation, and limits.
+ * timeoutMs defaults to 30000 ms; maxOutputBytes must be a positive integer at most 16 MiB.
+ * @returns UTF-8 stdout/stderr and exit code after process completion and listener/timer cleanup.
+ * @throws On invalid output limits, spawn/stream failure, cancellation, timeout, or overflow.
+ * @example runCommand("node", ["-e", "process.stdout.write('ok')"], { cwd: "/project" }) resolves with stdout: "ok" and exitCode: 0.
  */
 export async function runCommand(
   command: string,
@@ -128,8 +147,12 @@ export async function runCommand(
   },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   options.signal?.throwIfAborted();
-  const limit = options.maxOutputBytes ?? 512 * 1024;
-  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 16 * 1024 * 1024) {
+  const limit = options.maxOutputBytes ?? DEFAULT_COMMAND_OUTPUT_BYTES;
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit <= 0 ||
+    limit > MAX_COMMAND_OUTPUT_BYTES
+  ) {
     throw new Error("Command output limit must be between 1 byte and 16 MiB");
   }
   const child = spawnProcess(command, args, options);
@@ -226,7 +249,7 @@ export async function runCommand(
   options.signal?.addEventListener("abort", onAbort, { once: true });
   timer = setTimeout(
     () => stop(new Error(`Command timed out: ${command}`)),
-    Math.max(1, options.timeoutMs ?? 30_000),
+    Math.max(1, options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS),
   );
   if (options.signal?.aborted) {
     onAbort();

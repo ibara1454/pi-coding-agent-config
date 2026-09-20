@@ -15,6 +15,15 @@ import {
   welcomeSessions,
 } from "./data.ts";
 
+const MILLISECONDS_PER_MINUTE = 60_000;
+const MILLISECONDS_PER_HOUR = 3_600_000;
+const MILLISECONDS_PER_DAY = 86_400_000;
+const NEAR_FUTURE_OFFSET_MS = -10_000;
+const MINUTES_BEFORE_HOUR = 59;
+const HOURS_BEFORE_DAY = 23;
+const DAYS_BEFORE_WEEK = 6;
+const STALE_SESSION_DAYS = 9;
+
 const temporaryRoots: string[] = [];
 
 function temporaryDirectory(): string {
@@ -253,17 +262,17 @@ describe("welcomeSessions", () => {
       name: "  Named\nignored",
       firstMessage: "prompt",
       created: new Date(now),
-      modified: new Date(now - 10 * 60_000),
+      modified: new Date(now - 10 * MILLISECONDS_PER_MINUTE),
     };
     const prompted = {
       firstMessage: "  first prompt\nsecond line",
       created: new Date(now),
-      modified: new Date(now - 2 * 60 * 60_000),
+      modified: new Date(now - 2 * 60 * MILLISECONDS_PER_MINUTE),
     };
     const untitled = {
       firstMessage: "(no messages)",
       created: new Date("2026-08-01T10:30:00.000Z"),
-      modified: new Date(now - 9 * 86_400_000),
+      modified: new Date(now - STALE_SESSION_DAYS * MILLISECONDS_PER_DAY),
     };
 
     expect(welcomeSessions([named, prompted, untitled], now)).toEqual([
@@ -277,10 +286,14 @@ describe("welcomeSessions", () => {
   });
 
   test.each([
-    ["just now", "from the near future", -10_000],
-    ["59m ago", "59 minutes old", 59 * 60_000],
-    ["23h ago", "23 hours old", 23 * 3_600_000],
-    ["6d ago", "6 days old", 6 * 86_400_000],
+    ["just now", "from near future", NEAR_FUTURE_OFFSET_MS],
+    [
+      "59m ago",
+      "59 minutes old",
+      MINUTES_BEFORE_HOUR * MILLISECONDS_PER_MINUTE,
+    ],
+    ["23h ago", "23 hours old", HOURS_BEFORE_DAY * MILLISECONDS_PER_HOUR],
+    ["6d ago", "6 days old", DAYS_BEFORE_WEEK * MILLISECONDS_PER_DAY],
   ] as const)(
     "should format age %s when session is %s",
     (expected, _condition, age) => {

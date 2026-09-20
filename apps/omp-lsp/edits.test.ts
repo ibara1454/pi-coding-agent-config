@@ -123,11 +123,14 @@ afterEach(() => {
 
 describe("applyTextEdits", () => {
   test("should preserve CRLF and replace complete UTF-16 characters", () => {
+    const emojiEndOffset = 3;
     expect(
-      applyTextEdits("a\u{1f600}b\r\nnext", [replacement(1, 3, "x")]),
+      applyTextEdits("a\u{1f600}b\r\nnext", [
+        replacement(1, emojiEndOffset, "x"),
+      ]),
     ).toBe("axb\r\nnext");
     expect(() =>
-      applyTextEdits("a\u{1f600}b", [replacement(2, 3, "x")]),
+      applyTextEdits("a\u{1f600}b", [replacement(2, emojiEndOffset, "x")]),
     ).toThrow("surrogate");
   });
 
@@ -142,20 +145,26 @@ describe("applyTextEdits", () => {
   });
 
   test("should reject overlapping replacements instead of overwriting either result", () => {
+    const firstRangeEndOffset = 3;
+    const secondRangeEndOffset = 4;
     expect(() =>
-      applyTextEdits("abcd", [replacement(0, 3, "x"), replacement(2, 4, "y")]),
+      applyTextEdits("abcd", [
+        replacement(0, firstRangeEndOffset, "x"),
+        replacement(2, secondRangeEndOffset, "y"),
+      ]),
     ).toThrow("Overlapping");
   });
 });
 
 describe("applyWorkspaceEdit", () => {
   test("should reject stale server versions before changing disk", async () => {
+    const documentTextEndOffset = 3;
     const fixture = memoryFiles({ "/project/a.ts": "old" });
     const edit: WorkspaceEdit = {
       documentChanges: [
         {
           textDocument: { uri: fileToUri("/project/a.ts"), version: 1 },
-          edits: [replacement(0, 3, "new")],
+          edits: [replacement(0, documentTextEndOffset, "new")],
         },
       ],
     };
@@ -171,10 +180,17 @@ describe("applyWorkspaceEdit", () => {
   });
 
   test("should preserve a concurrent host write when content changes while queued", async () => {
+    const hostWriteEndOffset = 3;
     const fixture = memoryFiles({ "/project/a.ts": "old" });
     fixture.changeWhileQueued("/project/a.ts", "host update");
     const result = await applyWorkspaceEdit(
-      { changes: { [fileToUri("/project/a.ts")]: [replacement(0, 3, "new")] } },
+      {
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            replacement(0, hostWriteEndOffset, "new"),
+          ],
+        },
+      },
       { cwd: "/project" },
     );
     expect(result.applied).toBe(false);
@@ -183,6 +199,8 @@ describe("applyWorkspaceEdit", () => {
   });
 
   test("should leave all files unchanged when a later bucket has overlapping edits", async () => {
+    const firstBucketEndOffset = 3;
+    const overlappingBucketEndOffset = 4;
     const fixture = memoryFiles({
       "/project/a.ts": "old",
       "/project/b.ts": "abcd",
@@ -190,10 +208,12 @@ describe("applyWorkspaceEdit", () => {
     const result = await applyWorkspaceEdit(
       {
         changes: {
-          [fileToUri("/project/a.ts")]: [replacement(0, 3, "new")],
+          [fileToUri("/project/a.ts")]: [
+            replacement(0, firstBucketEndOffset, "new"),
+          ],
           [fileToUri("/project/b.ts")]: [
-            replacement(0, 3, "x"),
-            replacement(2, 4, "y"),
+            replacement(0, firstBucketEndOffset, "x"),
+            replacement(2, overlappingBucketEndOffset, "y"),
           ],
         },
       },
@@ -205,6 +225,7 @@ describe("applyWorkspaceEdit", () => {
   });
 
   test("should apply text edits against their ordered resource-operation state", async () => {
+    const renamedTextLength = 5;
     const fixture = memoryFiles({});
     const first = fileToUri("/project/a.ts");
     const second = fileToUri("/project/b.ts");
@@ -219,7 +240,7 @@ describe("applyWorkspaceEdit", () => {
           { kind: "rename", oldUri: first, newUri: second },
           {
             textDocument: { uri: second, version: null },
-            edits: [replacement(0, 5, "world")],
+            edits: [replacement(0, renamedTextLength, "world")],
           },
         ],
       },
@@ -231,6 +252,7 @@ describe("applyWorkspaceEdit", () => {
   });
 
   test("should report the committed prefix when a later filesystem write fails", async () => {
+    const committedTextEndOffset = 3;
     const fixture = memoryFiles({
       "/project/a.ts": "old",
       "/project/b.ts": "old",
@@ -239,8 +261,12 @@ describe("applyWorkspaceEdit", () => {
     const result = await applyWorkspaceEdit(
       {
         changes: {
-          [fileToUri("/project/a.ts")]: [replacement(0, 3, "new")],
-          [fileToUri("/project/b.ts")]: [replacement(0, 3, "new")],
+          [fileToUri("/project/a.ts")]: [
+            replacement(0, committedTextEndOffset, "new"),
+          ],
+          [fileToUri("/project/b.ts")]: [
+            replacement(0, committedTextEndOffset, "new"),
+          ],
         },
       },
       { cwd: "/project" },
@@ -255,6 +281,7 @@ describe("applyWorkspaceEdit", () => {
   });
 
   test("should restore reference edits when the subsequent file rename fails", async () => {
+    const referenceTextEndOffset = 3;
     const fixture = memoryFiles({
       "/project/ref.ts": "old",
       "/project/a.ts": "source",
@@ -265,7 +292,7 @@ describe("applyWorkspaceEdit", () => {
         documentChanges: [
           {
             textDocument: { uri: fileToUri("/project/ref.ts"), version: null },
-            edits: [replacement(0, 3, "new")],
+            edits: [replacement(0, referenceTextEndOffset, "new")],
           },
           {
             kind: "rename",

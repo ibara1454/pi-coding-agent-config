@@ -25,7 +25,12 @@ const CONFIG_FILES = [
   "lsp.yml",
   ".lsp.yml",
 ];
-const MAX_CONFIG_BYTES = 1024 * 1024;
+const BYTES_PER_KIBIBYTE = 1024;
+// 1 MiB (1024 * 1024 bytes).
+const MAX_CONFIG_BYTES = BYTES_PER_KIBIBYTE * BYTES_PER_KIBIBYTE;
+const MAX_CONFIG_DEPTH = 100;
+// 2 ** 31 - 1 ms: the maximum signed 32-bit timer delay.
+const MAX_DURATION_MS = 2_147_483_647;
 const MAX_ROOT_ENTRIES = 10_000;
 const LOCAL_BIN_DIRS = [
   "node_modules/.bin",
@@ -147,13 +152,23 @@ function strings(value: unknown, name: string, allowEmpty = false): string[] {
   return value as string[];
 }
 
+/**
+ * Rejects non-JSON values, cyclic aliases, and nesting deeper than 100 levels.
+ * @param value - Parsed configuration payload to inspect without modifying it.
+ * @param ancestors - Current recursion path; entries are removed on successful return.
+ * @param depth - Current nesting level, starting at zero for the root.
+ * @throws For excessive depth, cycles, non-finite numbers, or incompatible values.
+ * @example validateJsonPayload({ enabled: true }) returns; validateJsonPayload(NaN) throws.
+ */
 function validateJsonPayload(
   value: unknown,
   ancestors = new Set<object>(),
   depth = 0,
 ): void {
-  if (depth > 100) {
-    throw new Error("server configuration payload exceeds 100 nesting levels");
+  if (depth > MAX_CONFIG_DEPTH) {
+    throw new Error(
+      `server configuration payload exceeds ${MAX_CONFIG_DEPTH} nesting levels`,
+    );
   }
   if (
     value === null ||
@@ -198,15 +213,23 @@ function stringMap(value: unknown, name: string): Record<string, string> {
   return value as Record<string, string>;
 }
 
+/**
+ * Validates a timer duration without rounding fractional milliseconds.
+ * @param value - Untrusted configuration value.
+ * @param name - Setting name included in validation errors.
+ * @returns The finite numeric input, from 0 through 2147483647 milliseconds inclusive.
+ * @throws If the input is not a number within the supported range.
+ * @example duration(250, "idleTimeoutMs") returns 250; duration(-1, "idleTimeoutMs") throws.
+ */
 function duration(value: unknown, name: string): number {
   if (
     typeof value !== "number" ||
     !Number.isFinite(value) ||
     value < 0 ||
-    value > 2_147_483_647
+    value > MAX_DURATION_MS
   ) {
     throw new Error(
-      `${name} must be a finite millisecond duration between 0 and 2147483647`,
+      `${name} must be a finite millisecond duration between 0 and ${MAX_DURATION_MS}`,
     );
   }
   return value;

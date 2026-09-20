@@ -10,6 +10,11 @@ import {
 } from "./panel-test-fixtures.ts";
 import type { CatalogDiagnostic, CatalogRow, CommitResult } from "./types.ts";
 
+const NARROW_PANEL_WIDTH = 70;
+const MEDIUM_PANEL_WIDTH = 100;
+const WIDE_PANEL_WIDTH = 120;
+const COMPACT_PANEL_WIDTH = 80;
+const PANEL_ROW_COUNT = 18;
 const openPanels: ExtensionManagerPanel[] = [];
 
 afterEach(() => {
@@ -128,40 +133,40 @@ describe("ExtensionManagerPanel.render", () => {
   test("should render the default narrow list", () => {
     const { panel } = makePanel();
 
-    expect(frame(panel, 70)).toMatchSnapshot();
+    expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render the default wide list beside the inspector", () => {
     const { panel } = makePanel();
 
-    expect(frame(panel, 120)).toMatchSnapshot();
+    expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render stable search results", () => {
     const { panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     for (const character of "rev") {
       panel.handleInput(character);
     }
 
-    expect(frame(panel, 70)).toMatchSnapshot();
+    expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render the focused inspector", () => {
     const { panel } = makePanel();
-    panel.render(120);
+    panel.render(WIDE_PANEL_WIDTH);
     panel.handleInput("\r");
 
-    expect(frame(panel, 120)).toMatchSnapshot();
+    expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render the close confirmation", () => {
     const { panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
     panel.handleInput("\u001b");
 
-    expect(frame(panel, 70)).toMatchSnapshot();
+    expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render the self-disable warning", () => {
@@ -170,10 +175,10 @@ describe("ExtensionManagerPanel.render", () => {
       rows: [catalogRow("alpha", "extension", "Settings", selfPath)],
       selfPath,
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
 
-    expect(frame(panel, 70)).toMatchSnapshot();
+    expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render discovery diagnostics", () => {
@@ -192,7 +197,7 @@ describe("ExtensionManagerPanel.render", () => {
       ],
     });
 
-    expect(frame(panel, 120)).toMatchSnapshot();
+    expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
   test("should render the partial commit error state", async () => {
@@ -205,27 +210,34 @@ describe("ExtensionManagerPanel.render", () => {
         committedScopes: [],
       }),
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
     panel.handleInput("\u0013");
     await Bun.sleep(0);
 
-    expect(frame(panel, 70)).toMatchSnapshot();
+    expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
-  test.each([70, 100, 120])(
-    "should fill exactly %i cells at the terminal width",
-    (width: number) => {
+  test.each([
+    ["narrow", NARROW_PANEL_WIDTH],
+    ["medium", MEDIUM_PANEL_WIDTH],
+    ["wide", WIDE_PANEL_WIDTH],
+  ] as const)(
+    "should fill exactly %s cells at the terminal width",
+    (_scenario: string, width: number) => {
       const { panel } = makePanel();
       const lines = panel.render(width);
 
-      expect(lines).toHaveLength(18);
+      expect(lines).toHaveLength(PANEL_ROW_COUNT);
       expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
     },
   );
 
-  test.each([70, 120])(
-    "should keep dialog frames inside the %i-cell budget",
-    (width: number) => {
+  test.each([
+    ["narrow", NARROW_PANEL_WIDTH],
+    ["wide", WIDE_PANEL_WIDTH],
+  ] as const)(
+    "should keep dialog frames inside the %s-cell budget",
+    (_scenario: string, width: number) => {
       const { panel } = makePanel();
       panel.render(width);
       panel.handleInput(" ");
@@ -233,14 +245,14 @@ describe("ExtensionManagerPanel.render", () => {
       const lines = panel.render(width);
 
       expect(lines.join("\n")).toContain("Apply staged changes");
-      expect(lines).toHaveLength(18);
+      expect(lines).toHaveLength(PANEL_ROW_COUNT);
       expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
     },
   );
 
   test("should leave fullscreen mouse modes unchanged and omit click support", () => {
     const { panel, writes } = makePanel({ mode: "fullscreen" });
-    const lines = panel.render(80);
+    const lines = panel.render(COMPACT_PANEL_WIDTH);
 
     expect(writes).toEqual([]);
     expect(lines.join("\n")).toContain("Wheel");
@@ -258,7 +270,7 @@ describe("ExtensionManagerPanel.render", () => {
       ],
     });
 
-    expect(panel.render(120).join("\n")).toContain(
+    expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).toContain(
       "Diagnostic [Global · /agent/settings.json]: extensions[1] must be a string",
     );
   });
@@ -274,7 +286,7 @@ describe("ExtensionManagerPanel.render", () => {
       ],
     });
 
-    expect(panel.render(70).join("\n")).toContain("alpha [!]");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain("alpha [!]");
   });
 
   test("should sanitize row diagnostics before rendering the inspector", () => {
@@ -287,7 +299,7 @@ describe("ExtensionManagerPanel.render", () => {
       ],
     });
 
-    const rendered = panel.render(120).join("\n");
+    const rendered = panel.render(WIDE_PANEL_WIDTH).join("\n");
     expect(rendered).toContain("bad injected");
     expect(rendered).not.toContain("\u001b[31m");
   });
@@ -309,19 +321,21 @@ describe("ExtensionManagerPanel.render", () => {
         ),
       ],
     });
-    const lines = panel.render(120);
+    const lines = panel.render(WIDE_PANEL_WIDTH);
 
     expect(lines.join("\n")).toContain("alphalabel");
     expect(lines.join("\n")).not.toContain("\u001b");
     expect(lines.join("\n")).not.toContain("\u0007");
-    expect(lines.every((line) => visibleWidth(line) === 120)).toBe(true);
+    expect(lines.every((line) => visibleWidth(line) === WIDE_PANEL_WIDTH)).toBe(
+      true,
+    );
   });
 });
 
 describe("ExtensionManagerPanel.dispose", () => {
   test("should release regular-mode mouse state exactly once", () => {
     const { panel, writes } = makePanel();
-    panel.render(80);
+    panel.render(COMPACT_PANEL_WIDTH);
 
     expect(writes[0]).toContain("?1000h");
 
@@ -338,7 +352,7 @@ describe("ExtensionManagerPanel.dispose", () => {
       }),
     );
     const { panel, writes } = makePanel({ commit });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
     panel.handleInput("\u001b");
 
@@ -352,61 +366,63 @@ describe("ExtensionManagerPanel.dispose", () => {
 describe("ExtensionManagerPanel.handleInput", () => {
   test("should open narrow details with Enter and return to the list with Escape", () => {
     const { panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\r");
-    expect(panel.render(70).join("\n")).toContain("Resolved path:");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "Resolved path:",
+    );
 
     panel.handleInput("\u001b");
-    expect(panel.render(70).join("\n")).toContain("[x]");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain("[x]");
   });
 
   test("should expand and focus the wide inspector until Escape", () => {
     const { panel } = makePanel();
-    expect(panel.render(120).join("\n")).toContain("│");
+    expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).toContain("│");
 
     panel.handleInput("\r");
-    const focused = panel.render(120).join("\n");
+    const focused = panel.render(WIDE_PANEL_WIDTH).join("\n");
     expect(focused).toContain("Resolved path:");
     expect(focused).not.toContain("│");
 
     panel.handleInput("\t");
-    expect(panel.render(120).join("\n")).not.toContain("│");
+    expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).not.toContain("│");
 
     panel.handleInput("\u001b");
-    expect(panel.render(120).join("\n")).toContain("│");
+    expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).toContain("│");
   });
 
   test("should route printable input to search but keep j and k as navigation", () => {
     const { panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
 
     panel.handleInput("j");
-    let rendered = panel.render(70).join("\n");
+    let rendered = panel.render(NARROW_PANEL_WIDTH).join("\n");
     expect(rendered).toContain("type to filter");
     expect(rendered).toContain("> [x] P project-review");
 
     for (const character of "rev") {
       panel.handleInput(character);
     }
-    rendered = panel.render(70).join("\n");
+    rendered = panel.render(NARROW_PANEL_WIDTH).join("\n");
     expect(rendered).toContain("Search: rev");
     expect(rendered).toContain("project-review");
     expect(rendered).not.toContain("alpha");
 
     panel.handleInput("\u007f");
-    rendered = panel.render(70).join("\n");
+    rendered = panel.render(NARROW_PANEL_WIDTH).join("\n");
     expect(rendered).toContain("Search: re");
     expect(rendered).not.toContain("Search: rev");
   });
 
   test("should ignore list keys while the inspector is focused", () => {
     const { catalog, panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\r");
 
     panel.handleInput("j");
     panel.handleInput(" ");
-    const rendered = panel.render(70).join("\n");
+    const rendered = panel.render(NARROW_PANEL_WIDTH).join("\n");
 
     expect(rendered).toContain("Resolved path: /repo/alpha.ts");
     expect(rendered).not.toContain("Search: j");
@@ -415,11 +431,13 @@ describe("ExtensionManagerPanel.handleInput", () => {
 
   test("should clear search with Escape before closing", () => {
     const { panel, results } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("a");
     panel.handleInput("\u001b");
     expect(results).toEqual([]);
-    expect(panel.render(70).join("\n")).toContain("type to filter");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "type to filter",
+    );
 
     panel.handleInput("\u001b");
     expect(results).toEqual([{ type: "closed" }]);
@@ -431,13 +449,15 @@ describe("ExtensionManagerPanel.handleInput", () => {
       rows: [catalogRow("alpha", "extension", "Settings", selfPath)],
       selfPath,
     });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
-    expect(panel.render(70).join("\n")).toContain("Disable Extension Manager?");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "Disable Extension Manager?",
+    );
     expect(catalog.hasChanges()).toBe(false);
 
     panel.handleInput("\r");
-    expect(panel.render(70).join("\n")).not.toContain(
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).not.toContain(
       "Disable Extension Manager?",
     );
     expect(catalog.hasChanges()).toBe(false);
@@ -456,7 +476,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
       }),
     );
     const { catalog, panel, results } = makePanel({ commit });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
     panel.handleInput("\u001b");
 
@@ -465,7 +485,9 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(results).toEqual([]);
     expect(catalog.hasChanges()).toBe(true);
     expect(commit).not.toHaveBeenCalled();
-    expect(panel.render(70).join("\n")).toContain("> [ ] G alpha");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "> [ ] G alpha",
+    );
   });
 
   test("should discard staged changes and close when discard is confirmed", () => {
@@ -476,7 +498,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
       }),
     );
     const { catalog, panel, results } = makePanel({ commit });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
     panel.handleInput("\u001b");
 
@@ -496,17 +518,19 @@ describe("ExtensionManagerPanel.handleInput", () => {
       }),
     );
     const { panel, results } = makePanel({ commit });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
 
     panel.handleInput("\u0013");
 
     expect(commit).not.toHaveBeenCalled();
     expect(results).toEqual([]);
-    expect(panel.render(70).join("\n")).toContain("No staged changes");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "No staged changes",
+    );
   });
   const layouts: [string, number][] = [
-    ["narrow", 70],
-    ["wide", 120],
+    ["narrow", NARROW_PANEL_WIDTH],
+    ["wide", WIDE_PANEL_WIDTH],
   ];
 
   test.each(layouts)(
@@ -528,7 +552,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
 
   test("should toggle an unselected row on its checkbox click", () => {
     const { catalog, panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
 
     panel.handleInput("\u001b[<0;3;9M");
 
@@ -540,28 +564,30 @@ describe("ExtensionManagerPanel.handleInput", () => {
 
   test("should switch tabs from a header click", () => {
     const { panel } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
 
     panel.handleInput("\u001b[<0;8;3M");
 
-    const rendered = panel.render(70).join("\n");
+    const rendered = panel.render(NARROW_PANEL_WIDTH).join("\n");
     expect(rendered).toContain("alpha");
     expect(rendered).not.toContain("project-review");
   });
 
   test("should ignore fullscreen clicks but accept fullscreen wheel input", () => {
     const { catalog, panel } = makePanel({ mode: "fullscreen" });
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\u001b[<0;3;9M");
     expect(catalog.hasChanges()).toBe(false);
 
     panel.handleInput("\u001b[<65;1;1M");
-    expect(panel.render(70).join("\n")).toContain("project-review");
+    expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+      "project-review",
+    );
   });
 
   test("should request a render only for handled mouse events", () => {
     const { panel, renders } = makePanel();
-    panel.render(70);
+    panel.render(NARROW_PANEL_WIDTH);
     const before = renders.count;
 
     panel.handleInput("\u001b[<0;40;17M");

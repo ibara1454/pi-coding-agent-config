@@ -26,6 +26,15 @@ const BOX = {
   teeUp: "┴",
 } as const;
 const MAX_BOX_WIDTH = 100;
+const BOX_CONTENT_OVERHEAD = 3;
+const PREFERRED_LEFT_WIDTH_RATIO = 0.35;
+const WIDE_FIXED_ROWS = 13;
+const NARROW_FIXED_ROWS = 22;
+const MIN_EXTENSION_SLOTS = 4;
+const MAX_DISPLAYED_SESSIONS = 4;
+const TITLE_PREFIX_WIDTH = 3;
+const MIN_TIP_BODY_WIDTH = 8;
+const MIN_RENDERABLE_BOX_WIDTH = 4;
 const FIXED_TIP_ROWS = [
   "/ for commands",
   "! to run bash",
@@ -130,7 +139,7 @@ function renderLines(
   terminalRows: number,
   logo: readonly string[],
 ): string[] {
-  const contentWidth = boxWidth - 3;
+  const contentWidth = boxWidth - BOX_CONTENT_OVERHEAD;
   const preferredLeft = 26;
   const minimumLeft = 12;
   const minimumRight = 20;
@@ -140,7 +149,10 @@ function renderLines(
   );
   const desiredLeft = Math.min(
     preferredLeft,
-    Math.max(minimumLeft, Math.floor(contentWidth * 0.35)),
+    Math.max(
+      minimumLeft,
+      Math.floor(contentWidth * PREFERRED_LEFT_WIDTH_RATIO),
+    ),
   );
   const dualLeft =
     contentWidth >= minimumRight + 1
@@ -247,8 +259,9 @@ function extensionCapacity(
 ): number {
   // Fixed rows include borders, one-row top/bottom padding, headings,
   // separators, tips, and the rendered session rows.
-  const fixedRows = (isWide ? 13 : 22) + sessionRows;
-  return Math.max(4, terminalRows - fixedRows - tipRows);
+  const fixedRows =
+    (isWide ? WIDE_FIXED_ROWS : NARROW_FIXED_ROWS) + sessionRows;
+  return Math.max(MIN_EXTENSION_SLOTS, terminalRows - fixedRows - tipRows);
 }
 
 /**
@@ -339,7 +352,7 @@ function renderSessions(
   width: number,
 ): string[] {
   const rows: string[] = [];
-  for (const session of recentSessions.slice(0, 4)) {
+  for (const session of recentSessions.slice(0, MAX_DISPLAYED_SESSIONS)) {
     const prefix = " • ";
     const suffix = ` (${session.timeAgo})`;
     const name = truncateToWidth(
@@ -456,7 +469,7 @@ function renderBox(
 ): string[] {
   const dim = (value: string) => theme.fg("dim", value);
   const title = ` pi v${version} `;
-  const prefix = BOX.horizontal.repeat(3);
+  const prefix = BOX.horizontal.repeat(TITLE_PREFIX_WIDTH);
   const innerWidth = boxWidth - 2;
   const titleWidth = visibleWidth(prefix) + visibleWidth(title);
   const topInner =
@@ -501,7 +514,7 @@ function renderTipLines(
 ): string[] {
   const label = "Tip: ";
   const bodyWidth = boxWidth - 1 - visibleWidth(label);
-  if (bodyWidth < 8) {
+  if (bodyWidth < MIN_TIP_BODY_WIDTH) {
     return [];
   }
   const body = wrapText(selectedTip, bodyWidth);
@@ -572,7 +585,7 @@ export class WelcomeHeader {
     }
     const boxWidth = Math.min(MAX_BOX_WIDTH, Math.max(0, terminalWidth - 2));
     const lines =
-      boxWidth < 4
+      boxWidth < MIN_RENDERABLE_BOX_WIDTH
         ? []
         : renderLines(
             this.options,

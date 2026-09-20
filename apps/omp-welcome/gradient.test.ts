@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { IntroAnimation, RESTING_FRAMES } from "./gradient.ts";
 import { sanitizeInline } from "./terminal.ts";
 
+const INTRO_DURATION_MS = 3000;
+
 describe("Pi logo gradient", () => {
   const logo = [
     "▀██████████▀",
@@ -78,7 +80,7 @@ describe("welcome intro lifecycle", () => {
     animation.start();
     expect(animation.isActive()).toBe(true);
     expect(renders).toBe(1);
-    now = 3000;
+    now = INTRO_DURATION_MS;
     timer?.();
     expect(animation.isActive()).toBe(false);
     expect(cleared).toBe(1);

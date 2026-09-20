@@ -45,6 +45,26 @@ const LINE_BREAK = /\r?\n/;
 const CODE_ACTION_INDEX = /^\d+$/;
 const SWIFTLINT_COMMAND = /swiftlint/i;
 const ANY_LINE_BREAK = /\r\n|\r|\n/;
+const LSP_METHOD_NOT_FOUND_CODE = -32_601;
+const DEFAULT_ACTION_TIMEOUT_SECONDS = 20;
+const MIN_ACTION_TIMEOUT_SECONDS = 5;
+const MAX_ACTION_TIMEOUT_SECONDS = 300;
+const MILLISECONDS_PER_SECOND = 1000;
+const MAX_RESULT_TEXT_LENGTH = 60_000;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const MAX_DOCUMENT_BYTES = 16_777_216;
+const REFERENCE_RETRY_DELAY_MS = 250;
+const MAX_REFERENCE_RESULTS = 50;
+const MAX_NAVIGATION_RESULTS = 200;
+const MAX_CONTEXT_LINE_LENGTH = 500;
+const MAX_RAW_REQUEST_PAYLOAD_LENGTH = 400;
+const MAX_LINTER_TIMEOUT_MS = 3000;
+const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 10_000;
+const MULTI_FILE_DIAGNOSTIC_TIMEOUT_MS = 400;
+const MAX_SYMBOL_LINES = 200;
+const MUTATION_FEEDBACK_TIMEOUT_MS = 15_000;
+const MAX_MUTATION_FEEDBACK_TEXT_LENGTH = 20_000;
+const AFTER_MUTATION_TIMEOUT_MS = 16_000;
 
 interface WorkspaceOptions {
   cwd: string;
@@ -122,12 +142,18 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Recognizes the JSON-RPC method-not-found error used for capability fallbacks.
+ * @param error - Untrusted thrown value or RPC error object.
+ * @returns Whether the object carries numeric code -32601.
+ * @example methodNotFound({ code: -32601 }) is true; methodNotFound(null) is false.
+ */
 function methodNotFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    error.code === -32_601
+    error.code === LSP_METHOD_NOT_FOUND_CODE
   );
 }
 
@@ -275,7 +301,7 @@ async function executeAction(
   ) {
     return workspaceResult(params, "LSP is disabled in settings.", false);
   }
-  const requestedTimeout = params.timeout ?? 20;
+  const requestedTimeout = params.timeout ?? DEFAULT_ACTION_TIMEOUT_SECONDS;
   if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
     return workspaceResult(
       params,
@@ -283,14 +309,17 @@ async function executeAction(
       false,
     );
   }
-  const timeout = Math.min(300, Math.max(5, requestedTimeout));
+  const timeout = Math.min(
+    MAX_ACTION_TIMEOUT_SECONDS,
+    Math.max(MIN_ACTION_TIMEOUT_SECONDS, requestedTimeout),
+  );
   const deadline = new AbortController();
   const timer = setTimeout(
     () =>
       deadline.abort(
         new Error(`LSP ${params.action} timed out after ${timeout}s`),
       ),
-    timeout * 1000,
+    timeout * MILLISECONDS_PER_SECOND,
   );
   const signal = AbortSignal.any([
     state.lifetime.signal,
@@ -327,8 +356,8 @@ function workspaceResult(
   serverName?: string,
 ): LspResult {
   const bounded =
-    text.length > 60_000
-      ? `${text.slice(0, 60_000)}\n…output truncated at 60000 characters…`
+    text.length > MAX_RESULT_TEXT_LENGTH
+      ? `${text.slice(0, MAX_RESULT_TEXT_LENGTH)}\n…output truncated at 60000 characters…`
       : text;
   return {
     text: bounded,
@@ -407,7 +436,7 @@ async function openDocument(
   if (!stat.isFile()) {
     throw new Error(`Expected a file: ${file}`);
   }
-  if (stat.size > 16 * 1024 * 1024) {
+  if (stat.size > MAX_DOCUMENT_BYTES) {
     throw new Error(`LSP document exceeds 16 MiB: ${file}`);
   }
   const content = await fs.readFile(file, "utf8");
@@ -644,7 +673,7 @@ async function dispatchAction(
               found[0].range.start.line === position.line));
           attempt++
         ) {
-          await delay(250, undefined, { signal });
+          await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
           found = locations(await server.request(method, request, signal));
         }
       }
@@ -657,7 +686,10 @@ async function dispatchAction(
           server.config.name,
         );
       }
-      const limit = action === "references" ? 50 : 200;
+      const limit =
+        action === "references"
+          ? MAX_REFERENCE_RESULTS
+          : MAX_NAVIGATION_RESULTS;
       const contexts = new Map<string, string[]>();
       const lines: string[] = [];
       for (const location of found.slice(0, limit)) {
@@ -665,7 +697,7 @@ async function dispatchAction(
         let context = contexts.get(location.file);
         if (!context) {
           try {
-            if ((await fs.stat(location.file)).size > 16 * 1024 * 1024) {
+            if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
               throw new Error("file exceeds context limit");
             }
             context = (await fs.readFile(location.file, "utf8")).split(
@@ -678,7 +710,7 @@ async function dispatchAction(
         }
         const text = context[location.range.start.line]?.trim();
         lines.push(
-          `${path.relative(state.options.cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, 500)}` : ""}`,
+          `${path.relative(state.options.cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
         );
       }
       return workspaceResult(
@@ -820,7 +852,7 @@ async function rawRequest(
   } catch (error) {
     return workspaceResult(
       params,
-      `LSP error from ${server.config.name} on ${method}: ${errorText(error)}\n  params: ${JSON.stringify(payload ?? null).slice(0, 400)}`,
+      `LSP error from ${server.config.name} on ${method}: ${errorText(error)}\n  params: ${JSON.stringify(payload ?? null).slice(0, MAX_RAW_REQUEST_PAYLOAD_LENGTH)}`,
       false,
       server.config.name,
     );
@@ -854,7 +886,7 @@ async function collectDiagnostics(
     };
   }
   const stat = await fs.stat(file);
-  if (!stat.isFile() || stat.size > 16 * 1024 * 1024) {
+  if (!stat.isFile() || stat.size > MAX_DOCUMENT_BYTES) {
     throw new Error(
       `Diagnostics target is not a regular file below 16 MiB: ${file}`,
     );
@@ -878,7 +910,9 @@ async function collectDiagnostics(
         const report = await server.diagnostics(
           file,
           signal,
-          config.isLinter ? Math.min(3000, timeoutMs) : timeoutMs,
+          config.isLinter
+            ? Math.min(MAX_LINTER_TIMEOUT_MS, timeoutMs)
+            : timeoutMs,
         );
         diagnostics = normalizeDiagnostics(report.items);
         if (report.freshness === "unversioned") {
@@ -932,7 +966,13 @@ async function diagnosticsResult(
     const result = await runWorkspaceDiagnostics(
       state.options.cwd,
       signal,
-      Math.min(300, Math.max(5, params.timeout ?? 20)) * 1000,
+      Math.min(
+        MAX_ACTION_TIMEOUT_SECONDS,
+        Math.max(
+          MIN_ACTION_TIMEOUT_SECONDS,
+          params.timeout ?? DEFAULT_ACTION_TIMEOUT_SECONDS,
+        ),
+      ) * MILLISECONDS_PER_SECOND,
     );
     return {
       ...result,
@@ -957,7 +997,9 @@ async function diagnosticsResult(
       state,
       file,
       signal,
-      targets.files.length > 1 ? 400 : 10_000,
+      targets.files.length > 1
+        ? MULTI_FILE_DIAGNOSTIC_TIMEOUT_MS
+        : DEFAULT_DIAGNOSTIC_TIMEOUT_MS,
     ),
   );
   const lines: string[] = [];
@@ -1008,13 +1050,13 @@ async function diagnosticsResult(
  */
 function symbolLines(cwd: string, found: readonly DisplaySymbol[]): string[] {
   const lines = found
-    .slice(0, 200)
+    .slice(0, MAX_SYMBOL_LINES)
     .map(
       (symbol) =>
         `${"  ".repeat(symbol.depth)}${symbol.name}${symbol.container ? ` (${symbol.container})` : ""} [kind ${symbol.kind}] ${path.relative(cwd, symbol.file) || symbol.file}${symbol.position ? `:${symbol.position.line + 1}:${symbol.position.character + 1}` : " (location unresolved)"}`,
     );
-  if (found.length > 200) {
-    lines.push(`…${found.length - 200} symbols elided…`);
+  if (found.length > MAX_SYMBOL_LINES) {
+    lines.push(`…${found.length - MAX_SYMBOL_LINES} symbols elided…`);
   }
   return lines;
 }
@@ -1124,7 +1166,11 @@ async function codeActions(
   let diagnosticWarning = "";
   let diagnosticContextFailed = false;
   try {
-    const report = await server.diagnostics(file, signal, 10_000);
+    const report = await server.diagnostics(
+      file,
+      signal,
+      DEFAULT_DIAGNOSTIC_TIMEOUT_MS,
+    );
     diagnostics = normalizeDiagnostics(report.items);
     if (report.freshness === "unversioned") {
       diagnosticWarning = `Diagnostic context freshness-unverified from ${server.config.name}: unversioned diagnostics may be stale.`;
@@ -1860,7 +1906,7 @@ async function mutationFeedback(
         controller.abort(
           new Error("LSP mutation feedback timed out after 15s"),
         ),
-      15_000,
+      MUTATION_FEEDBACK_TIMEOUT_MS,
     );
     const signal = AbortSignal.any([
       state.lifetime.signal,
@@ -2001,8 +2047,8 @@ async function mutationFeedback(
   return text
     ? {
         text:
-          text.length > 20_000
-            ? `${text.slice(0, 20_000)}\n…LSP feedback truncated…`
+          text.length > MAX_MUTATION_FEEDBACK_TEXT_LENGTH
+            ? `${text.slice(0, MAX_MUTATION_FEEDBACK_TEXT_LENGTH)}\n…LSP feedback truncated…`
             : text,
         details: { action: "afterMutation", source },
       }
@@ -2246,7 +2292,7 @@ export class LspWorkspace {
           text: `LSP feedback timed out; the host ${source} already succeeded. Cancellation was requested for pending LSP work.`,
           details: { action: "afterMutation", source },
         });
-      }, 16_000);
+      }, AFTER_MUTATION_TIMEOUT_MS);
       job.then(
         () => clearTimeout(timer),
         () => clearTimeout(timer),

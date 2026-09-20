@@ -1,5 +1,13 @@
 import type { StatusLineSeparatorStyle } from "./types.ts";
 
+const FNV_PRIME = 16_777_619;
+const HUE_CYCLE_DEGREES = 360;
+const HSL_PERCENT_SCALE = 100;
+const HUE_SECTION_CYAN_START = 3;
+const HUE_SECTION_BLUE_START = 4;
+const HUE_SECTION_MAGENTA_START = 5;
+const RGB_CHANNEL_MAX = 255;
+
 export const RESET = "\x1b[0m";
 export const RESET_FG = "\x1b[39m";
 export const DEFAULT_STATUS_BG = "\x1b[48;2;18;18;18m";
@@ -131,20 +139,35 @@ export function getSeparator(
   }
 }
 
+/**
+ * Hashes Unicode code points with FNV-style XOR/multiply steps, not UTF-8 bytes.
+ * @param name Session name, including any whitespace; no normalization is applied.
+ * @returns Deterministic unsigned 32-bit hash, not a cryptographic identifier.
+ * @example hashName(""); // 2166136261 (the initial offset basis)
+ */
 function hashName(name: string): number {
   let hash = 2_166_136_261;
   for (const char of name) {
     hash ^= char.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 16_777_619);
+    hash = Math.imul(hash, FNV_PRIME);
   }
   return hash >>> 0;
 }
 
+/**
+ * Derives a stable truecolor foreground from the name's hash modulo 360 degrees.
+ * Uses 68% saturation and 64% lightness, rounding RGB channels to 0–255.
+ * @param name Name to hash verbatim; it is never embedded in the escape sequence.
+ * @returns ANSI foreground prefix only; the caller owns applying and resetting it.
+ * @example sessionAccentAnsi(""); // "\x1b[38;2;224;226;101m"
+ */
 export function sessionAccentAnsi(name: string): string {
-  const hue = hashName(name) % 360;
+  const hue = hashName(name) % HUE_CYCLE_DEGREES;
   const saturation = 68;
   const lightness = 64;
-  const chroma = (1 - Math.abs((2 * lightness) / 100 - 1)) * (saturation / 100);
+  const chroma =
+    (1 - Math.abs((2 * lightness) / HSL_PERCENT_SCALE - 1)) *
+    (saturation / HSL_PERCENT_SCALE);
   const section = hue / 60;
   const x = chroma * (1 - Math.abs((section % 2) - 1));
   let r1: number;
@@ -158,15 +181,15 @@ export function sessionAccentAnsi(name: string): string {
     r1 = x;
     g1 = chroma;
     b1 = 0;
-  } else if (section < 3) {
+  } else if (section < HUE_SECTION_CYAN_START) {
     r1 = 0;
     g1 = chroma;
     b1 = x;
-  } else if (section < 4) {
+  } else if (section < HUE_SECTION_BLUE_START) {
     r1 = 0;
     g1 = x;
     b1 = chroma;
-  } else if (section < 5) {
+  } else if (section < HUE_SECTION_MAGENTA_START) {
     r1 = x;
     g1 = 0;
     b1 = chroma;
@@ -175,9 +198,9 @@ export function sessionAccentAnsi(name: string): string {
     g1 = 0;
     b1 = x;
   }
-  const m = lightness / 100 - chroma / 2;
-  const r = Math.round((r1 + m) * 255);
-  const g = Math.round((g1 + m) * 255);
-  const b = Math.round((b1 + m) * 255);
+  const m = lightness / HSL_PERCENT_SCALE - chroma / 2;
+  const r = Math.round((r1 + m) * RGB_CHANNEL_MAX);
+  const g = Math.round((g1 + m) * RGB_CHANNEL_MAX);
+  const b = Math.round((b1 + m) * RGB_CHANNEL_MAX);
   return `\x1b[38;2;${r};${g};${b}m`;
 }

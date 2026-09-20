@@ -92,6 +92,29 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const WRITE_TIMEOUT_MS = 5000;
 const DIAGNOSTIC_TIMEOUT_MS = 10_000;
 const DIAGNOSTIC_SETTLE_MS = 250;
+// 2 ** 31 - 1 ms: the maximum signed 32-bit timer delay.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+// 16 KiB (16 * 1024 bytes).
+const LSP_HEADER_MAX_BYTES = 16_384;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const LSP_MESSAGE_MAX_BYTES = 16_777_216;
+const HEADER_TERMINATOR_LENGTH = 4;
+const HEADER_CR_OFFSET = HEADER_TERMINATOR_LENGTH;
+const HEADER_LF_OFFSET = 3;
+const HEADER_SECOND_CR_OFFSET = 2;
+const HEADER_SECOND_LF_OFFSET = 1;
+const CARRIAGE_RETURN_CODE = 13;
+const LINE_FEED_CODE = 10;
+// 16 * 1024 UTF-16 code units, not bytes.
+const MAX_RETAINED_STDERR_CHARACTERS = 16_384;
+const DIAGNOSTIC_POLL_INTERVAL_MS = 50;
+const WORKSPACE_STATUS_TIMEOUT_MS = 1000;
+const RUST_ANALYZER_SETTLE_MS = 2000;
+const WORKSPACE_SETTLE_MS = 100;
+const WORKSPACE_POLL_INTERVAL_MS = 100;
+const RPC_CANCELLATION_GRACE_MS = 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
+const MAX_IDLE_SWEEP_INTERVAL_MS = 1000;
 
 const CONTAINER_FILENAME = /^(dockerfile|containerfile)(\.|$)/;
 const CONTENT_LENGTH_HEADER = /^content-length:/i;
@@ -119,9 +142,16 @@ function check(signal?: AbortSignal): void {
   }
 }
 
+/**
+ * Normalizes positive timer durations to Node's maximum supported delay.
+ * @param value - Requested milliseconds; undefined, non-finite, or nonpositive values use fallback.
+ * @param fallback - Caller-provided default milliseconds, returned without further validation.
+ * @returns The requested value capped at 2147483647, or fallback.
+ * @example duration(0, 1000) returns 1000; duration(250, 1000) returns 250.
+ */
 function duration(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value) && value > 0
-    ? Math.min(value, 2_147_483_647)
+    ? Math.min(value, MAX_TIMER_DELAY_MS)
     : fallback;
 }
 
@@ -411,10 +441,19 @@ function clientCapabilities(): ClientCapabilities {
 
 /** Validate framing before vscode-jsonrpc can grow its message buffer. */
 class BoundedLspInput extends Transform {
-  private readonly header = Buffer.allocUnsafe(16 * 1024);
+  private readonly header = Buffer.allocUnsafe(LSP_HEADER_MAX_BYTES);
   private headerBytes = 0;
   private bodyRemaining = 0;
 
+  /**
+   * Validates streaming LSP frames before forwarding their bytes to the RPC reader.
+   * @param chunk - Incoming bytes, potentially spanning partial or multiple frames.
+   * @param _encoding - Stream encoding, unused for Buffer input.
+   * @param callback - Called with framing errors instead of throwing to the stream caller.
+   * Headers are limited to 16 KiB and bodies to 16 MiB; forwarded headers are copied
+   * before reusing owned header storage, while body slices share the input buffer.
+   * @example A "Content-Length: 2\r\n\r\n{}" chunk forwards one valid frame and calls callback().
+   */
   override _transform(
     chunk: Buffer,
     _encoding: BufferEncoding,
@@ -438,11 +477,12 @@ class BoundedLspInput extends Transform {
           this.header.writeUInt8(chunk.readUInt8(offset++), this.headerBytes++);
           const size = this.headerBytes;
           if (
-            size >= 4 &&
-            this.header[size - 4] === 13 &&
-            this.header[size - 3] === 10 &&
-            this.header[size - 2] === 13 &&
-            this.header[size - 1] === 10
+            size >= HEADER_TERMINATOR_LENGTH &&
+            this.header[size - HEADER_CR_OFFSET] === CARRIAGE_RETURN_CODE &&
+            this.header[size - HEADER_LF_OFFSET] === LINE_FEED_CODE &&
+            this.header[size - HEADER_SECOND_CR_OFFSET] ===
+              CARRIAGE_RETURN_CODE &&
+            this.header[size - HEADER_SECOND_LF_OFFSET] === LINE_FEED_CODE
           ) {
             complete = true;
             break;
@@ -464,7 +504,7 @@ class BoundedLspInput extends Transform {
         if (!Number.isSafeInteger(length) || length <= 0) {
           throw new Error("Invalid LSP Content-Length header");
         }
-        if (length > 16 * 1024 * 1024) {
+        if (length > LSP_MESSAGE_MAX_BYTES) {
           throw new Error("LSP message exceeds 16 MiB");
         }
         // The header storage is reused; the downstream reader owns this copy.
@@ -658,7 +698,9 @@ class StdioLanguageServer implements LanguageServer {
    * child.stderr.emit("data", "denied\n"); // Later failures include "denied".
    */
   private readonly onStderr = (data: Buffer | string): void => {
-    this.state.stderr = (this.state.stderr + String(data)).slice(-16_384);
+    this.state.stderr = (this.state.stderr + String(data)).slice(
+      -MAX_RETAINED_STDERR_CHARACTERS,
+    );
   };
   /**
    * Routes process and stream errors into owned shutdown using one stable listener identity.
@@ -931,8 +973,11 @@ class StdioLanguageServer implements LanguageServer {
           let lineStart = 0;
           for (let index = 0; index < prior.content.length; index++) {
             const char = prior.content.charCodeAt(index);
-            if (char === 13 || char === 10) {
-              if (char === 13 && prior.content.charCodeAt(index + 1) === 10) {
+            if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
+              if (
+                char === CARRIAGE_RETURN_CODE &&
+                prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
+              ) {
                 index++;
               }
               line++;
@@ -1118,9 +1163,13 @@ class StdioLanguageServer implements LanguageServer {
             freshness: published.versioned ? "versioned" : "unversioned",
           };
         }
-        await pause(Math.min(50, Math.max(1, deadline - Date.now())), [
-          operationSignal,
-        ]);
+        await pause(
+          Math.min(
+            DIAGNOSTIC_POLL_INTERVAL_MS,
+            Math.max(1, deadline - Date.now()),
+          ),
+          [operationSignal],
+        );
       }
       throw new Error(
         `LSP ${this.config.name} diagnostics timed out for ${file}; no fresh complete report (clean state is unverified)`,
@@ -1314,7 +1363,8 @@ async function waitForWorkspace(
   const start = Date.now();
   let quietSince = start;
   const deadline =
-    start + Math.min(duration(timings?.timeoutMs, 10_000), timeoutMs);
+    start +
+    Math.min(duration(timings?.timeoutMs, DIAGNOSTIC_TIMEOUT_MS), timeoutMs);
   while (Date.now() < deadline) {
     check(signal);
     if (rust) {
@@ -1323,7 +1373,10 @@ async function waitForWorkspace(
         {},
         signal,
         Math.min(
-          duration(timings?.statusRequestTimeoutMs, 1000),
+          duration(
+            timings?.statusRequestTimeoutMs,
+            WORKSPACE_STATUS_TIMEOUT_MS,
+          ),
           Math.max(1, deadline - Date.now()),
         ),
       );
@@ -1333,18 +1386,22 @@ async function waitForWorkspace(
       if (
         !status.startsWith("No workspaces") &&
         state.progress.size === 0 &&
-        Date.now() - start >= duration(timings?.settleMs, 2000)
+        Date.now() - start >=
+          duration(timings?.settleMs, RUST_ANALYZER_SETTLE_MS)
       ) {
         return;
       }
     } else if (state.progress.size > 0) {
       quietSince = Date.now();
-    } else if (Date.now() - quietSince >= duration(timings?.settleMs, 100)) {
+    } else if (
+      Date.now() - quietSince >=
+      duration(timings?.settleMs, WORKSPACE_SETTLE_MS)
+    ) {
       return;
     }
     await pause(
       Math.min(
-        duration(timings?.pollMs, 100),
+        duration(timings?.pollMs, WORKSPACE_POLL_INTERVAL_MS),
         Math.max(1, deadline - Date.now()),
       ),
       [signal, state.lifetime.signal],
@@ -1423,7 +1480,7 @@ async function rpc<T>(
                 ),
               );
             }
-          }, 1000);
+          }, RPC_CANCELLATION_GRACE_MS);
           state.cancellationTimers.add(cleanupTimer);
         }
       },
@@ -1827,7 +1884,7 @@ export class LanguageServerPool {
   constructor(options: PoolOptions) {
     this.options = options;
     if (options.idleTimeoutMs !== undefined && options.idleTimeoutMs > 0) {
-      const timeout = duration(options.idleTimeoutMs, 60_000);
+      const timeout = duration(options.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS);
       this.idleTimer = setInterval(
         () => {
           for (const [key, entry] of this.entries) {
@@ -1842,7 +1899,7 @@ export class LanguageServerPool {
             }
           }
         },
-        Math.min(timeout, 1000),
+        Math.min(timeout, MAX_IDLE_SWEEP_INTERVAL_MS),
       );
       this.idleTimer.unref();
     }

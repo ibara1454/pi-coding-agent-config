@@ -5,6 +5,20 @@ import { WelcomeHeader } from "./welcome.ts";
 
 const WIDE_BOTTOM_BORDER = /^╰─+┴─+╯$/;
 const EXTENSION_NAME = /extension-\d+\.ts/;
+const DEFAULT_TERMINAL_ROWS = 40;
+const WIDE_TERMINAL_WIDTH = 102;
+const EXPECTED_WIDE_BOX_WIDTH = 100;
+const WIDE_TITLE_FILL_CELLS = 83;
+const EXPECTED_TIP_ROWS = 4;
+const EXPECTED_SESSION_ROWS = 4;
+const WIDE_SCROLL_TERMINAL_ROWS = 17;
+const WIDE_SCROLL_RENDERED_ROWS = 19;
+const NARROW_TERMINAL_WIDTH = 32;
+const NARROW_SCROLL_TERMINAL_ROWS = 27;
+const NARROW_SCROLL_RENDERED_ROWS = 29;
+const NARROW_BOX_CONTENT_WIDTH = 30;
+const GRAPHEME_TRUNCATION_WIDTH = 6;
+const GRAPHEME_SOURCE_WIDTH = 11;
 
 function identityTheme(colorMode: "truecolor" | "256color" = "truecolor") {
   return {
@@ -27,7 +41,7 @@ function header(
     requestRender: () => {
       // Rendering is driven explicitly by each test.
     },
-    terminalRows: () => 40,
+    terminalRows: () => DEFAULT_TERMINAL_ROWS,
     ...overrides,
   });
 }
@@ -59,7 +73,7 @@ describe("wide welcome box", () => {
       { name: "Fourth", timeAgo: "3d ago" },
     ];
     const component = header({ extensions, recentSessions: sessions });
-    const rendered = component.render(102);
+    const rendered = component.render(WIDE_TERMINAL_WIDTH);
     const lines = rendered.map(sanitizeInline);
     const [first] = lines;
     const bottom = lines.find((line) => line.startsWith("╰"));
@@ -68,10 +82,10 @@ describe("wide welcome box", () => {
     expect(bottom).toBeDefined();
     expect(bottom).not.toBeNull();
 
-    expect(first).toBe(`╭─── pi v0.84.1 ${"─".repeat(83)}╮`);
-    expect(visibleWidth(first ?? "")).toBe(100);
+    expect(first).toBe(`╭─── pi v0.84.1 ${"─".repeat(WIDE_TITLE_FILL_CELLS)}╮`);
+    expect(visibleWidth(first ?? "")).toBe(EXPECTED_WIDE_BOX_WIDTH);
     expect(bottom).toMatch(WIDE_BOTTOM_BORDER);
-    expect(visibleWidth(bottom ?? "")).toBe(100);
+    expect(visibleWidth(bottom ?? "")).toBe(EXPECTED_WIDE_BOX_WIDTH);
     expect(
       rendered.filter((line) => line.includes("\x1b[38;2;")),
     ).not.toHaveLength(0);
@@ -90,7 +104,7 @@ describe("wide welcome box", () => {
           line.includes("to run bash") ||
           line.includes("drop files to attach"),
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(EXPECTED_TIP_ROWS);
     expect(
       lines.filter(
         (line) =>
@@ -99,7 +113,7 @@ describe("wide welcome box", () => {
           line.includes("1h ago") ||
           line.includes("3d ago"),
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(EXPECTED_SESSION_ROWS);
     expect(lines.some((line) => line.includes("Welcome back!"))).toBe(true);
     expect(lines.at(-1)).toContain("active model.");
     component.dispose();
@@ -118,7 +132,7 @@ describe("wide welcome box", () => {
     ];
     const lines = rawLines(
       header({ extensions, recentSessions: sessions }),
-      102,
+      WIDE_TERMINAL_WIDTH,
     );
     const bottomIndex = lines.findIndex((line) => line.startsWith("╰"));
     const boxRows = lines.slice(1, bottomIndex);
@@ -147,9 +161,12 @@ describe("wide welcome box", () => {
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
     }));
-    const lines = rawLines(header({ extensions, terminalRows: () => 17 }), 102);
+    const lines = rawLines(
+      header({ extensions, terminalRows: () => WIDE_SCROLL_TERMINAL_ROWS }),
+      WIDE_TERMINAL_WIDTH,
+    );
 
-    expect(lines).toHaveLength(19);
+    expect(lines).toHaveLength(WIDE_SCROLL_RENDERED_ROWS);
     expect(
       lines
         .filter((line) => line.includes("extension-"))
@@ -166,7 +183,7 @@ describe("narrow welcome box", () => {
         extensions: [{ name: "local.ts", scope: "project" }],
         recentSessions: [{ name: "Saved work", timeAgo: "just now" }],
       }),
-      32,
+      NARROW_TERMINAL_WIDTH,
     );
     const [first] = lines;
     const bottom = lines.find((line) => line.startsWith("╰"));
@@ -202,9 +219,12 @@ describe("narrow welcome box", () => {
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
     }));
-    const lines = rawLines(header({ extensions, terminalRows: () => 27 }), 32);
+    const lines = rawLines(
+      header({ extensions, terminalRows: () => NARROW_SCROLL_TERMINAL_ROWS }),
+      NARROW_TERMINAL_WIDTH,
+    );
 
-    expect(lines).toHaveLength(29);
+    expect(lines).toHaveLength(NARROW_SCROLL_RENDERED_ROWS);
     expect(
       lines
         .filter((line) => line.includes("extension-"))
@@ -229,7 +249,7 @@ describe("narrow welcome box", () => {
           },
         ],
       }),
-      32,
+      NARROW_TERMINAL_WIDTH,
     );
 
     expect(lines.some((line) => line.includes("… user"))).toBe(true);
@@ -241,10 +261,10 @@ describe("narrow welcome box", () => {
     expect(
       lines
         .filter((line) => line.startsWith("│"))
-        .every((line) => visibleWidth(line) === 30),
+        .every((line) => visibleWidth(line) === NARROW_BOX_CONTENT_WIDTH),
     ).toBe(true);
 
-    const empty = rawLines(header(), 32);
+    const empty = rawLines(header(), NARROW_TERMINAL_WIDTH);
     expect(empty.some((line) => line.includes("No extensions"))).toBe(true);
     expect(empty.some((line) => line.includes("No recent sessions"))).toBe(
       true,
@@ -255,10 +275,10 @@ describe("narrow welcome box", () => {
 describe("terminal-cell-safe rendering", () => {
   test("should count graphemes in cells and close ANSI state before ellipsis", () => {
     const source = "\x1b[35m界e\u0301👩‍💻abcdef";
-    const truncated = truncateToWidth(source, 6);
+    const truncated = truncateToWidth(source, GRAPHEME_TRUNCATION_WIDTH);
 
-    expect(visibleWidth(source)).toBe(11);
-    expect(visibleWidth(truncated)).toBe(6);
+    expect(visibleWidth(source)).toBe(GRAPHEME_SOURCE_WIDTH);
+    expect(visibleWidth(truncated)).toBe(GRAPHEME_TRUNCATION_WIDTH);
     expect(sanitizeInline(truncated)).toBe("界e\u0301👩‍💻…");
     expect(truncated.endsWith("\x1b[0m")).toBe(true);
   });
@@ -271,15 +291,19 @@ describe("terminal-cell-safe rendering", () => {
       ],
       selectedTip: "Use 👩‍💻 and 界界 safely in a terminal-cell-aware tip.",
     });
-    const lines = component.render(102);
+    const lines = component.render(WIDE_TERMINAL_WIDTH);
     const box = lines.slice(
       0,
       lines.findIndex((line) => sanitizeInline(line).startsWith("╰")) + 1,
     );
 
-    expect(box.every((line) => visibleWidth(line) === 100)).toBe(true);
     expect(
-      lines.slice(box.length).every((line) => visibleWidth(line) <= 100),
+      box.every((line) => visibleWidth(line) === EXPECTED_WIDE_BOX_WIDTH),
+    ).toBe(true);
+    expect(
+      lines
+        .slice(box.length)
+        .every((line) => visibleWidth(line) <= EXPECTED_WIDE_BOX_WIDTH),
     ).toBe(true);
     component.dispose();
   });
@@ -298,7 +322,7 @@ describe("terminal-cell-safe rendering", () => {
       ],
       selectedTip: "Use\u0000 controls\nsafely",
     });
-    const rendered = component.render(102);
+    const rendered = component.render(WIDE_TERMINAL_WIDTH);
     const raw = rendered.join("\n");
     const plain = rendered.map(sanitizeInline).join("\n");
 
@@ -316,7 +340,7 @@ describe("terminal-cell-safe rendering", () => {
 describe("dynamic welcome behavior", () => {
   test("should use the 256-color logo fallback", () => {
     const component = header({ theme: identityTheme("256color") });
-    const rendered = component.render(102).join("\n");
+    const rendered = component.render(WIDE_TERMINAL_WIDTH).join("\n");
 
     expect(rendered).toContain("\x1b[38;5;");
     component.dispose();

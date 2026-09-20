@@ -36,6 +36,12 @@ const WILDCARD = /[*?]/;
 const SCP_GIT_PATH: RegExp = /^git@[^:]+:(.+)$/;
 const GIT_REF_SUFFIX = /@[^/]+$/;
 const EXTENSION_SUFFIX = /\.(?:ts|js)$/;
+const USER_AUTO_DISCOVERY_RANK = 3;
+const MILLISECONDS_PER_MINUTE = 60_000;
+const MILLISECONDS_PER_HOUR = 3_600_000;
+const MILLISECONDS_PER_DAY = 86_400_000;
+const RELATIVE_AGE_DAY_LIMIT = 7;
+const MAX_WELCOME_SESSIONS = 4;
 
 export type ExtensionScope = "project" | "user";
 
@@ -990,6 +996,12 @@ function extensionNames(
  * Captures Pi's enabled startup extension set without loading or installing
  * anything again. It mirrors Pi 0.84.1's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
+ * Reads local metadata only; it neither imports extensions nor installs packages.
+ * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.
+ * @param options Startup cwd, trust decision, and optional agent/welcome paths.
+ * @returns Canonically deduplicated enabled entries, project scope first, then by name.
+ * @example collectWelcomeExtensions({ cwd: "/work", projectTrusted: false });
+ * // Ignores project settings and project auto-discovery, retaining user extensions.
  */
 export function collectWelcomeExtensions(
   options: WelcomeSnapshotOptions,
@@ -1169,7 +1181,12 @@ export function collectWelcomeExtensions(
     addAutoDiscovered("project", settings.project.extensions, projectDir, 1);
   }
   addConfigured("user", settings.user.extensions, agentDir, 2);
-  addAutoDiscovered("user", settings.user.extensions, agentDir, 3);
+  addAutoDiscovered(
+    "user",
+    settings.user.extensions,
+    agentDir,
+    USER_AUTO_DISCOVERY_RANK,
+  );
 
   const seen = new Set<string>();
   const resolved = [...byPath.values()]
@@ -1238,12 +1255,18 @@ interface SessionInfoLike {
   modified: Date;
 }
 
-/** OMP's compact relative age wording. */
+/**
+ * Formats session age relative to a millisecond epoch clock.
+ * @param date Modification time; future times are treated as "just now".
+ * @param now Epoch milliseconds, defaulting to Date.now().
+ * @returns Whole minutes/hours/days below seven days, otherwise a locale date.
+ * @example formatSessionAge(new Date(0), 60000); // "1m ago"
+ */
 function formatSessionAge(date: Date, now = Date.now()): string {
   const difference = now - date.getTime();
-  const minutes = Math.floor(difference / 60_000);
-  const hours = Math.floor(difference / 3_600_000);
-  const days = Math.floor(difference / 86_400_000);
+  const minutes = Math.floor(difference / MILLISECONDS_PER_MINUTE);
+  const hours = Math.floor(difference / MILLISECONDS_PER_HOUR);
+  const days = Math.floor(difference / MILLISECONDS_PER_DAY);
   if (minutes < 1) {
     return "just now";
   }
@@ -1253,7 +1276,7 @@ function formatSessionAge(date: Date, now = Date.now()): string {
   if (hours < 24) {
     return `${hours}h ago`;
   }
-  if (days < 7) {
+  if (days < RELATIVE_AGE_DAY_LIMIT) {
     return `${days}d ago`;
   }
   return date.toLocaleDateString();
@@ -1282,13 +1305,22 @@ function sessionLabel(session: SessionInfoLike): string {
   return `Untitled · ${time}`;
 }
 
+/**
+ * Selects the four most recently modified sessions without mutating the input.
+ * Labels keep their first line and remove ASCII control bytes; terminal styling is not parsed here.
+ * @param sessions Session metadata; labels prefer sanitized name, then first prompt.
+ * @param now Epoch milliseconds for relative ages; defaults to the current clock.
+ * @returns Display labels and ages; missing labels use a locale-time untitled label.
+ * @example welcomeSessions([{ name: "Fix", firstMessage: "", created: new Date(0),
+ * modified: new Date(0) }], 60000); // [{ name: "Fix", timeAgo: "1m ago" }]
+ */
 export function welcomeSessions(
   sessions: readonly SessionInfoLike[],
   now = Date.now(),
 ): WelcomeSession[] {
   return [...sessions]
     .sort((a, b) => b.modified.getTime() - a.modified.getTime())
-    .slice(0, 4)
+    .slice(0, MAX_WELCOME_SESSIONS)
     .map((session) => ({
       name: sessionLabel(session),
       timeAgo: formatSessionAge(session.modified, now),

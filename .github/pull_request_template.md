@@ -8,10 +8,15 @@ Related issue: <!-- Use "Closes #123" only if this PR resolves it; otherwise "Re
 
 ## Verification
 
-<!-- List exact commands and results; explain checks not run.
-Examples: bun run check, bun test apps/<extension>, bun run test.
-For behavior changes, include the exercised scenario and observed result.
-For terminal UI changes, include Pi interaction steps and a screenshot or output.
+<!-- Document only verification beyond .github/workflows/check.yml.
+Do not list commands or results already covered by CI, including lint, type
+checking, workspace tests, existing snapshots, or narrower reruns of those checks.
+Describe additional manual checks, smoke/differential checks, or independent
+reviews with the exercised scenarios and observed results.
+For terminal UI checks beyond CI, include Pi interaction steps and a screenshot
+or output.
+If no additional verification was needed, write:
+"No additional verification beyond CI."
 -->
 
 -
