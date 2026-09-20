@@ -1,9 +1,9 @@
 // Adapted from Oh My Pi's MIT-licensed workspace diagnostics; see LICENSE.
 import { access } from "node:fs/promises";
-import * as path from "node:path";
-import { resolveCommand } from "./config.js";
-import { runCommand } from "./process.js";
-import type { LspResult } from "./types.js";
+import path from "node:path";
+import { resolveCommand } from "./config.ts";
+import { runCommand } from "./process.ts";
+import type { LspResult } from "./types.ts";
 
 interface Checker {
   language: "rust" | "typescript" | "go" | "python";
@@ -24,6 +24,9 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_CONCURRENT_CHECKERS = 2;
 const MAX_GO_MODULES = 256;
 
+const TRAILING_SLASHES = /\/+$/;
+const LINE_BREAK = /\r?\n/;
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -35,7 +38,9 @@ async function marker(cwd: string, name: string): Promise<boolean> {
   } catch (error) {
     if (record(error)) {
       const { code } = error;
-      if (code === "ENOENT" || code === "ENOTDIR") return false;
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        return false;
+      }
     }
     throw error;
   }
@@ -90,34 +95,40 @@ async function detectCheckers(
 
 function goWorkspacePatterns(output: string): string[] {
   const parsed: unknown = JSON.parse(output);
-  if (!record(parsed))
+  if (!record(parsed)) {
     throw new Error(
       "go work edit -json returned no workspace modules; workspace was not verified",
     );
+  }
   const { Use: modules } = parsed;
-  if (!Array.isArray(modules) || modules.length === 0)
+  if (!Array.isArray(modules) || modules.length === 0) {
     throw new Error(
       "go work edit -json returned no workspace modules; workspace was not verified",
     );
-  if (modules.length > MAX_GO_MODULES)
+  }
+  if (modules.length > MAX_GO_MODULES) {
     throw new Error(
       `Go workspace exceeds ${MAX_GO_MODULES} modules; select a smaller workspace`,
     );
+  }
   const patterns = new Set<string>();
   for (const entry of modules) {
-    if (!record(entry))
+    if (!record(entry)) {
       throw new Error("go work edit -json returned an invalid module path");
+    }
     const { DiskPath: modulePath } = entry;
     if (
       typeof modulePath !== "string" ||
       !modulePath.trim() ||
       modulePath.includes("\0")
-    )
+    ) {
       throw new Error("go work edit -json returned an invalid module path");
+    }
     const directory =
-      modulePath.replaceAll("\\", "/").replace(/\/+$/, "") || "/";
-    if (directory === ".") patterns.add("./...");
-    else {
+      modulePath.replaceAll("\\", "/").replace(TRAILING_SLASHES, "") || "/";
+    if (directory === ".") {
+      patterns.add("./...");
+    } else {
       const absolute =
         path.isAbsolute(directory) || path.win32.isAbsolute(directory);
       const prefix =
@@ -131,7 +142,7 @@ function goWorkspacePatterns(output: string): string[] {
 }
 
 function boundedOutput(text: string): string {
-  const lines = text.trim().split(/\r?\n/);
+  const lines = text.trim().split(LINE_BREAK);
   const displayed = lines
     .slice(0, 50)
     .map((line) =>
@@ -156,33 +167,37 @@ async function runChecker(
   const remaining = (): number => {
     signal?.throwIfAborted();
     const timeoutMs = deadline - Date.now();
-    if (timeoutMs <= 0)
+    if (timeoutMs <= 0) {
       throw new Error(
         "workspace diagnostics deadline exceeded; workspace was not verified",
       );
+    }
     return timeoutMs;
   };
   try {
     remaining();
     let command = await resolveCommand(checker.command, cwd);
-    if (!command && checker.language === "typescript")
+    if (!command && checker.language === "typescript") {
       command = await resolveCommand("tsgo", cwd);
-    if (!command)
+    }
+    if (!command) {
       throw new Error(
         `installed '${checker.command}' executable was not found in project binaries or PATH; install the checker explicitly (no dependencies were downloaded)`,
       );
+    }
     const options = { cwd, ...(signal ? { signal } : {}) };
-    let args = checker.args;
+    let { args } = checker;
     if (checker.goWorkspace) {
       const workspace = await runCommand(command, ["work", "edit", "-json"], {
         ...options,
         timeoutMs: remaining(),
       });
       signal?.throwIfAborted();
-      if (workspace.exitCode !== 0)
+      if (workspace.exitCode !== 0) {
         throw new Error(
           `go work edit -json exited with code ${workspace.exitCode}: ${boundedOutput(workspace.stderr || workspace.stdout) || "no output"}`,
         );
+      }
       args = ["build", ...goWorkspacePatterns(workspace.stdout)];
     }
     const result = await runCommand(command, args, {
@@ -193,13 +208,14 @@ async function runChecker(
     const output = [result.stdout.trim(), result.stderr.trim()]
       .filter(Boolean)
       .join("\n");
-    if (!output && result.exitCode !== 0)
+    if (!output && result.exitCode !== 0) {
       return {
         description: checker.description,
         isError: true,
         exitCode: result.exitCode,
         output: `Failed to run ${checker.command} ${args.join(" ")}: checker exited with code ${result.exitCode} without reporting anything; workspace was not verified`,
       };
+    }
     return {
       description: checker.description,
       // Nonzero checker exits with output report findings, not tool failures.
@@ -230,11 +246,12 @@ export async function runWorkspaceDiagnostics(
     !Number.isFinite(timeoutMs) ||
     timeoutMs <= 0 ||
     timeoutMs > 2_147_483_647
-  )
+  ) {
     return {
       text: "Workspace diagnostics timeout must be a positive, finite millisecond duration no greater than 2147483647",
       isError: true,
     };
+  }
   const deadline = Date.now() + timeoutMs;
   let checkers: Checker[];
   try {
@@ -246,19 +263,21 @@ export async function runWorkspaceDiagnostics(
       isError: true,
     };
   }
-  if (checkers.length === 0)
+  if (checkers.length === 0) {
     return {
       text: "Cannot detect project type. Supported: Rust (Cargo.toml), TypeScript (tsconfig.json), Go (go.work/go.mod), Python (pyproject.toml/pyrightconfig.json). Workspace was not verified.",
       isError: true,
     };
+  }
   const results: CheckerResult[] = [];
   let cursor = 0;
   const worker = async (): Promise<void> => {
     while (cursor < checkers.length) {
       const index = cursor++;
       const checker = checkers[index];
-      if (checker)
+      if (checker) {
         results[index] = await runChecker(cwd, checker, deadline, signal);
+      }
     }
   };
   await Promise.all(

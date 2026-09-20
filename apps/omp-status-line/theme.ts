@@ -100,7 +100,7 @@ export interface SeparatorDef {
  *
  * @param style The configured separator style.
  * @param ascii Whether the status line should override the configured style with ASCII separators.
- * @returns The left and right separators, including end caps when the style uses them.
+ * @returns The left and right separators, including caps when the style uses them.
  *
  * @example
  * getSeparator("powerline", true);
@@ -126,14 +126,16 @@ export function getSeparator(
       return { left: "▌", right: "▌" };
     case "none":
       return { left: " ", right: " " };
+    default:
+      throw new Error(`Unexpected value: ${effectiveStyle satisfies never}`);
   }
 }
 
 function hashName(name: string): number {
-  let hash = 2166136261;
+  let hash = 2_166_136_261;
   for (const char of name) {
     hash ^= char.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 16777619);
+    hash = Math.imul(hash, 16_777_619);
   }
   return hash >>> 0;
 }
@@ -145,18 +147,34 @@ export function sessionAccentAnsi(name: string): string {
   const chroma = (1 - Math.abs((2 * lightness) / 100 - 1)) * (saturation / 100);
   const section = hue / 60;
   const x = chroma * (1 - Math.abs((section % 2) - 1));
-  const [r1, g1, b1] =
-    section < 1
-      ? [chroma, x, 0]
-      : section < 2
-        ? [x, chroma, 0]
-        : section < 3
-          ? [0, chroma, x]
-          : section < 4
-            ? [0, x, chroma]
-            : section < 5
-              ? [x, 0, chroma]
-              : [chroma, 0, x];
+  let r1: number;
+  let g1: number;
+  let b1: number;
+  if (section < 1) {
+    r1 = chroma;
+    g1 = x;
+    b1 = 0;
+  } else if (section < 2) {
+    r1 = x;
+    g1 = chroma;
+    b1 = 0;
+  } else if (section < 3) {
+    r1 = 0;
+    g1 = chroma;
+    b1 = x;
+  } else if (section < 4) {
+    r1 = 0;
+    g1 = x;
+    b1 = chroma;
+  } else if (section < 5) {
+    r1 = x;
+    g1 = 0;
+    b1 = chroma;
+  } else {
+    r1 = chroma;
+    g1 = 0;
+    b1 = x;
+  }
   const m = lightness / 100 - chroma / 2;
   const r = Math.round((r1 + m) * 255);
   const g = Math.round((g1 + m) * 255);

@@ -7,16 +7,24 @@ import {
   spyOn,
   test,
 } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Spies must intercept the compiler probe's live named filesystem imports.
 import * as fs from "node:fs/promises";
-import * as config from "./config";
-import * as processes from "./process";
-import { runWorkspaceDiagnostics } from "./workspace-diagnostics";
+
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
+import * as config from "./config.ts";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
+import * as processes from "./process.ts";
+
+import { runWorkspaceDiagnostics } from "./workspace-diagnostics.ts";
 
 beforeEach(() => {
-  spyOn(fs, "access").mockImplementation(async (file) => {
+  spyOn(fs, "access").mockImplementation((file) => {
     if (String(file) !== "/project/tsconfig.json") {
-      throw Object.assign(new Error("missing marker"), { code: "ENOENT" });
+      return Promise.reject(
+        Object.assign(new Error("missing marker"), { code: "ENOENT" }),
+      );
     }
+    return Promise.resolve();
   });
   spyOn(config, "resolveCommand").mockResolvedValue("/installed/tsc");
 });

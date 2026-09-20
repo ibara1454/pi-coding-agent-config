@@ -20,6 +20,7 @@ export interface LspParams {
   line?: number;
   symbol?: string;
   query?: string;
+  // biome-ignore lint/style/useNamingConvention: LSP protocol exposes the external new_name argument.
   new_name?: string;
   apply?: boolean;
   timeout?: number;

@@ -1,3 +1,5 @@
+import { warn } from "node:console";
+import process from "node:process";
 import type {
   Api,
   Model,
@@ -12,6 +14,7 @@ import type {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider URLs must reject ASCII control bytes.
 const ASCII_CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/u;
 const HTTP_URL_PREFIX = /^https?:\/\/[^/?#]+(?:\/|$)/iu;
+const TRAILING_SLASHES = /\/+$/u;
 const AZURE_API = "azure-openai-responses";
 const WARNING_PREFIX = "[provider-base-url-overrides]";
 const PROVIDER_INSTALL_WARNING =
@@ -21,11 +24,11 @@ type TransportOptions = ProviderRequestOptions & {
   azureBaseUrl?: string;
 };
 
-type ProviderRoutes = {
+interface ProviderRoutes {
   root: string;
   openAi: string;
   googleGenerative: string;
-};
+}
 
 // ponytail: use optional spreads; keep getter reads single and ordered.
 type NonNullRecord<T extends Record<string, unknown>> = {
@@ -34,10 +37,6 @@ type NonNullRecord<T extends Record<string, unknown>> = {
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
-}
-
-function warn(message: string): void {
-  console.warn(`${WARNING_PREFIX} ${message}`);
 }
 
 function toNonNullRecord<T extends Record<string, unknown>>(
@@ -55,11 +54,13 @@ function toNonNullRecord<T extends Record<string, unknown>>(
 function readProviderBaseUrl(): string | undefined {
   const { PROVIDER_BASE_URL } = process.env;
   const value = PROVIDER_BASE_URL?.trim();
-  if (!value) return undefined;
+  if (!value) {
+    return undefined;
+  }
 
   if (!isValidProviderBaseUrl(value)) {
     warn(
-      "Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.",
+      `${WARNING_PREFIX} Ignoring invalid PROVIDER_BASE_URL; expected an absolute HTTP(S) URL without control characters, query, or fragment.`,
     );
     return undefined;
   }
@@ -68,9 +69,15 @@ function readProviderBaseUrl(): string | undefined {
 }
 
 function isValidProviderBaseUrl(value: string): boolean {
-  if (ASCII_CONTROL_CHARACTER.test(value)) return false;
-  if (!HTTP_URL_PREFIX.test(value)) return false;
-  if (value.includes("?") || value.includes("#")) return false;
+  if (ASCII_CONTROL_CHARACTER.test(value)) {
+    return false;
+  }
+  if (!HTTP_URL_PREFIX.test(value)) {
+    return false;
+  }
+  if (value.includes("?") || value.includes("#")) {
+    return false;
+  }
 
   try {
     const url = new URL(value);
@@ -83,8 +90,12 @@ function isValidProviderBaseUrl(value: string): boolean {
   }
 }
 
+/**
+ * Builds API-specific routes while preserving the root for unmodified APIs.
+ * @example createProviderRoutes("https://proxy.test/").openAi // "https://proxy.test/v1"
+ */
 function createProviderRoutes(root: string): ProviderRoutes {
-  const suffixRoot = root.replace(/\/+$/u, "");
+  const suffixRoot = root.replace(TRAILING_SLASHES, "");
   return {
     root,
     openAi: `${suffixRoot}/v1`,
@@ -113,38 +124,40 @@ function routedBaseUrl(
   }
 }
 
-function routeModel<TApi extends Api>(
-  model: Model<TApi>,
+function routeModel<ApiType extends Api>(
+  model: Model<ApiType>,
   routes: ProviderRoutes,
-): Model<TApi> {
+): Model<ApiType> {
   const snapshot = { ...model };
   snapshot.baseUrl = routedBaseUrl(snapshot, routes);
   return snapshot;
 }
 
-function routeModels<TApi extends Api>(
-  models: readonly Model<TApi>[],
+function routeModels<ApiType extends Api>(
+  models: readonly Model<ApiType>[],
   routes: ProviderRoutes,
-): Model<TApi>[] {
-  const routedModels: Model<TApi>[] = [];
+): Model<ApiType>[] {
+  const routedModels: Model<ApiType>[] = [];
   for (const model of models) {
     routedModels.push(routeModel(model, routes));
   }
   return routedModels;
 }
 
-function routeTransportOptions<TOptions extends ProviderRequestOptions>(
+function routeTransportOptions<OptionsType extends ProviderRequestOptions>(
   api: Api,
   routedModelBaseUrl: string,
-  options: TOptions | undefined,
-): TOptions | undefined;
+  options: OptionsType | undefined,
+): OptionsType | undefined;
 
 function routeTransportOptions(
   api: Api,
   routedModelBaseUrl: string,
   options: ProviderRequestOptions | undefined,
 ): TransportOptions | undefined {
-  if (api !== AZURE_API) return options;
+  if (api !== AZURE_API) {
+    return options;
+  }
 
   const optionsSnapshot: ProviderRequestOptions = { ...options };
   return {
@@ -152,19 +165,20 @@ function routeTransportOptions(
     azureBaseUrl: routedModelBaseUrl,
     env: {
       ...optionsSnapshot.env,
+      // biome-ignore lint/style/useNamingConvention: preserve Azure OpenAI environment variable key
       AZURE_OPENAI_BASE_URL: routedModelBaseUrl,
     },
   };
 }
 
 function routeRequest<
-  TApi extends Api,
-  TOptions extends ProviderRequestOptions,
+  ApiType extends Api,
+  OptionsType extends ProviderRequestOptions,
 >(
-  model: Model<TApi>,
+  model: Model<ApiType>,
   routes: ProviderRoutes,
-  options: TOptions | undefined,
-): { model: Model<TApi>; options: TOptions | undefined } {
+  options: OptionsType | undefined,
+): { model: Model<ApiType>; options: OptionsType | undefined } {
   const routedModel = routeModel(model, routes);
   return {
     model: routedModel,
@@ -203,12 +217,12 @@ function wrapProvider(
     );
   };
 
-  const refreshModels = provider.refreshModels;
+  const { refreshModels } = provider;
   const wrappedRefreshModels: Provider["refreshModels"] = refreshModels
     ? (context) => refreshModels.call(provider, context)
     : undefined;
 
-  const filterModels = provider.filterModels;
+  const { filterModels } = provider;
   const wrappedFilterModels: Provider["filterModels"] = filterModels
     ? (models, credential) => {
         const routedModels = routeModels(models, routes);
@@ -221,7 +235,7 @@ function wrapProvider(
       }
     : undefined;
 
-  const fetchDeferred = provider.fetchDeferred;
+  const { fetchDeferred } = provider;
   const wrappedFetchDeferred: Provider["fetchDeferred"] = fetchDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, routes, options);
@@ -234,7 +248,7 @@ function wrapProvider(
       }
     : undefined;
 
-  const cancelDeferred = provider.cancelDeferred;
+  const { cancelDeferred } = provider;
   const wrappedCancelDeferred: Provider["cancelDeferred"] = cancelDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, routes, options);
@@ -278,7 +292,9 @@ function installProviderOverrides(
 
   for (const providerId of providerIds) {
     const providerValue = registry.getProvider(providerId);
-    if (providerValue === undefined) continue;
+    if (providerValue === undefined) {
+      continue;
+    }
 
     const wrappedProvider = wrapProvider(providerValue, routes);
     try {
@@ -292,7 +308,9 @@ function installProviderOverrides(
 
 export default function providerBaseUrlOverrides(pi: ExtensionAPI): void {
   const providerBaseUrl = readProviderBaseUrl();
-  if (!providerBaseUrl) return;
+  if (!providerBaseUrl) {
+    return;
+  }
 
   const routes = createProviderRoutes(providerBaseUrl);
   pi.on("session_start", (_event, ctx) => {

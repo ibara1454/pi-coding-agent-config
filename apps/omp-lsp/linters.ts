@@ -1,16 +1,20 @@
 // Adapted from Oh My Pi's MIT-licensed Biome and SwiftLint adapters; see LICENSE.
 import { open } from "node:fs/promises";
-import * as path from "node:path";
+import path from "node:path";
 import type {
   Diagnostic,
   DiagnosticSeverity,
   Position,
 } from "vscode-languageserver-protocol";
-import { runCommand } from "./process.js";
-import type { ServerConfig } from "./types.js";
+import { runCommand } from "./process.ts";
+import type { ServerConfig } from "./types.ts";
 
 const CLI_TIMEOUT_MS = 30_000;
 const MAX_DIAGNOSTICS = 1000;
+
+const MUTATING_FLAG =
+  /^(?:--write|--fix|--unsafe|--autocorrect|--format)(?:=|$)/;
+const LINE_BREAK = /\r?\n/;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -20,13 +24,7 @@ function cliArguments(
   server: ServerConfig,
   action: "lint" | "format",
 ): string[] {
-  if (
-    server.args.some((argument) =>
-      /^(?:--write|--fix|--unsafe|--autocorrect|--format)(?:=|$)/.test(
-        argument,
-      ),
-    )
-  ) {
+  if (server.args.some((argument) => MUTATING_FLAG.test(argument))) {
     throw new Error(
       `${server.name}: mutating CLI flags are not allowed in LSP diagnostic or formatting computations`,
     );
@@ -34,7 +32,9 @@ function cliArguments(
   const args: string[] = [];
   for (let index = 0; index < server.args.length; index++) {
     const argument = server.args[index];
-    if (argument === undefined) continue;
+    if (argument === undefined) {
+      continue;
+    }
     if (argument === "--reporter" || argument === "--max-diagnostics") {
       index++;
       continue;
@@ -42,8 +42,9 @@ function cliArguments(
     if (
       argument.startsWith("--reporter=") ||
       argument.startsWith("--max-diagnostics=")
-    )
+    ) {
       continue;
+    }
     args.push(argument);
   }
   const mode = args.findIndex(
@@ -53,8 +54,11 @@ function cliArguments(
       argument === "format" ||
       argument === "check",
   );
-  if (mode >= 0) args[mode] = action;
-  else args.unshift(action);
+  if (mode >= 0) {
+    args[mode] = action;
+  } else {
+    args.unshift(action);
+  }
   return args;
 }
 
@@ -66,10 +70,11 @@ async function sourceLines(
   const handle = await open(file, "r");
   try {
     const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024)
+    if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024) {
       throw new Error(
         "CLI diagnostics require a regular source file no larger than 8 MiB",
       );
+    }
     const bytes = Buffer.alloc(metadata.size + 1);
     let length = 0;
     while (length < bytes.length) {
@@ -80,14 +85,17 @@ async function sourceLines(
         bytes.length - length,
         null,
       );
-      if (result.bytesRead === 0) break;
+      if (result.bytesRead === 0) {
+        break;
+      }
       length += result.bytesRead;
     }
-    if (length > metadata.size)
+    if (length > metadata.size) {
       throw new Error(
         "Source file changed while being read for CLI diagnostics",
       );
-    return bytes.toString("utf8", 0, length).split(/\r?\n/);
+    }
+    return bytes.toString("utf8", 0, length).split(LINE_BREAK);
   } finally {
     await handle.close();
   }
@@ -98,11 +106,14 @@ function position(
   label: string,
   lines: readonly string[],
 ): Position {
-  if (!record(value))
+  if (!record(value)) {
     throw new Error(`Biome returned an invalid ${label} position`);
+  }
   const { line: rawLine, column } = value;
   // Biome uses (0, 0) for a file-level diagnostic without a source span.
-  if (rawLine === 0 && column === 0) return { line: 0, character: 0 };
+  if (rawLine === 0 && column === 0) {
+    return { line: 0, character: 0 };
+  }
   if (
     typeof rawLine !== "number" ||
     !Number.isSafeInteger(rawLine) ||
@@ -115,18 +126,22 @@ function position(
   }
   const line = rawLine - 1;
   const text = lines[line];
-  if (text === undefined)
+  if (text === undefined) {
     throw new Error(`Biome returned an out-of-bounds ${label} line`);
+  }
   // The JSON reporter counts Unicode scalar values, not LSP's UTF-16 code units.
   let remaining = column - 1;
   let character = 0;
   for (const scalar of text) {
-    if (remaining === 0) break;
+    if (remaining === 0) {
+      break;
+    }
     character += scalar.length;
     remaining--;
   }
-  if (remaining !== 0)
+  if (remaining !== 0) {
     throw new Error(`Biome returned an out-of-bounds ${label} column`);
+  }
   return { line, character };
 }
 
@@ -155,42 +170,53 @@ function biomeDiagnostics(
   file: string,
   lines: readonly string[],
 ): Diagnostic[] {
-  if (!record(value))
+  if (!record(value)) {
     throw new Error("Biome JSON reporter did not return diagnostics array");
+  }
   const { diagnostics: rawDiagnostics, summary } = value;
-  if (!Array.isArray(rawDiagnostics))
+  if (!Array.isArray(rawDiagnostics)) {
     throw new Error("Biome JSON reporter did not return a diagnostics array");
-  if (rawDiagnostics.length > MAX_DIAGNOSTICS)
+  }
+  if (rawDiagnostics.length > MAX_DIAGNOSTICS) {
     throw new Error(
       `Biome returned more than ${MAX_DIAGNOSTICS} diagnostics; narrow the file or rule configuration`,
     );
+  }
   const diagnostics: Diagnostic[] = [];
   for (const item of rawDiagnostics) {
-    if (!record(item))
+    if (!record(item)) {
       throw new Error(
         "Biome JSON reporter returned diagnostic without a message",
       );
+    }
     const { message, location } = item;
-    if (typeof message !== "string" || !message)
+    if (typeof message !== "string" || !message) {
       throw new Error(
         "Biome JSON reporter returned a diagnostic without a message",
       );
-    if (!record(location))
+    }
+    if (!record(location)) {
       throw new Error(`Biome could not locate diagnostic: ${message}`);
+    }
     const { path: diagnosticPath, start: rawStart, end: rawEnd } = location;
-    if (typeof diagnosticPath !== "string" || !diagnosticPath)
+    if (typeof diagnosticPath !== "string" || !diagnosticPath) {
       throw new Error(`Biome could not locate diagnostic: ${message}`);
-    if (path.resolve(server.root, diagnosticPath) !== file) continue;
+    }
+    if (path.resolve(server.root, diagnosticPath) !== file) {
+      continue;
+    }
     const start = position(rawStart, "start", lines);
     const end = rawEnd === undefined ? start : position(rawEnd, "end", lines);
     if (
       end.line < start.line ||
       (end.line === start.line && end.character < start.character)
-    )
+    ) {
       throw new Error("Biome returned a reversed diagnostic range");
+    }
     const { category, severity: diagnosticSeverity } = item;
-    if (category !== undefined && typeof category !== "string")
+    if (category !== undefined && typeof category !== "string") {
       throw new Error("Biome returned an invalid diagnostic category");
+    }
     diagnostics.push({
       range: { start, end },
       severity: severity(diagnosticSeverity, "Biome"),
@@ -201,10 +227,14 @@ function biomeDiagnostics(
   }
   if (record(summary)) {
     const { diagnosticsNotPrinted } = summary;
-    if (typeof diagnosticsNotPrinted === "number" && diagnosticsNotPrinted > 0)
+    if (
+      typeof diagnosticsNotPrinted === "number" &&
+      diagnosticsNotPrinted > 0
+    ) {
       throw new Error(
         `Biome omitted ${diagnosticsNotPrinted} diagnostics; result is incomplete`,
       );
+    }
   }
   return diagnostics;
 }
@@ -214,44 +244,53 @@ function swiftlintDiagnostics(
   server: ServerConfig,
   file: string,
 ): Diagnostic[] {
-  if (!Array.isArray(value))
+  if (!Array.isArray(value)) {
     throw new Error(
       "SwiftLint JSON reporter did not return a violations array",
     );
-  if (value.length > MAX_DIAGNOSTICS)
+  }
+  if (value.length > MAX_DIAGNOSTICS) {
     throw new Error(
       `SwiftLint returned more than ${MAX_DIAGNOSTICS} diagnostics; narrow the file or rule configuration`,
     );
+  }
   const diagnostics: Diagnostic[] = [];
   for (const item of value) {
-    if (!record(item))
+    if (!record(item)) {
       throw new Error("SwiftLint JSON reporter returned an invalid violation");
+    }
     const { reason, file: diagnosticFile } = item;
     if (
       typeof reason !== "string" ||
       !reason ||
       typeof diagnosticFile !== "string" ||
       !diagnosticFile
-    )
+    ) {
       throw new Error("SwiftLint JSON reporter returned an invalid violation");
-    if (path.resolve(server.root, diagnosticFile) !== file) continue;
+    }
+    if (path.resolve(server.root, diagnosticFile) !== file) {
+      continue;
+    }
     const {
       line,
       character,
       rule_id: ruleId,
       severity: diagnosticSeverity,
     } = item;
-    if (typeof line !== "number" || !Number.isSafeInteger(line) || line < 1)
+    if (typeof line !== "number" || !Number.isSafeInteger(line) || line < 1) {
       throw new Error("SwiftLint returned an invalid diagnostic line");
+    }
     const column = character ?? 1;
     if (
       typeof column !== "number" ||
       !Number.isSafeInteger(column) ||
       column < 1
-    )
+    ) {
       throw new Error("SwiftLint returned an invalid diagnostic column");
-    if (typeof ruleId !== "string")
+    }
+    if (typeof ruleId !== "string") {
       throw new Error("SwiftLint returned an invalid rule identifier");
+    }
     const start = { line: line - 1, character: column - 1 };
     diagnostics.push({
       range: { start, end: start },
@@ -271,22 +310,26 @@ export async function lintWithCli(
   signal?: AbortSignal,
 ): Promise<Diagnostic[]> {
   signal?.throwIfAborted();
-  if (server.name !== "biome" && server.name !== "swiftlint")
+  if (server.name !== "biome" && server.name !== "swiftlint") {
     throw new Error(`${server.name} is not a CLI linter`);
-  if (server.disabled || !server.resolvedCommand)
+  }
+  if (server.disabled || !server.resolvedCommand) {
     throw new Error(`${server.name}: executable is unavailable or disabled`);
+  }
   const target = path.resolve(server.root, file);
   const lines =
     server.name === "biome" ? await sourceLines(target, signal) : [];
   const args = cliArguments(server, "lint");
-  if (server.name === "biome")
+  if (server.name === "biome") {
     args.push(
       "--reporter=json",
       `--max-diagnostics=${MAX_DIAGNOSTICS}`,
       target,
     );
-  else {
-    if (!args.includes("--quiet")) args.push("--quiet");
+  } else {
+    if (!args.includes("--quiet")) {
+      args.push("--quiet");
+    }
     args.push("--reporter", "json", target);
   }
   const result = await runCommand(server.resolvedCommand, args, {
@@ -302,6 +345,7 @@ export async function lintWithCli(
   } catch (error) {
     throw new Error(
       `${server.name}: invalid or missing JSON diagnostics (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 1500) || result.stdout.trim().slice(0, 1500) || String(error)}`,
+      { cause: error },
     );
   }
   const diagnostics =
@@ -330,11 +374,15 @@ export async function formatWithCli(
 ): Promise<string> {
   signal?.throwIfAborted();
   // Like the upstream adapter, SwiftLint is lint-only. SourceKit supplies Swift formatting.
-  if (server.name === "swiftlint") return content;
-  if (server.name !== "biome")
+  if (server.name === "swiftlint") {
+    return content;
+  }
+  if (server.name !== "biome") {
     throw new Error(`${server.name} is not a CLI formatter`);
-  if (server.disabled || !server.resolvedCommand)
+  }
+  if (server.disabled || !server.resolvedCommand) {
     throw new Error(`${server.name}: executable is unavailable or disabled`);
+  }
   const args = [
     ...cliArguments(server, "format"),
     `--stdin-file-path=${path.resolve(server.root, file)}`,
@@ -348,13 +396,15 @@ export async function formatWithCli(
     maxOutputBytes: 16 * 1024 * 1024,
   });
   signal?.throwIfAborted();
-  if (result.exitCode !== 0)
+  if (result.exitCode !== 0) {
     throw new Error(
       `Biome formatting failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 1500) || "no error output"}`,
     );
-  if (content.trim() && !result.stdout.trim())
+  }
+  if (content.trim() && !result.stdout.trim()) {
     throw new Error(
       "Biome formatter returned empty output for a non-empty file",
     );
+  }
   return result.stdout;
 }

@@ -1,0 +1,163 @@
+// Rule meanings and severity policy: ./docs/lint-policy.md
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "plugins": [
+    {
+      "path": "./packages/biome-rules/src/no-async-describe-callback.grit",
+      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
+    },
+    "./packages/biome-rules/src/no-double-type-assertion.grit",
+    "./packages/biome-rules/src/no-private-methods.grit",
+    {
+      "path": "./packages/biome-rules/src/use-should-test-title.grit",
+      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
+    }
+  ],
+  "files": {
+    "includes": ["**", "!**/.turbo", "!**/node_modules"],
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      // Pi extensions do not use Qwik.
+      "qwik": "none"
+    },
+    "rules": {
+      "preset": "all",
+      "complexity": {
+        // Defer metric-driven rewrites until behavior or ownership needs to change.
+        "noExcessiveCognitiveComplexity": "off",
+        // Do not split cohesive operations or test suites just to meet line limits.
+        "noExcessiveLinesPerFunction": "off",
+        "noImplicitCoercions": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
+      "correctness": {
+        // Pi extensions run on Node/Bun and need built-in modules.
+        "noNodejsModules": "off",
+        "noProcessGlobal": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useExhaustiveSwitchCases": {
+          "level": "error",
+          "options": {
+            "requireExplicitCase": true
+          }
+        },
+        "noJsRestrictedProperties": {
+          "level": "error",
+          "options": {
+            "entries": [
+              {
+                "object": "globalThis",
+                "property": "Reflect",
+                "message": "The global `Reflect` namespace is not allowed, including through `globalThis`. Use the direct language or `Object` equivalent: `obj[key]` for `Reflect.get`, `obj[key] = value` for `Reflect.set`, `delete obj[key]` for `Reflect.deleteProperty`, `key in obj` for `Reflect.has`, `Object.keys`/`Object.getOwnPropertyNames`/`Object.getOwnPropertySymbols` for `Reflect.ownKeys`, and `Object.defineProperty`/`Object.getOwnPropertyDescriptor` for their `Reflect` counterparts. If it is genuinely unavoidable, suppress the single access with a preceding `// biome-ignore lint/nursery/noJsRestrictedProperties: <specific justification>` comment."
+              }
+            ]
+          }
+        }
+      },
+      "performance": {
+        // Ordered IO, rollback, retries, and bounded workers require sequential awaits.
+        "noAwaitInLoops": "off"
+      },
+      "security": {
+        // False positives on terminal fixtures and protocol names; defer until tuned.
+        "noSecrets": "off"
+      },
+      "suspicious": {
+        // Bitwise operations are intentional in hashing and token estimation.
+        "noBitwiseOperators": "off",
+        "noImportCycles": {
+          "level": "error",
+          "options": {
+            "ignoreTypes": true
+          }
+        }
+      },
+      "style": {
+        // Guard-style continue keeps filtering loops flat.
+        "noContinue": "off",
+        // Related implementation and host-fixture classes can share a module.
+        "noExcessiveClassesPerFile": "off",
+        // File length alone is not a module boundary.
+        "noExcessiveLinesPerFile": "off",
+        // Increment/decrement is clear for counters and indexed loops.
+        "noIncrementDecrement": "off",
+        // Name real limits case by case, not every index, protocol value, or fixture.
+        "noMagicNumbers": "off",
+        // Choose branch order for readability rather than banning negative conditions.
+        "noNegationElse": "off",
+        // Environment access belongs at runtime/config boundaries and in isolated tests.
+        "noProcessEnv": "off",
+        "noInferrableTypes": "error",
+        // Simple conditional values are readable; nested ternaries remain flagged.
+        "noTernary": "off",
+        "noNestedTernary": "error",
+        // Review function variance when converting existing method signatures.
+        "useConsistentMethodSignatures": "error",
+        // Keep exported declarations beside the code they describe.
+        "useExportsLast": "off",
+        // Enforce naming without changing required external protocol/schema spellings.
+        "useNamingConvention": "error",
+        "useAtIndex": "error",
+        "useConsistentArrayType": "error",
+        "useConsistentTypeDefinitions": "error",
+        "useDestructuring": "error",
+        "useErrorCause": "error",
+        "useExplicitLengthCheck": "error",
+        "useNumberNamespace": "error",
+        "useNumericSeparators": "error",
+        "noRestrictedGlobals": {
+          "level": "error",
+          "options": {
+            "deniedGlobals": {
+              "Reflect": "The global `Reflect` namespace is not allowed. Use the direct language or `Object` equivalent: `obj[key]` for `Reflect.get`, `obj[key] = value` for `Reflect.set`, `delete obj[key]` for `Reflect.deleteProperty`, `key in obj` for `Reflect.has`, `Object.keys`/`Object.getOwnPropertyNames`/`Object.getOwnPropertySymbols` for `Reflect.ownKeys`, and `Object.defineProperty`/`Object.getOwnPropertyDescriptor` for their `Reflect` counterparts. If it is genuinely unavoidable, suppress the single access with a preceding `// biome-ignore lint/style/noRestrictedGlobals: <specific justification>` comment."
+            }
+          }
+        }
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/*/index.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            // Pi loads extension entrypoints through their default-exported factories.
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.test.ts", "test/**"],
+      "javascript": {
+        "globals": ["Bun"]
+      }
+    }
+  ],
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

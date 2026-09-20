@@ -9,14 +9,14 @@ import {
 import type { CatalogSeed } from "./types.ts";
 
 export interface ExtensionManagerApi {
-  on(event: "session_shutdown", handler: () => void): void;
-  registerCommand(
+  on: (event: "session_shutdown", handler: () => void) => void;
+  registerCommand: (
     name: string,
     options: {
       description: string;
       handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
     },
-  ): void;
+  ) => void;
 }
 
 export function registerExtensionManager(
@@ -39,7 +39,7 @@ export function registerExtensionManager(
 
       await ctx.waitForIdle();
       let seed: CatalogSeed;
-      while (true) {
+      for (;;) {
         try {
           seed = await runtime.discover({
             agentDir: runtime.agentDir(),

@@ -1,5 +1,5 @@
-import * as os from "node:os";
-import * as path from "node:path";
+import { homedir, hostname } from "node:os";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { URL } from "node:url";
 import {
   sliceByColumn,
@@ -13,18 +13,26 @@ import type {
   StatusLineSegmentId,
 } from "./types.ts";
 
+const TRAILING_DECIMAL_ZERO_RE = /\.0$/;
+const WHITESPACE_RE = /\s/u;
+const GPT_MODEL_ID_RE = /^gpt-[\d.]+-[a-z][a-z0-9-]*$/i;
+const MODEL_VERSION_RE = /^[\d.]+$/;
+
 function withIcon(icon: string, text: string): string {
   return icon ? `${icon} ${text}` : text;
 }
 
 function formatNumber(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000)
-    return `${(value / 1_000_000_000).toFixed(abs >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, "")}B`;
-  if (abs >= 1_000_000)
-    return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`;
-  if (abs >= 1_000)
-    return `${(value / 1_000).toFixed(abs >= 10_000 ? 0 : 1).replace(/\.0$/, "")}K`;
+  if (abs >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(abs >= 10_000_000_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}M`;
+  }
+  if (abs >= 1000) {
+    return `${(value / 1000).toFixed(abs >= 10_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}K`;
+  }
   return Math.round(value).toString();
 }
 
@@ -33,8 +41,12 @@ function formatDuration(milliseconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainder = seconds % 60;
-  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
-  if (minutes > 0) return `${minutes}m${remainder > 0 ? ` ${remainder}s` : ""}`;
+  if (hours > 0) {
+    return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m${remainder > 0 ? ` ${remainder}s` : ""}`;
+  }
   return `${remainder}s`;
 }
 
@@ -48,7 +60,9 @@ export function sanitizeInlineText(text: string): string {
       codePoint !== undefined &&
       (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f));
     if (isControl) {
-      if (!previousWasControl) sanitized += " ";
+      if (!previousWasControl) {
+        sanitized += " ";
+      }
       previousWasControl = true;
       continue;
     }
@@ -60,7 +74,9 @@ export function sanitizeInlineText(text: string): string {
 
 function safeHyperlinkUrl(text: string): string | null {
   const sanitized = sanitizeInlineText(text).trim();
-  if (sanitized !== text || /\s/u.test(sanitized)) return null;
+  if (sanitized !== text || WHITESPACE_RE.test(sanitized)) {
+    return null;
+  }
   try {
     const url = new URL(sanitized);
     return url.protocol === "http:" || url.protocol === "https:"
@@ -73,7 +89,9 @@ function safeHyperlinkUrl(text: string): string | null {
 
 function clampPathWidth(value: string, maxWidth: number): string {
   const width = visibleWidth(value);
-  if (width <= maxWidth) return value;
+  if (width <= maxWidth) {
+    return value;
+  }
   const ellipsis = "…";
   const tailWidth = Math.max(0, maxWidth - visibleWidth(ellipsis));
   return `${ellipsis}${sliceByColumn(
@@ -86,7 +104,9 @@ function clampPathWidth(value: string, maxWidth: number): string {
 
 function statusValue(ctx: SegmentContext, key: string): string | undefined {
   const value = ctx.footerData?.getExtensionStatuses().get(key);
-  if (value === undefined) return undefined;
+  if (value === undefined) {
+    return undefined;
+  }
   const sanitized = sanitizeInlineText(value).trim();
   return sanitized || undefined;
 }
@@ -95,14 +115,23 @@ function thinkingDisplay(ctx: SegmentContext): string {
   if (
     ctx.options.model?.showThinkingLevel === false ||
     !ctx.extensionContext.model?.reasoning
-  )
+  ) {
     return "";
+  }
   const level = ctx.extensionContext.thinkingLevel ?? "off";
   const ascii = ctx.settings.preset === "ascii";
-  if (ascii)
-    return level === "off"
-      ? "[off]"
-      : `[${level === "medium" ? "med" : level === "xhigh" ? "xhi" : level}]`;
+  if (ascii) {
+    if (level === "off") {
+      return "[off]";
+    }
+    let label: string = level;
+    if (level === "medium") {
+      label = "med";
+    } else if (level === "xhigh") {
+      label = "xhi";
+    }
+    return `[${label}]`;
+  }
   const glyphs: Record<string, string> = {
     off: "⊘ off",
     minimal: "○ min",
@@ -124,17 +153,21 @@ function renderModel(ctx: SegmentContext): RenderedSegment {
     ctx.extensionContext.model?.id ?? "",
   ).trim();
   let name = modelName || modelId || "no-model";
-  if (name.startsWith("Claude ")) name = name.slice(7);
-  if (/^gpt-[\d.]+-[a-z][a-z0-9-]*$/i.test(modelId)) {
+  if (name.startsWith("Claude ")) {
+    name = name.slice(7);
+  }
+  if (GPT_MODEL_ID_RE.test(modelId)) {
     name = modelId
       .split("-")
-      .map((part, index) =>
-        index === 0
-          ? part.toUpperCase()
-          : /^[\d.]+$/.test(part)
-            ? part
-            : `${part[0]?.toUpperCase()}${part.slice(1)}`,
-      )
+      .map((part, index) => {
+        if (index === 0) {
+          return part.toUpperCase();
+        }
+        if (MODEL_VERSION_RE.test(part)) {
+          return part;
+        }
+        return `${part[0]?.toUpperCase()}${part.slice(1)}`;
+      })
       .join("-");
   }
   const thinking = thinkingDisplay(ctx);
@@ -152,25 +185,25 @@ function renderModel(ctx: SegmentContext): RenderedSegment {
 function renderPath(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const opts = ctx.options.path ?? {};
-  let cwd = ctx.extensionContext.cwd;
+  let { cwd } = ctx.extensionContext;
   if (opts.stripWorkPrefix !== false) {
-    for (const root of [path.join(os.homedir(), "Projects"), "/work"]) {
-      const relative = path.relative(root, cwd);
+    for (const root of [join(homedir(), "Projects"), "/work"]) {
+      const relativePath = relative(root, cwd);
       if (
-        relative &&
-        !relative.startsWith("..") &&
-        !path.isAbsolute(relative)
+        relativePath &&
+        !relativePath.startsWith("..") &&
+        !isAbsolute(relativePath)
       ) {
-        cwd = relative;
+        cwd = relativePath;
         break;
       }
     }
   }
   if (
     opts.abbreviate !== false &&
-    (cwd === os.homedir() || cwd.startsWith(`${os.homedir()}${path.sep}`))
+    (cwd === homedir() || cwd.startsWith(`${homedir()}${sep}`))
   ) {
-    cwd = `~${cwd.slice(os.homedir().length)}`;
+    cwd = `~${cwd.slice(homedir().length)}`;
   }
   cwd = clampPathWidth(sanitizeInlineText(cwd), opts.maxLength ?? 40);
   return {
@@ -183,8 +216,9 @@ function renderGit(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const opts = ctx.options.git ?? {};
   const { branch, staged, unstaged, untracked } = ctx.git;
-  if (!branch && staged === 0 && unstaged === 0 && untracked === 0)
+  if (!branch && staged === 0 && unstaged === 0 && untracked === 0) {
     return { content: "", visible: false };
+  }
   const dirty = staged > 0 || unstaged > 0 || untracked > 0;
   const safeBranch = sanitizeInlineText(branch ?? "").trim();
   let content =
@@ -192,15 +226,21 @@ function renderGit(ctx: SegmentContext): RenderedSegment {
       ? ""
       : withIcon(icons.branch, safeBranch);
   const indicators: string[] = [];
-  if (opts.showUnstaged !== false && unstaged > 0)
+  if (opts.showUnstaged !== false && unstaged > 0) {
     indicators.push(color(statusColor.dirty, `*${unstaged}`));
-  if (opts.showStaged !== false && staged > 0)
+  }
+  if (opts.showStaged !== false && staged > 0) {
     indicators.push(color(statusColor.staged, `+${staged}`));
-  if (opts.showUntracked !== false && untracked > 0)
+  }
+  if (opts.showUntracked !== false && untracked > 0) {
     indicators.push(color(statusColor.untracked, `?${untracked}`));
-  if (indicators.length > 0)
+  }
+  if (indicators.length > 0) {
     content += `${content ? " " : withIcon(icons.git, "")}${indicators.join(" ")}`;
-  if (!content) return { content: "", visible: false };
+  }
+  if (!content) {
+    return { content: "", visible: false };
+  }
   return {
     content: color(
       dirty ? statusColor.gitDirty : statusColor.gitClean,
@@ -215,9 +255,15 @@ function contextColor(ctx: SegmentContext): string {
   const window = ctx.contextWindow;
   const reaches = (percent: number, tokens: number) =>
     pct >= Math.min(percent, window > 0 ? (tokens / window) * 100 : percent);
-  if (reaches(90, 500_000)) return ctx.theme.getFgAnsi("error");
-  if (reaches(70, 270_000)) return ctx.theme.getFgAnsi("thinkingHigh");
-  if (reaches(50, 150_000)) return ctx.theme.getFgAnsi("warning");
+  if (reaches(90, 500_000)) {
+    return ctx.theme.getFgAnsi("error");
+  }
+  if (reaches(70, 270_000)) {
+    return ctx.theme.getFgAnsi("thinkingHigh");
+  }
+  if (reaches(50, 150_000)) {
+    return ctx.theme.getFgAnsi("warning");
+  }
   return statusColor.context;
 }
 
@@ -248,15 +294,27 @@ function renderTime(ctx: SegmentContext): RenderedSegment {
     hours = hours % 12 || 12;
   }
   let value = `${hours}:${now.getMinutes().toString().padStart(2, "0")}`;
-  if (opts.showSeconds)
+  if (opts.showSeconds) {
     value += `:${now.getSeconds().toString().padStart(2, "0")}`;
+  }
   return { content: withIcon(icons.time, `${value}${suffix}`), visible: true };
 }
 
+/**
+ * Renders one configured segment with its visibility and terminal styling.
+ * @param id Segment selected by the active preset.
+ * @param ctx Current settings, usage, and host state; nothing is mutated.
+ * @returns The rendered segment, or undefined for an invalid runtime ID.
+ * @example renderSegment("token_in", ctx); // Hidden when ctx.usage.input is zero.
+ */
 export function renderSegment(
   id: StatusLineSegmentId,
   ctx: SegmentContext,
-): RenderedSegment {
+): RenderedSegment;
+export function renderSegment(
+  id: string,
+  ctx: SegmentContext,
+): RenderedSegment | undefined {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const extensionStatus = statusValue(ctx, id);
   switch (id) {
@@ -278,7 +336,9 @@ export function renderSegment(
     case "git":
       return renderGit(ctx);
     case "pr": {
-      if (!ctx.git.pr) return { content: "", visible: false };
+      if (!ctx.git.pr) {
+        return { content: "", visible: false };
+      }
       const label = withIcon(icons.pr, `#${ctx.git.pr.number}`);
       const url = safeHyperlinkUrl(ctx.git.pr.url);
       return {
@@ -353,9 +413,15 @@ export function renderSegment(
       const premium =
         Math.round((ctx.usage.premiumRequests + Number.EPSILON) * 100) / 100;
       const parts: string[] = [];
-      if (ctx.usage.cost > 0) parts.push(`$${ctx.usage.cost.toFixed(2)}`);
-      if (premium > 0) parts.push(`★ ${formatNumber(premium)}`);
-      if (subscription) parts.push("(sub)");
+      if (ctx.usage.cost > 0) {
+        parts.push(`$${ctx.usage.cost.toFixed(2)}`);
+      }
+      if (premium > 0) {
+        parts.push(`★ ${formatNumber(premium)}`);
+      }
+      if (subscription) {
+        parts.push("(sub)");
+      }
       return parts.length > 0
         ? { content: color(statusColor.cost, parts.join(" ")), visible: true }
         : { content: "", visible: false };
@@ -394,9 +460,9 @@ export function renderSegment(
       return { content: withIcon(icons.session, idValue), visible: true };
     }
     case "hostname": {
-      const hostname = sanitizeInlineText(os.hostname()).trim();
+      const hostName = sanitizeInlineText(hostname()).trim();
       return {
-        content: withIcon(icons.host, hostname.split(".")[0] ?? hostname),
+        content: withIcon(icons.host, hostName.split(".")[0] ?? hostName),
         visible: true,
       };
     }
@@ -423,8 +489,9 @@ export function renderSegment(
     case "cache_hit": {
       const total =
         ctx.usage.cacheRead + ctx.usage.cacheWrite + ctx.usage.input;
-      if (ctx.usage.cacheRead <= 0 || total <= 0)
+      if (ctx.usage.cacheRead <= 0 || total <= 0) {
         return { content: "", visible: false };
+      }
       return {
         content: withIcon(
           icons.cache,
@@ -440,11 +507,16 @@ export function renderSegment(
       const name = sanitizeInlineText(
         ctx.extensionContext.sessionManager.getSessionName() ?? "",
       ).trim();
-      if (!name) return { content: "", visible: false };
+      if (!name) {
+        return { content: "", visible: false };
+      }
       const ansi = ctx.settings.sessionAccent
         ? sessionAccentAnsi(name)
         : ctx.theme.getFgAnsi("accent");
       return { content: color(ansi, name), visible: true };
     }
+    default:
+      // Preserve the prior fallthrough for untyped callers with an unknown ID.
+      return undefined;
   }
 }

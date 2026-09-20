@@ -14,6 +14,7 @@ import type { CommitResult } from "./types.ts";
 
 const ENABLE_MOUSE = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE = "\u001b[?1006l\u001b[?1000l";
+const MOUSE_REPORT = /^(\d+);(\d+);(\d+)([Mm])$/;
 
 export type PanelResult =
   | { readonly type: "closed" }
@@ -82,7 +83,7 @@ function parseMouse(data: string):
   if (!data.startsWith(prefix)) {
     return undefined;
   }
-  const match = data.slice(prefix.length).match(/^(\d+);(\d+);(\d+)([Mm])$/);
+  const match = data.slice(prefix.length).match(MOUSE_REPORT);
   if (match === null) {
     return undefined;
   }
@@ -261,6 +262,7 @@ export class ExtensionManagerPanel implements Component {
     ) {
       state.model.detailsOpen = true;
     } else if (matchesKey(data, "ctrl+s")) {
+      // biome-ignore lint/complexity/noVoid: apply reports commit failures; the synchronous UI callback must remain nonblocking.
       void apply(state, this);
     } else if (matchesKey(data, "backspace")) {
       state.model.backspaceSearch();
@@ -307,7 +309,7 @@ function handleDialogInput(
   panel: ExtensionManagerPanel,
   data: string,
 ): void {
-  const dialog = state.dialog;
+  const { dialog } = state;
   if (dialog === undefined) {
     return;
   }
@@ -338,6 +340,7 @@ function handleDialogInput(
 
   if (dialog.choice === 0) {
     state.dialog = undefined;
+    // biome-ignore lint/complexity/noVoid: apply reports commit failures; the synchronous UI callback must remain nonblocking.
     void apply(state, panel);
   } else if (dialog.choice === 1) {
     state.catalog.discard();
@@ -527,16 +530,15 @@ function renderMain(
     banners.push("Saved settings are pending /reload");
   }
   if (view.diagnostics.length > 0) {
-    const diagnostic = view.diagnostics[0];
-    const marker = [
-      diagnostic?.scope === undefined
-        ? undefined
-        : diagnostic.scope === "global"
-          ? "Global"
-          : "Project",
-      diagnostic?.source,
-      diagnostic?.path,
-    ]
+    const [diagnostic] = view.diagnostics;
+    let scopeLabel: string | undefined;
+    if (diagnostic?.scope !== undefined) {
+      scopeLabel = "Project";
+      if (diagnostic.scope === "global") {
+        scopeLabel = "Global";
+      }
+    }
+    const marker = [scopeLabel, diagnostic?.source, diagnostic?.path]
       .filter((part): part is string => part !== undefined)
       .join(" · ");
     banners.push(
@@ -584,28 +586,14 @@ function renderMain(
 
   const bodyHeight = Math.max(0, height - 7);
   if (state.model.detailsOpen) {
-    lines.push(
-      ...renderInspector(
-        state.catalog,
-        state.model.selectedRow()?.id,
-        state.theme,
-        width,
-        bodyHeight,
-      ),
-    );
+    lines.push(...renderInspector(state, width, bodyHeight));
   } else if (state.narrow) {
     lines.push(...renderList(state, width, bodyHeight, 6));
   } else {
     const listWidth = Math.max(36, Math.floor(width * 0.45));
     const inspectorWidth = Math.max(1, width - listWidth - 3);
     const list = renderList(state, listWidth, bodyHeight, 6);
-    const inspector = renderInspector(
-      state.catalog,
-      state.model.selectedRow()?.id,
-      state.theme,
-      inspectorWidth,
-      bodyHeight,
-    );
+    const inspector = renderInspector(state, inspectorWidth, bodyHeight);
     for (let index = 0; index < bodyHeight; index += 1) {
       lines.push(
         `${fitLine(list[index] ?? "", listWidth)} ${state.theme.fg("borderMuted", "│")} ${fitLine(inspector[index] ?? "", inspectorWidth)}`,
@@ -685,24 +673,22 @@ function renderList(
 
 /**
  * Renders a selected resource's sanitized metadata, wrapped preview, and diagnostics.
- * @param catalog - Source of the selected resource's inspection data.
- * @param selectedId - Selected resource ID, or undefined when there is no matching row.
- * @param theme - Styling for inspector text and diagnostics.
+ * @param state - Catalog, selection, and theme used for inspection.
  * @param width - Cell budget for wrapped preview and diagnostic lines.
  * @param height - Maximum inspection lines when inspection data is available.
  * @returns Inspection lines, or a message when selection or inspection is unavailable.
  * @example
  * With selected row "alpha" named "alpha\nbeta":
- * `renderInspector(catalog, "alpha", theme, 60, 1)` returns only the styled
+ * `renderInspector(state, 60, 1)` returns only its sanitized, themed name line.
  * heading "alpha beta"; the metadata newline cannot create a second screen line.
  */
 function renderInspector(
-  catalog: ExtensionCatalog,
-  selectedId: string | undefined,
-  theme: Theme,
+  state: PanelState,
   width: number,
   height: number,
 ): string[] {
+  const { catalog, theme } = state;
+  const selectedId = state.model.selectedRow()?.id;
   if (selectedId === undefined) {
     return [theme.fg("dim", "No matching resources")];
   }

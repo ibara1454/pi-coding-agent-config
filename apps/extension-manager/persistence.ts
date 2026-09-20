@@ -9,7 +9,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
+// biome-ignore lint/correctness/noUnresolvedImports: Biome 2.5.14 misses proper-lockfile's CommonJS default export, which Node and Bun provide.
 import lockfile from "proper-lockfile";
 import {
   applySettingsMutations,
@@ -36,16 +38,25 @@ export interface PersistenceIo {
   readonly writeAtomic: (path: string, content: string) => Promise<void>;
 }
 
+/**
+ * Recognizes missing-file errors without assuming the shape of a thrown value.
+ * @example isMissingFile({ code: "ENOENT" }) // true
+ * @example isMissingFile(null) // false
+ */
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 async function readIfPresent(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
+  } catch (error: unknown) {
+    if (isMissingFile(error)) {
       return undefined;
     }
     throw error;
@@ -62,14 +73,10 @@ async function atomicReplace(path: string, content: string): Promise<void> {
 
   let mode: number | undefined;
   try {
-    mode = (await stat(path)).mode;
-  } catch (error) {
-    if (
-      typeof error !== "object" ||
-      error === null ||
-      !("code" in error) ||
-      error.code !== "ENOENT"
-    ) {
+    const { mode: fileMode } = await stat(path);
+    mode = fileMode;
+  } catch (error: unknown) {
+    if (!isMissingFile(error)) {
       throw error;
     }
   }

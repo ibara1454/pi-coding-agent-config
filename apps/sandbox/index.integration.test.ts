@@ -7,9 +7,9 @@ import {
   mock,
   test,
 } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
@@ -18,6 +18,7 @@ import {
 let agentDir = "";
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
+  // biome-ignore lint/style/useNamingConvention: preserve exported host configuration key
   CONFIG_DIR_NAME: ".pi",
   createBashTool: () => ({
     name: "bash",
@@ -40,15 +41,16 @@ let resetBehavior: () => Promise<void>;
 
 interface TestContext {
   cwd: string;
+  // biome-ignore lint/style/useNamingConvention: preserve host context property name
   hasUI: boolean;
-  isProjectTrusted(): boolean;
+  isProjectTrusted: () => boolean;
   mode: "tui";
   ui: {
-    notify(message: string, level: string): void;
-    setStatus(key: string, value: string | undefined): void;
-    setWidget(key: string, value: unknown): void;
+    notify: (message: string, level: string) => void;
+    setStatus: (key: string, value: string | undefined) => void;
+    setWidget: (key: string, value: unknown) => void;
     theme: {
-      fg(color: string, text: string): string;
+      fg: (color: string, text: string) => string;
     };
   };
 }
@@ -69,13 +71,16 @@ function createContext(cwd: string): ContextFixture {
     statuses,
     context: {
       cwd,
+      // biome-ignore lint/style/useNamingConvention: preserve host context property name
       hasUI: true,
       isProjectTrusted: () => true,
       mode: "tui",
       ui: {
         notify: (message, level) => notifications.push({ level, message }),
         setStatus: (key, value) => statuses.push({ key, value }),
-        setWidget: () => {},
+        setWidget: () => {
+          // These lifecycle tests observe notifications and status, not widgets.
+        },
         theme: {
           fg: (_color, text) => text,
         },
@@ -89,15 +94,23 @@ function createHarness() {
   const pi = {
     getFlag: () => false,
     on: (event: string, handler: HostHandler) => handlers.set(event, handler),
-    registerCommand: () => {},
-    registerFlag: () => {},
-    registerTool: () => {},
+    registerCommand: () => {
+      // Commands are not invoked by this lifecycle harness.
+    },
+    registerFlag: () => {
+      // getFlag supplies the fixed flag state for these tests.
+    },
+    registerTool: () => {
+      // Tool execution is outside these manager lifecycle tests.
+    },
   };
   sandbox(pi as never);
 
   const invoke = async (event: string, context: TestContext): Promise<void> => {
     const handler = handlers.get(event);
-    if (!handler) throw new Error(`Expected ${event} handler`);
+    if (!handler) {
+      throw new Error(`Expected ${event} handler`);
+    }
     await handler({}, context);
   };
 
@@ -133,16 +146,18 @@ async function createConfigFiles(
 }
 
 function requireInitializeCall(): SandboxRuntimeConfig {
-  const config = initializeCalls[0];
-  if (!config) throw new Error("Expected SandboxManager.initialize call");
+  const [config] = initializeCalls;
+  if (!config) {
+    throw new Error("Expected SandboxManager.initialize call");
+  }
   return config;
 }
 
 beforeEach(() => {
   initializeCalls = [];
   resetCalls = 0;
-  initializeBehavior = async () => {};
-  resetBehavior = async () => {};
+  initializeBehavior = () => Promise.resolve();
+  resetBehavior = () => Promise.resolve();
   SandboxManager.initialize = async (config) => {
     initializeCalls.push(config);
     await initializeBehavior(config);
@@ -218,9 +233,7 @@ describe("sandbox", () => {
     const { context, notifications } = createContext(cwd);
     const harness = createHarness();
     await harness.start(context);
-    resetBehavior = async () => {
-      throw new Error("reset exploded");
-    };
+    resetBehavior = () => Promise.reject(new Error("reset exploded"));
 
     await harness.shutdown(context);
 

@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs/promises";
+import fs from "node:fs/promises";
 import type {
   ExtensionAPI,
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
-import * as config from "./config";
-import lsp from "./index";
-import type { LspConfig, LspParams } from "./types";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
+import * as config from "./config.ts";
+
+import lsp from "./index.ts";
+import type { LspConfig, LspParams } from "./types.ts";
 
 const filesystem: {
-  stat(file: string): Promise<{ isFile(): boolean }>;
+  stat: (file: string) => Promise<{ isFile: () => boolean }>;
 } = fs;
 const shutdowns: Array<() => unknown> = [];
 type HostHandler = (event: unknown, context: ExtensionContext) => unknown;
@@ -45,8 +49,8 @@ function fixture() {
   const tools = new Map<string, ToolDefinition>();
   const handlers = new Map<string, HostHandler>();
   const pi = {
-    registerTool(tool: ToolDefinition): void {
-      tools.set(tool.name, tool);
+    registerTool(definition: ToolDefinition): void {
+      tools.set(definition.name, definition);
     },
     on(event: string, handler: HostHandler): void {
       handlers.set(event, handler);
@@ -56,12 +60,15 @@ function fixture() {
   lsp(pi as ExtensionAPI);
   const context = {
     cwd: "/project",
+    // biome-ignore lint/style/useNamingConvention: Host ExtensionContext uses the public hasUI field.
     hasUI: false,
     isProjectTrusted: () => true,
   } as ExtensionContext;
   const tool = tools.get("lsp");
   const shutdown = handlers.get("session_shutdown");
-  if (!tool || !shutdown) throw new Error("LSP extension registration failed");
+  if (!(tool && shutdown)) {
+    throw new Error("LSP extension registration failed");
+  }
   shutdowns.push(() =>
     shutdown({ type: "session_shutdown", reason: "quit" }, context),
   );
@@ -76,7 +83,9 @@ function fixture() {
 }
 
 afterEach(async () => {
-  for (const shutdown of shutdowns.splice(0)) await shutdown();
+  for (const shutdown of shutdowns.splice(0)) {
+    await shutdown();
+  }
 });
 
 describe("lsp.execute", () => {
@@ -89,13 +98,13 @@ describe("lsp.execute", () => {
         line: 1,
         symbol: "value",
       }),
-    ).rejects.toThrow(/No language server found/);
+    ).rejects.toThrow("No language server found");
   });
 
   test("should reject diagnostics instead of reporting a clean file when the matching server is not installed", async () => {
     const execute = fixture();
     await expect(
       execute({ action: "diagnostics", file: "example.ts" }),
-    ).rejects.toThrow(/No language server found/);
+    ).rejects.toThrow("No language server found");
   });
 });

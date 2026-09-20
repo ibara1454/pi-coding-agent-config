@@ -9,6 +9,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { globSync } from "glob";
 import type { ResourceField, ResourceKind } from "./types.ts";
 
+const GLOB_CHARACTERS = /[*?[\]{}]/;
+
 export function toPosixPath(path: string): string {
   return path.replaceAll("\\", "/");
 }
@@ -84,7 +86,7 @@ function expandResourceEntries(
     ) {
       continue;
     }
-    const matches = /[*?[\]{}]/.test(entry)
+    const matches = GLOB_CHARACTERS.test(entry)
       ? globSync(entry, {
           cwd: root,
           absolute: true,
@@ -100,11 +102,13 @@ function expandResourceEntries(
 function fileSystemKind(path: string): "file" | "directory" | undefined {
   try {
     const stats = statSync(path);
-    return stats.isFile()
-      ? "file"
-      : stats.isDirectory()
-        ? "directory"
-        : undefined;
+    if (stats.isFile()) {
+      return "file";
+    }
+    if (stats.isDirectory()) {
+      return "directory";
+    }
+    return undefined;
   } catch {
     return undefined;
   }

@@ -3,11 +3,8 @@ import type { WelcomeExtension, WelcomeSession } from "./data.ts";
 import { sanitizeInline, truncateToWidth, visibleWidth } from "./terminal.ts";
 import { WelcomeHeader } from "./welcome.ts";
 
-function required<T>(value: T): NonNullable<T> {
-  expect(value).toBeDefined();
-  expect(value).not.toBeNull();
-  return value as NonNullable<T>;
-}
+const WIDE_BOTTOM_BORDER = /^╰─+┴─+╯$/;
+const EXTENSION_NAME = /extension-\d+\.ts/;
 
 function identityTheme(colorMode: "truecolor" | "256color" = "truecolor") {
   return {
@@ -27,7 +24,9 @@ function header(
     recentSessions: [],
     selectedTip: "Use /model to choose the active model.",
     theme: identityTheme(),
-    requestRender: () => {},
+    requestRender: () => {
+      // Rendering is driven explicitly by each test.
+    },
     terminalRows: () => 40,
     ...overrides,
   });
@@ -37,10 +36,13 @@ function rawLines(component: WelcomeHeader, width: number): string[] {
   return component.render(width).map(sanitizeInline);
 }
 
+/**
+ * Captures a heading's row index without asserting outside the calling test.
+ * @returns The first matching row, or -1 when the heading is absent.
+ * @example sectionIndex(["Tips"], "Tips") returns 0.
+ */
 function sectionIndex(lines: readonly string[], heading: string): number {
-  const index = lines.findIndex((line) => line.includes(heading));
-  expect(index).toBeGreaterThanOrEqual(0);
-  return index;
+  return lines.findIndex((line) => line.includes(heading));
 }
 
 describe("wide welcome box", () => {
@@ -59,22 +61,28 @@ describe("wide welcome box", () => {
     const component = header({ extensions, recentSessions: sessions });
     const rendered = component.render(102);
     const lines = rendered.map(sanitizeInline);
-    const first = required(lines[0]);
-    const bottom = required(lines.find((line) => line.startsWith("╰")));
+    const [first] = lines;
+    const bottom = lines.find((line) => line.startsWith("╰"));
+    expect(first).toBeDefined();
+    expect(first).not.toBeNull();
+    expect(bottom).toBeDefined();
+    expect(bottom).not.toBeNull();
 
     expect(first).toBe(`╭─── pi v0.84.1 ${"─".repeat(83)}╮`);
-    expect(visibleWidth(first)).toBe(100);
-    expect(bottom).toMatch(/^╰─+┴─+╯$/);
-    expect(visibleWidth(bottom)).toBe(100);
+    expect(visibleWidth(first ?? "")).toBe(100);
+    expect(bottom).toMatch(WIDE_BOTTOM_BORDER);
+    expect(visibleWidth(bottom ?? "")).toBe(100);
     expect(
       rendered.filter((line) => line.includes("\x1b[38;2;")),
     ).not.toHaveLength(0);
-    expect(sectionIndex(lines, "Tips")).toBeLessThan(
-      sectionIndex(lines, "Extensions"),
-    );
-    expect(sectionIndex(lines, "Extensions")).toBeLessThan(
-      sectionIndex(lines, "Recent sessions"),
-    );
+    const tipsIndex = sectionIndex(lines, "Tips");
+    const extensionsIndex = sectionIndex(lines, "Extensions");
+    const sessionsIndex = sectionIndex(lines, "Recent sessions");
+    expect(tipsIndex).toBeGreaterThanOrEqual(0);
+    expect(extensionsIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionsIndex).toBeGreaterThanOrEqual(0);
+    expect(tipsIndex).toBeLessThan(extensionsIndex);
+    expect(extensionsIndex).toBeLessThan(sessionsIndex);
     expect(
       lines.filter(
         (line) =>
@@ -145,7 +153,7 @@ describe("wide welcome box", () => {
     expect(
       lines
         .filter((line) => line.includes("extension-"))
-        .map((line) => line.match(/extension-\d+\.ts/)?.[0]),
+        .map((line) => line.match(EXTENSION_NAME)?.[0]),
     ).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
     expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });
@@ -160,22 +168,28 @@ describe("narrow welcome box", () => {
       }),
       32,
     );
-    const first = required(lines[0]);
-    const bottom = required(lines.find((line) => line.startsWith("╰")));
-    const bottomIndex = lines.indexOf(bottom);
+    const [first] = lines;
+    const bottom = lines.find((line) => line.startsWith("╰"));
+    expect(first).toBeDefined();
+    expect(first).not.toBeNull();
+    expect(bottom).toBeDefined();
+    expect(bottom).not.toBeNull();
+    const bottomIndex = lines.indexOf(bottom ?? "");
     const boxRows = lines.slice(1, bottomIndex);
 
-    expect(first.startsWith("╭")).toBe(true);
-    expect(bottom.includes("┴")).toBe(false);
-    expect(sectionIndex(lines, "Welcome back!")).toBeLessThan(
-      sectionIndex(lines, "Tips"),
-    );
-    expect(sectionIndex(lines, "Tips")).toBeLessThan(
-      sectionIndex(lines, "Extensions"),
-    );
-    expect(sectionIndex(lines, "Extensions")).toBeLessThan(
-      sectionIndex(lines, "Recent sessions"),
-    );
+    expect(first?.startsWith("╭")).toBe(true);
+    expect(bottom?.includes("┴")).toBe(false);
+    const welcomeIndex = sectionIndex(lines, "Welcome back!");
+    const tipsIndex = sectionIndex(lines, "Tips");
+    const extensionsIndex = sectionIndex(lines, "Extensions");
+    const sessionsIndex = sectionIndex(lines, "Recent sessions");
+    expect(welcomeIndex).toBeGreaterThanOrEqual(0);
+    expect(tipsIndex).toBeGreaterThanOrEqual(0);
+    expect(extensionsIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionsIndex).toBeGreaterThanOrEqual(0);
+    expect(welcomeIndex).toBeLessThan(tipsIndex);
+    expect(tipsIndex).toBeLessThan(extensionsIndex);
+    expect(extensionsIndex).toBeLessThan(sessionsIndex);
     expect(lines.some((line) => line.includes("local.ts"))).toBe(true);
     expect(lines.some((line) => line.includes("Saved work"))).toBe(true);
     expect(boxRows[0]?.replace(/[│ ]/g, "") ?? "").toBe("");
@@ -194,7 +208,7 @@ describe("narrow welcome box", () => {
     expect(
       lines
         .filter((line) => line.includes("extension-"))
-        .map((line) => line.match(/extension-\d+\.ts/)?.[0]),
+        .map((line) => line.match(EXTENSION_NAME)?.[0]),
     ).toEqual(["extension-1.ts", "extension-2.ts", "extension-3.ts"]);
     expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });

@@ -1,19 +1,24 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Stats } from "node:fs";
-import * as fs from "node:fs/promises";
+import fs from "node:fs/promises";
+
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
-import * as config from "./config";
-import * as linters from "./linters";
-import { type LanguageServer, LanguageServerPool } from "./runtime";
-import type { LspConfig, ServerConfig } from "./types";
-import { LspWorkspace } from "./workspace";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
+import * as config from "./config.ts";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
+import * as linters from "./linters.ts";
+
+import { type LanguageServer, LanguageServerPool } from "./runtime.ts";
+import type { LspConfig, ServerConfig } from "./types.ts";
+import { LspWorkspace } from "./workspace.ts";
 
 const filesystem: {
-  stat(file: string): Promise<Stats>;
-  lstat(file: string): Promise<Stats>;
-  realpath(file: string): Promise<string>;
-  readFile(file: string, encoding: "utf8"): Promise<string>;
-  writeFile(file: string, content: string, encoding: "utf8"): Promise<void>;
+  stat: (file: string) => Promise<Stats>;
+  lstat: (file: string) => Promise<Stats>;
+  realpath: (file: string) => Promise<string>;
+  readFile: (file: string, encoding: "utf8") => Promise<string>;
+  writeFile: (file: string, content: string, encoding: "utf8") => Promise<void>;
 } = fs;
 const workspaces: LspWorkspace[] = [];
 const file = "/project/sample.ts";
@@ -26,15 +31,16 @@ async function fixture(linter = false) {
       isFile: () => true,
       isDirectory: () => false,
       isSymbolicLink: () => false,
-      mode: 0o100644,
+      mode: 0o10_0644,
       size: content.length,
     }) as Stats;
   spyOn(filesystem, "stat").mockImplementation(async () => stat());
   spyOn(filesystem, "lstat").mockImplementation(async () => stat());
-  spyOn(filesystem, "realpath").mockImplementation(async (file) => file);
+  spyOn(filesystem, "realpath").mockImplementation(async (target) => target);
   spyOn(filesystem, "readFile").mockImplementation(async () => content);
-  spyOn(filesystem, "writeFile").mockImplementation(async (_file, text) => {
+  spyOn(filesystem, "writeFile").mockImplementation((_file, text) => {
     content = text;
+    return Promise.resolve();
   });
   spyOn(host, "withFileMutationQueue").mockImplementation(async (_file, work) =>
     work(),
@@ -68,13 +74,13 @@ async function fixture(linter = false) {
     isAlive: true,
     // Bun's mock type erases the caller-selected RPC result type.
     request: request as LanguageServer["request"],
-    notify: async () => {},
-    syncFile: async () => {},
-    saved: async () => {},
-    closeFile: async () => {},
+    notify: () => Promise.resolve(),
+    syncFile: () => Promise.resolve(),
+    saved: () => Promise.resolve(),
+    closeFile: () => Promise.resolve(),
     diagnostics: async () => ({ items: [], freshness: "pull" }),
     document: () => ({ version: 1, content }),
-    shutdown: async () => {},
+    shutdown: () => Promise.resolve(),
   };
   spyOn(LanguageServerPool.prototype, "get").mockResolvedValue(server);
   spyOn(LanguageServerPool.prototype, "clients").mockReturnValue(
@@ -90,7 +96,9 @@ async function fixture(linter = false) {
 }
 
 afterEach(async () => {
-  for (const workspace of workspaces.splice(0)) await workspace.dispose();
+  for (const workspace of workspaces.splice(0)) {
+    await workspace.dispose();
+  }
 });
 
 describe("LspWorkspace.afterMutation", () => {

@@ -15,7 +15,7 @@ const GRADIENT_STOPS = [
 ] as const;
 const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
 const SHINE_HALF_WIDTH = 0.18;
-const INTRO_MS = 3_000;
+const INTRO_MS = 3000;
 const INTRO_TICK_MS = 33;
 
 interface ShineConfig {
@@ -65,7 +65,9 @@ function gradientEscape(
     const intensity =
       Math.max(0, 1 - Math.abs(t - shinePosition) / SHINE_HALF_WIDTH) *
       shineStrength;
-    if (intensity > 0.5) index = GRADIENT_RAMP_256.length - 1;
+    if (intensity > 0.5) {
+      index = GRADIENT_RAMP_256.length - 1;
+    }
   }
   return `\x1b[38;5;${GRADIENT_RAMP_256[index]}m`;
 }
@@ -111,9 +113,9 @@ export function introFrame(progress: number, colorMode: ColorMode): string[] {
 type IntroTimerHandle = NodeJS.Timeout;
 
 interface IntroTimer {
-  now(): number;
-  setInterval(handler: () => void, milliseconds: number): IntroTimerHandle;
-  clearInterval(timer: IntroTimerHandle): void;
+  now: () => number;
+  setInterval: (handler: () => void, milliseconds: number) => IntroTimerHandle;
+  clearInterval: (timer: IntroTimerHandle) => void;
 }
 
 const systemTimer: IntroTimer = {
@@ -147,13 +149,17 @@ export class IntroAnimation {
     this.requestRender();
     this.timer = this.clock.setInterval(() => {
       const progress = this.progress();
-      if (progress !== undefined && progress >= 1) this.dispose();
+      if (progress !== undefined && progress >= 1) {
+        this.dispose();
+      }
       this.requestRender();
     }, INTRO_TICK_MS);
   }
 
   progress(): number | undefined {
-    if (this.startedAt === undefined) return undefined;
+    if (this.startedAt === undefined) {
+      return undefined;
+    }
     return Math.min(
       1,
       Math.max(0, (this.clock.now() - this.startedAt) / INTRO_MS),

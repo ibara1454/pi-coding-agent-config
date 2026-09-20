@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
   type ExtensionAPI,
@@ -8,8 +9,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import type { LspAction, LspResult } from "./types";
-import { LspWorkspace } from "./workspace";
+import type { LspAction, LspResult } from "./types.ts";
+import { LspWorkspace } from "./workspace.ts";
+
+const CONTROL_CHARACTER = /\p{Cc}/gu;
+const PATH_WHITESPACE = /[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g;
+const LEADING_AT = /^@/;
+const WINDOWS_MOUNT = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i;
+const FILE_URI = /^file:\/\//;
+const URI_SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
 
 const actions = [
   "diagnostics",
@@ -52,6 +60,7 @@ const parameters = Type.Object(
           "Symbol search, code-action title/index/kind, or raw LSP method name.",
       }),
     ),
+    // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
     new_name: Type.Optional(
       Type.String({
         description: "New symbol name or destination file/directory path.",
@@ -80,10 +89,15 @@ const parameters = Type.Object(
 );
 
 function cleanText(text: string): string {
-  return stripTerminalSequences(text).replace(/\p{Cc}/gu, (character) => {
-    if (character === "\n") return character;
-    return character === "\t" ? "  " : "";
-  });
+  return stripTerminalSequences(text).replace(
+    CONTROL_CHARACTER,
+    (character) => {
+      if (character === "\n") {
+        return character;
+      }
+      return character === "\t" ? "  " : "";
+    },
+  );
 }
 
 function outputText(result: LspResult): string {
@@ -96,27 +110,30 @@ function outputText(result: LspResult): string {
 
 /** Matches Pi's write/edit path aliases so feedback synchronizes the file the host actually changed. */
 function mutationFile(input: string, cwd: string): string | undefined {
-  let file = input
-    .replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, " ")
-    .replace(/^@/, "");
+  let file = input.replace(PATH_WHITESPACE, " ").replace(LEADING_AT, "");
   if (
     process.platform === "win32" &&
     file.startsWith("/") &&
     !file.startsWith("//") &&
     !file.includes("\\")
   ) {
-    const drive = file.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
-    if (drive?.[1])
+    const drive = file.match(WINDOWS_MOUNT);
+    if (drive?.[1]) {
       file = `${drive[1].toUpperCase()}:\\${drive[2]?.replaceAll("/", "\\") ?? ""}`;
+    }
   }
-  if (file === "~") file = homedir();
-  else if (
+  if (file === "~") {
+    file = homedir();
+  } else if (
     file.startsWith("~/") ||
     (process.platform === "win32" && file.startsWith("~\\"))
-  )
+  ) {
     file = join(homedir(), file.slice(2));
-  else if (/^file:\/\//.test(file)) file = fileURLToPath(file);
-  else if (/^[a-z][a-z\d+.-]*:\/\//i.test(file)) return undefined;
+  } else if (FILE_URI.test(file)) {
+    file = fileURLToPath(file);
+  } else if (URI_SCHEME.test(file)) {
+    return undefined;
+  }
   return resolve(cwd, file);
 }
 
@@ -134,29 +151,35 @@ export default function lsp(pi: ExtensionAPI): void {
   async function release(): Promise<void> {
     const previous = state;
     state = undefined;
-    if (!previous) return;
+    if (!previous) {
+      return;
+    }
     previous.controller.abort(new Error("LSP session ended"));
     // Creation's cancellation path disposes any workspace it acquired.
     await previous.ready.then(
       (workspace) => workspace.dispose(),
-      () => {},
+      () => undefined,
     );
   }
 
   /** Reuses the current context's workspace and disposes its predecessor before replacement. */
   function workspaceFor(ctx: ExtensionContext): WorkspaceState {
     const cwd = resolve(ctx.cwd);
-    if (state?.cwd === cwd && !state.controller.signal.aborted) return state;
+    if (state?.cwd === cwd && !state.controller.signal.aborted) {
+      return state;
+    }
     const previous = state;
     previous?.controller.abort(new Error("LSP workspace changed"));
     const controller = new AbortController();
     const ready = Promise.resolve().then(async () => {
       if (previous) {
-        // Failed initialization has no reusable session state.
-        await previous.ready.then(
-          (workspace) => workspace.dispose(),
-          () => {},
-        );
+        let previousWorkspace: LspWorkspace | undefined;
+        try {
+          previousWorkspace = await previous.ready;
+        } catch {
+          // Failed initialization has no reusable session state.
+        }
+        await previousWorkspace?.dispose();
       }
       controller.signal.throwIfAborted();
       const workspace = await LspWorkspace.create({
@@ -174,8 +197,10 @@ export default function lsp(pi: ExtensionAPI): void {
     state = next;
     // The original promise is still observed by callers; avoid an unhandled
     // rejection when a session shuts down before any caller awaits creation.
-    void ready.catch(() => {
-      if (state === next) state = undefined;
+    ready.catch(() => {
+      if (state === next) {
+        state = undefined;
+      }
     });
     return next;
   }
@@ -196,6 +221,7 @@ export default function lsp(pi: ExtensionAPI): void {
     ],
     parameters,
     executionMode: "sequential",
+    // biome-ignore lint/complexity/useMaxParams: The base execute signature already has many parameters.
     async execute(_id, params, signal, _onUpdate, ctx) {
       if (!ctx.isProjectTrusted()) {
         await release();
@@ -211,7 +237,9 @@ export default function lsp(pi: ExtensionAPI): void {
       const workspace = await current.ready;
       combined.throwIfAborted();
       const result = await workspace.execute(params, combined);
-      if (result.isError) throw new Error(outputText(result));
+      if (result.isError) {
+        throw new Error(outputText(result));
+      }
       return {
         content: [{ type: "text", text: outputText(result) }],
         details: { action: params.action, success: true, ...result.details },
@@ -262,7 +290,9 @@ export default function lsp(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     await release();
-    if (!ctx.isProjectTrusted()) return;
+    if (!ctx.isProjectTrusted()) {
+      return;
+    }
     try {
       const workspace = await workspaceFor(ctx).ready;
       if (ctx.hasUI) {
@@ -271,11 +301,12 @@ export default function lsp(pi: ExtensionAPI): void {
         }
       }
     } catch (error) {
-      if (ctx.hasUI)
+      if (ctx.hasUI) {
         ctx.ui.notify(
           cleanText(`LSP initialization failed: ${String(error)}`),
           "error",
         );
+      }
     }
   });
 
@@ -283,18 +314,25 @@ export default function lsp(pi: ExtensionAPI): void {
     if (
       event.isError ||
       (event.toolName !== "write" && event.toolName !== "edit")
-    )
+    ) {
       return;
-    if (!ctx.isProjectTrusted()) return;
+    }
+    if (!ctx.isProjectTrusted()) {
+      return;
+    }
     const { path: inputPath } = event.input;
-    if (typeof inputPath !== "string") return;
+    if (typeof inputPath !== "string") {
+      return;
+    }
     const current = workspaceFor(ctx);
     const combined = ctx.signal
       ? AbortSignal.any([ctx.signal, current.controller.signal])
       : current.controller.signal;
     try {
       const file = mutationFile(inputPath, ctx.cwd);
-      if (!file) return;
+      if (!file) {
+        return;
+      }
       combined.throwIfAborted();
       const workspace = await current.ready;
       combined.throwIfAborted();
@@ -303,7 +341,9 @@ export default function lsp(pi: ExtensionAPI): void {
         event.toolName,
         combined,
       );
-      if (!feedback || combined.aborted) return;
+      if (!feedback || combined.aborted) {
+        return;
+      }
       return {
         content: [
           ...event.content,
@@ -311,7 +351,9 @@ export default function lsp(pi: ExtensionAPI): void {
         ],
       };
     } catch (error) {
-      if (combined.aborted) return;
+      if (combined.aborted) {
+        return;
+      }
       // Optional feedback must not turn an already-committed write into failure.
       return {
         content: [
@@ -329,11 +371,12 @@ export default function lsp(pi: ExtensionAPI): void {
     try {
       await release();
     } catch (error) {
-      if (ctx.hasUI)
+      if (ctx.hasUI) {
         ctx.ui.notify(
           cleanText(`LSP shutdown failed: ${String(error)}`),
           "error",
         );
+      }
     }
   });
 }

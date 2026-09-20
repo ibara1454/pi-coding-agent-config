@@ -113,12 +113,14 @@ function makePanel(
   };
 }
 
+const TRAILING_CELL_PADDING = / +$/;
+
 // Snapshots keep the padded frame shape but drop the trailing cell padding so
 // the external snapshot stays reviewable; width budgets are asserted below.
 function frame(panel: ExtensionManagerPanel, width: number): string {
   return panel
     .render(width)
-    .map((line) => line.replace(/ +$/, ""))
+    .map((line) => line.replace(TRAILING_CELL_PADDING, ""))
     .join("\n");
 }
 

@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Spies must intercept live named imports of Node's process launcher.
 import * as childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
+import process from "node:process";
 import { PassThrough } from "node:stream";
-import { runCommand } from "./process";
+import { runCommand } from "./process.ts";
 
 const spawning: {
-  spawn(
+  spawn: (
     command: string,
     args: string[],
     options: childProcess.SpawnOptionsWithoutStdio,
-  ): childProcess.ChildProcessWithoutNullStreams;
+  ) => childProcess.ChildProcessWithoutNullStreams;
 } = childProcess;
 
 afterEach(() => mock.restore());
@@ -69,7 +71,7 @@ describe("runCommand", () => {
         stdin: new PassThrough(),
         stdout,
         stderr,
-        pid: 12345,
+        pid: 12_345,
         exitCode: null,
         signalCode: null,
       },
@@ -99,6 +101,6 @@ describe("runCommand", () => {
     expect(await result).toMatchObject({
       message: expect.stringContaining("stdout exceeded"),
     });
-    expect(signals.mock.calls).toEqual([[-12345, "SIGTERM"]]);
+    expect(signals.mock.calls).toEqual([[-12_345, "SIGTERM"]]);
   });
 });

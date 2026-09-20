@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lintRule } from "./test-utils";
+import { lintRule } from "./test-utils.ts";
 
 const invalid = `
 declare const value: object;

@@ -1,9 +1,11 @@
 import { expect, mock, test } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import process from "node:process";
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
+  // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
   estimateTokens: () => 0,
 }));
@@ -13,7 +15,9 @@ const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 function statusText(line: string): string {
   const plain = Bun.stripANSI(line);
   const capIndex = plain.indexOf("▶", 3);
-  if (capIndex < 0) throw new Error(`Expected status-line end cap in ${plain}`);
+  if (capIndex < 0) {
+    throw new Error(`Expected status-line end cap in ${plain}`);
+  }
   return plain.slice(3, capIndex + 1);
 }
 
@@ -22,20 +26,20 @@ async function createSettingsFixture(
   projectStatusLine?: Record<string, unknown>,
 ): Promise<{
   projectDir: string;
-  cleanup(): Promise<void>;
+  cleanup: () => Promise<void>;
 }> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-status-line-"));
-  const agentDir = path.join(root, "agent");
-  const projectDir = path.join(root, "project");
-  await fs.mkdir(path.join(projectDir, ".pi"), { recursive: true });
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.writeFile(
-    path.join(agentDir, "settings.json"),
+  const root = await mkdtemp(join(tmpdir(), "omp-status-line-"));
+  const agentDir = join(root, "agent");
+  const projectDir = join(root, "project");
+  await mkdir(join(projectDir, ".pi"), { recursive: true });
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(
+    join(agentDir, "settings.json"),
     JSON.stringify({ statusLine: globalStatusLine }),
   );
   if (projectStatusLine) {
-    await fs.writeFile(
-      path.join(projectDir, ".pi", "settings.json"),
+    await writeFile(
+      join(projectDir, ".pi", "settings.json"),
       JSON.stringify({ statusLine: projectStatusLine }),
     );
   }
@@ -45,9 +49,12 @@ async function createSettingsFixture(
   return {
     projectDir,
     async cleanup(): Promise<void> {
-      if (previousAgentDir === undefined) delete process.env[AGENT_DIR_ENV];
-      else process.env[AGENT_DIR_ENV] = previousAgentDir;
-      await fs.rm(root, { recursive: true, force: true });
+      if (previousAgentDir === undefined) {
+        delete process.env[AGENT_DIR_ENV];
+      } else {
+        process.env[AGENT_DIR_ENV] = previousAgentDir;
+      }
+      await rm(root, { recursive: true, force: true });
     },
   };
 }
@@ -100,7 +107,10 @@ function createHarness(options: {
     thinkingLevel: "off",
     getContextUsage: () => ({ tokens: 18_768, contextWindow: 272_000 }),
     getSystemPrompt: () => "",
-    modelRegistry: { isUsingOAuth: () => false },
+    modelRegistry: {
+      // biome-ignore lint/style/useNamingConvention: host API method name
+      isUsingOAuth: () => false,
+    },
     sessionManager: {
       getBranch: () => [
         {
@@ -172,8 +182,9 @@ test("should shrink the path before dropping context usage", async () => {
     await harness.handlers.get("session_start")?.({}, harness.context);
 
     const editorFactory = harness.getEditorFactory();
-    if (typeof editorFactory !== "function")
+    if (typeof editorFactory !== "function") {
       throw new Error("Expected editor component to be installed");
+    }
     const editor = editorFactory({}, harness.theme, {});
     const fullStatus = statusText(editor.render(160)[0] ?? "");
     expect(fullStatus).toContain("6.9%/272K");
@@ -215,8 +226,9 @@ test("should ignore project settings when project is untrusted", async () => {
     await harness.handlers.get("session_start")?.({}, harness.context);
 
     const editorFactory = harness.getEditorFactory();
-    if (typeof editorFactory !== "function")
+    if (typeof editorFactory !== "function") {
       throw new Error("Expected editor component to be installed");
+    }
     const status = statusText(
       editorFactory({}, harness.theme, {}).render(120)[0] ?? "",
     );
@@ -250,7 +262,7 @@ test("should release owned resources without replacing newer UI", async () => {
           command.resolve({ stdout: "", stderr: "", code: 1, killed: true }),
         { once: true },
       );
-      return command.promise;
+      return await command.promise;
     },
   });
 
@@ -260,10 +272,15 @@ test("should release owned resources without replacing newer UI", async () => {
     await harness.handlers.get("session_start")?.({}, harness.context);
 
     const footerFactory = harness.getFooterFactory();
-    if (typeof footerFactory !== "function")
+    if (typeof footerFactory !== "function") {
       throw new Error("Expected footer component to be installed");
+    }
     const footer = footerFactory(
-      { requestRender: (): void => {} },
+      {
+        requestRender: (): void => {
+          /* Rendering is not observed in this ownership test. */
+        },
+      },
       harness.theme,
       {
         getGitBranch: () => "main",

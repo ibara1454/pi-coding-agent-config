@@ -1,5 +1,10 @@
 const ESC = "\x1b";
 const BEL = "\x07";
+const ZERO_WIDTH_GRAPHEME =
+  /^[\p{Control}\p{Mark}\p{Default_Ignorable_Code_Point}\p{Format}]+$/u;
+const EMOJI_GRAPHEME = /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI SGR detection requires ESC.
+const ANSI_SGR = /^\x1b\[[0-?]*[ -/]*m$/;
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
 });
@@ -14,7 +19,9 @@ function ansiSequenceEnd(value: string, start: number): number {
   if (kind === "[") {
     for (let index = start + 2; index < value.length; index++) {
       const code = value.charCodeAt(index);
-      if (code >= 0x40 && code <= 0x7e) return index + 1;
+      if (code >= 0x40 && code <= 0x7e) {
+        return index + 1;
+      }
     }
     return value.length;
   }
@@ -27,8 +34,12 @@ function ansiSequenceEnd(value: string, start: number): number {
     kind === "X"
   ) {
     for (let index = start + 2; index < value.length; index++) {
-      if (value[index] === BEL) return index + 1;
-      if (value[index] === ESC && value[index + 1] === "\\") return index + 2;
+      if (value[index] === BEL) {
+        return index + 1;
+      }
+      if (value[index] === ESC && value[index + 1] === "\\") {
+        return index + 2;
+      }
     }
     return value.length;
   }
@@ -51,8 +62,9 @@ function terminalTokens(value: string): TerminalToken[] {
     const end = escapeIndex < 0 ? value.length : escapeIndex;
     for (const { segment } of graphemeSegmenter.segment(
       value.slice(index, end),
-    ))
+    )) {
       tokens.push({ grapheme: segment });
+    }
     index = end;
   }
   return tokens;
@@ -60,49 +72,51 @@ function terminalTokens(value: string): TerminalToken[] {
 
 function isWideCodePoint(codePoint: number): boolean {
   return (
-    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
-    codePoint === 0x2329 ||
-    codePoint === 0x232a ||
-    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
-    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
-    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
-    (codePoint >= 0x1b000 && codePoint <= 0x1b2ff) ||
-    (codePoint >= 0x1f200 && codePoint <= 0x1f251) ||
-    (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+    (codePoint >= 0x11_00 && codePoint <= 0x11_5f) ||
+    codePoint === 0x23_29 ||
+    codePoint === 0x23_2a ||
+    (codePoint >= 0x2e_80 && codePoint <= 0xa4_cf) ||
+    (codePoint >= 0xac_00 && codePoint <= 0xd7_a3) ||
+    (codePoint >= 0xf9_00 && codePoint <= 0xfa_ff) ||
+    (codePoint >= 0xfe_10 && codePoint <= 0xfe_19) ||
+    (codePoint >= 0xfe_30 && codePoint <= 0xfe_6f) ||
+    (codePoint >= 0xff_00 && codePoint <= 0xff_60) ||
+    (codePoint >= 0xff_e0 && codePoint <= 0xff_e6) ||
+    (codePoint >= 0x1_b0_00 && codePoint <= 0x1_b2_ff) ||
+    (codePoint >= 0x1_f2_00 && codePoint <= 0x1_f2_51) ||
+    (codePoint >= 0x2_00_00 && codePoint <= 0x3_ff_fd)
   );
 }
 
 function graphemeWidth(grapheme: string): number {
-  if (grapheme === "\t") return 3;
-  if (
-    /^[\p{Control}\p{Mark}\p{Default_Ignorable_Code_Point}\p{Format}]+$/u.test(
-      grapheme,
-    )
-  )
+  if (grapheme === "\t") {
+    return 3;
+  }
+  if (ZERO_WIDTH_GRAPHEME.test(grapheme)) {
     return 0;
-  if (
-    /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(grapheme) ||
-    grapheme.includes("\u20e3")
-  )
+  }
+  if (EMOJI_GRAPHEME.test(grapheme) || grapheme.includes("\u20e3")) {
     return 2;
+  }
 
   for (const character of grapheme) {
     const codePoint = character.codePointAt(0);
-    if (codePoint !== undefined && isWideCodePoint(codePoint)) return 2;
+    if (codePoint !== undefined && isWideCodePoint(codePoint)) {
+      return 2;
+    }
   }
   return 1;
 }
 
 function osc8Terminator(sequence: string): string | undefined {
-  if (!sequence.startsWith("\x1b]8;")) return undefined;
+  if (!sequence.startsWith("\x1b]8;")) {
+    return undefined;
+  }
   const content = sequence.slice(4, sequence.endsWith("\x1b\\") ? -2 : -1);
   const separator = content.indexOf(";");
-  if (separator < 0 || content.slice(separator + 1).length === 0)
+  if (separator < 0 || content.slice(separator + 1).length === 0) {
     return undefined;
+  }
   return sequence.endsWith("\x1b\\") ? "\x1b\\" : BEL;
 }
 
@@ -110,7 +124,9 @@ function osc8Terminator(sequence: string): string | undefined {
 function stripTerminalSequences(value: string): string {
   let result = "";
   for (const token of terminalTokens(value)) {
-    if (token.grapheme) result += token.grapheme;
+    if (token.grapheme) {
+      result += token.grapheme;
+    }
   }
   return result;
 }
@@ -129,7 +145,9 @@ export function sanitizeInline(value: string): string {
 export function visibleWidth(value: string): number {
   let width = 0;
   for (const token of terminalTokens(value)) {
-    if (token.grapheme) width += graphemeWidth(token.grapheme);
+    if (token.grapheme) {
+      width += graphemeWidth(token.grapheme);
+    }
   }
   return width;
 }
@@ -144,15 +162,23 @@ export function truncateToWidth(
   width: number,
   ellipsis = "…",
 ): string {
-  if (width <= 0) return "";
-  if (visibleWidth(value) <= width) return value;
+  if (width <= 0) {
+    return "";
+  }
+  if (visibleWidth(value) <= width) {
+    return value;
+  }
 
   let clippedEllipsis = "";
   let ellipsisWidth = 0;
   for (const token of terminalTokens(ellipsis)) {
-    if (!token.grapheme) continue;
+    if (!token.grapheme) {
+      continue;
+    }
     const cells = graphemeWidth(token.grapheme);
-    if (ellipsisWidth + cells > width) break;
+    if (ellipsisWidth + cells > width) {
+      break;
+    }
     clippedEllipsis += token.grapheme;
     ellipsisWidth += cells;
   }
@@ -166,26 +192,36 @@ export function truncateToWidth(
   for (const token of terminalTokens(value)) {
     if (token.ansi) {
       pendingAnsi += token.ansi;
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI SGR detection requires ESC.
-      if (/^\x1b\[[0-?]*[ -/]*m$/.test(token.ansi)) hasSgr = true;
+      if (ANSI_SGR.test(token.ansi)) {
+        hasSgr = true;
+      }
       const terminator = osc8Terminator(token.ansi);
-      if (terminator) hyperlinkTerminator = terminator;
-      else if (token.ansi.startsWith("\x1b]8;;"))
+      if (terminator) {
+        hyperlinkTerminator = terminator;
+      } else if (token.ansi.startsWith("\x1b]8;;")) {
         hyperlinkTerminator = undefined;
+      }
       continue;
     }
-    if (!token.grapheme) continue;
+    if (!token.grapheme) {
+      continue;
+    }
     const graphemeCells = graphemeWidth(token.grapheme);
-    if (cells + graphemeCells > contentWidth) break;
+    if (cells + graphemeCells > contentWidth) {
+      break;
+    }
     result += pendingAnsi;
     pendingAnsi = "";
     result += token.grapheme;
     cells += graphemeCells;
   }
 
-  if (result.length > 0 && hyperlinkTerminator)
+  if (result.length > 0 && hyperlinkTerminator) {
     result += `\x1b]8;;${hyperlinkTerminator}`;
-  if (result.length > 0 && hasSgr) result += "\x1b[0m";
+  }
+  if (result.length > 0 && hasSgr) {
+    result += "\x1b[0m";
+  }
   return hasSgr
     ? `${result}${clippedEllipsis}\x1b[0m`
     : `${result}${clippedEllipsis}`;
@@ -193,7 +229,9 @@ export function truncateToWidth(
 
 /** Wrap plain welcome-tip text by terminal cells. ANSI-aware truncation handles long words. */
 export function wrapTextWithAnsi(value: string, width: number): string[] {
-  if (width < 1) return [];
+  if (width < 1) {
+    return [];
+  }
   const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
   const lines: string[] = [];
   let line = "";
@@ -207,6 +245,8 @@ export function wrapTextWithAnsi(value: string, width: number): string[] {
       line = truncateToWidth(word, width);
     }
   }
-  if (line) lines.push(line);
+  if (line) {
+    lines.push(line);
+  }
   return lines;
 }

@@ -120,8 +120,7 @@ function stringArray(
     return undefined;
   }
   if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "string")
+    !(Array.isArray(value) && value.every((item) => typeof item === "string"))
   ) {
     throw new Error(`${label} must be an array of strings`);
   }
@@ -142,7 +141,7 @@ function mutateTopLevel(
   settings: JsonObject,
   mutation: SettingsMutation,
 ): void {
-  const target = mutation.target;
+  const { target } = mutation;
   if (target.type !== "top-level") {
     throw new Error("Expected a top-level toggle target");
   }
@@ -177,7 +176,7 @@ function packageObject(entry: unknown): JsonObject {
 }
 
 function mutatePackage(settings: JsonObject, mutation: SettingsMutation): void {
-  const target = mutation.target;
+  const { target } = mutation;
   if (target.type !== "package") {
     throw new Error("Expected a package toggle target");
   }
@@ -261,7 +260,7 @@ export function captureMutationOwners(
   const seen = new Set<string>();
   const owners: SettingsOwnerSnapshot[] = [];
   for (const mutation of mutations) {
-    const target = mutation.target;
+    const { target } = mutation;
     const key =
       target.type === "top-level"
         ? `field:${target.field}`
