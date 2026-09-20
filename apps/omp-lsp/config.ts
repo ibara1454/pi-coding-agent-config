@@ -494,11 +494,60 @@ async function typescriptSpeaksLsp(command: string): Promise<boolean> {
 }
 
 /**
+ * Reads validated LSP overrides from one settings.json layer without changing caller state.
+ * @param settingsFile - Settings file in an already permitted directory.
+ * @returns Known boolean overrides and warnings for invalid values or read errors.
+ * Missing files or LSP sections return empty overrides and warnings.
+ * @example A layer with { lsp: { lazy: false } } returns overrides.lazy === false.
+ */
+async function readLspSettingsFile(
+  settingsFile: string,
+): Promise<{ overrides: Partial<LspSettings>; warnings: string[] }> {
+  const overrides: Partial<LspSettings> = {};
+  const warnings: string[] = [];
+  try {
+    const settings = await readConfig(settingsFile);
+    if (settings === undefined) {
+      return { overrides, warnings };
+    }
+    if (!record(settings)) {
+      throw new Error("settings must be an object");
+    }
+    const { lsp } = settings;
+    if (lsp === undefined) {
+      return { overrides, warnings };
+    }
+    if (!record(lsp)) {
+      throw new Error("lsp settings must be an object");
+    }
+    for (const key of Object.keys(SETTING_DEFAULTS) as (keyof LspSettings)[]) {
+      if (lsp[key] === undefined) {
+        continue;
+      }
+      if (typeof lsp[key] !== "boolean") {
+        warnings.push(
+          `${settingsFile}: lsp.${key} must be a boolean; keeping previous value`,
+        );
+      } else {
+        overrides[key] = lsp[key];
+      }
+    }
+  } catch (error) {
+    warnings.push(
+      `${settingsFile}: ${message(error)}; keeping previous settings`,
+    );
+  }
+  return { overrides, warnings };
+}
+
+/**
  * Loads bundled and agent configuration, plus project configuration only when trusted.
+ * Later valid layers override earlier values; invalid user configuration adds warnings.
  * @param projectDirectory - Project path, resolved without changing the caller's input.
  * @param agentDir - Agent configuration directory.
  * @param trusted - Permits reading project configuration and resolving project executables.
  * @returns Effective servers, settings, and configuration warnings.
+ * Settings are constructed from the permitted layers without modifying earlier values.
  * @throws If bundled configuration is invalid or cannot be read.
  * @example loadLspConfig("/project", "/agent", false) does not read /project/.pi.
  */
@@ -508,11 +557,11 @@ export async function loadLspConfig(
   trusted: boolean,
 ): Promise<LspConfig> {
   const cwd = path.resolve(projectDirectory);
-  const result: LspConfig = {
+  const result: Omit<LspConfig, "settings"> = {
     servers: [],
-    settings: { ...SETTING_DEFAULTS },
     warnings: [],
   };
+  const settingsOverrides: Partial<LspSettings>[] = [];
   const merged = new Map<string, ServerConfig>();
   const customizedLaunchers = new Set<string>();
   const defaults = await readConfig(
@@ -531,39 +580,11 @@ export async function loadLspConfig(
     ? [path.resolve(agentDir), path.join(cwd, ".pi")]
     : [path.resolve(agentDir)];
   for (const directory of directories) {
-    const settingsFile = path.join(directory, "settings.json");
-    try {
-      const settings = await readConfig(settingsFile);
-      if (settings !== undefined) {
-        if (!record(settings)) {
-          throw new Error("settings must be an object");
-        }
-        const { lsp } = settings;
-        if (lsp !== undefined) {
-          if (!record(lsp)) {
-            throw new Error("lsp settings must be an object");
-          }
-          for (const key of Object.keys(
-            SETTING_DEFAULTS,
-          ) as (keyof LspSettings)[]) {
-            if (lsp[key] === undefined) {
-              continue;
-            }
-            if (typeof lsp[key] !== "boolean") {
-              result.warnings.push(
-                `${settingsFile}: lsp.${key} must be a boolean; keeping previous value`,
-              );
-            } else {
-              result.settings[key] = lsp[key];
-            }
-          }
-        }
-      }
-    } catch (error) {
-      result.warnings.push(
-        `${settingsFile}: ${message(error)}; keeping previous settings`,
-      );
-    }
+    const { overrides, warnings } = await readLspSettingsFile(
+      path.join(directory, "settings.json"),
+    );
+    settingsOverrides.push(overrides);
+    result.warnings.push(...warnings);
     // OMP's same-directory priority: visible JSON wins over hidden JSON, YAML, YML.
     for (const filename of [...CONFIG_FILES].reverse()) {
       const file = path.join(directory, filename);
@@ -644,11 +665,12 @@ export async function loadLspConfig(
       }
     }
   }
+  const settings = Object.assign({}, SETTING_DEFAULTS, ...settingsOverrides);
   if (!trusted) {
     result.warnings.push(
       "Project is not trusted: project LSP configuration, executable discovery, and language servers are disabled.",
     );
-    return result;
+    return { ...result, settings };
   }
   for (const server of merged.values()) {
     try {
@@ -702,7 +724,7 @@ export async function loadLspConfig(
       );
     }
   }
-  return result;
+  return { ...result, settings };
 }
 
 /** Selects enabled, installed servers by filename or extension, with semantic servers before linters. */

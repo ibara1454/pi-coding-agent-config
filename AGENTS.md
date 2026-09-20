@@ -58,7 +58,6 @@ bun test packages/biome-rules
 - For Pi refresh work triggered by events or renders, reuse matching in-flight work and invalidate cached results when relevant inputs change.
 - Pi terminal UI must use cell-width and ANSI helpers, sanitize external inline text, and close OSC 8 hyperlinks within the rendered surface.
 - Keep declarative UI data separate from rendering where existing modules already do so: e.g. status-line presets/theme/types versus `renderSegment`, and welcome discovery data versus `WelcomeHeader` rendering.
-- Name direct suites `*.test.ts`; use `*.integration.test.ts` when the result is owned by another production module, an external runtime, or real filesystem/process semantics. Use lowercase behavior-focused descriptions.
 
 ## Important Files
 
@@ -88,14 +87,16 @@ bun test packages/biome-rules
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
 - For changes to `packages/biome-rules/`, read the custom-rule testing notes in `packages/biome-rules/README.md`.
-- Prefer lightweight fake Pi/UI/context objects over broad integration setup. For filesystem/configuration tests, create deterministic temp roots, restore environment variables, invoke shutdown/dispose paths, and remove temp data in `finally`/`afterEach`.
 - Run the affected workspace's test command before delivering a permanent behavior change.
 
 ## Agent skills
 
 ### Repository engineering
 
-Before implementing or reviewing any repository change, read and apply `docs/agents/engineering.md`; it governs module/interface design, TSDoc requirements, exports, resource ownership, cross-interface dispatch, tests and snapshots, and deviations.
+Repository **MUST** and **SHOULD** rules, including their negative forms, are requirements. Voluntary deviations need another reviewer's `ACCEPT`; unaccepted waivers leave work incomplete. Higher-priority instructions take precedence: record conflicts as authorized overrides, without requesting a waiver.
+
+- **Implementation and interface review:** Before implementing, refactoring, or reviewing functions, methods, module boundaries, parameters/results, exports, validation/failures, effects, or resource lifetimes, MUST use the `repo-design` skill.
+- **Test design and review:** Before designing, adding, modifying, or reviewing tests, selecting test levels or mocks, naming suites/cases, building tables, or changing snapshots, MUST use the `repo-testing` skill.
 
 ### Issue tracker
 

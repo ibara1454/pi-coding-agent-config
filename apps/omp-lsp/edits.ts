@@ -631,6 +631,55 @@ async function plan(
       virtual.set(candidate, { kind: "directory", signature: "created" });
     }
   };
+  /**
+   * Validates a text operation and returns its changed virtual entry and plan.
+   * @param op - Canonicalized text operation, including its original document alias.
+   * @param before - Current virtual entry; prior resource operations are already reflected.
+   * @param label - Workspace-relative path used in diagnostics and summaries.
+   * @returns Updated entry and change, or undefined for empty or unchanged edits.
+   * Reads planning snapshots without modifying them or the caller's virtual state.
+   * @throws For non-file targets, stale snapshots or versions, or invalid text edits.
+   * @example Replacing "old" with "new" returns entry.content "new" and a change with before "old".
+   */
+  const planTextEdit = (
+    op: Extract<Operation, { kind: "text" }>,
+    before: Entry | null,
+    label: string,
+  ): { entry: Entry; change: PlannedChange } | undefined => {
+    if (op.edits.length === 0) {
+      return;
+    }
+    if (before?.kind !== "file" || before.content === undefined) {
+      throw new Error(`Text edit target not regular file: ${op.file}`);
+    }
+    const snapshot = options.documents?.get(op.documentFile ?? op.file);
+    const live = options.document?.(op.documentFile ?? op.file);
+    if (
+      op.version !== null &&
+      (!(snapshot && live) ||
+        op.version !== snapshot.version ||
+        op.version !== live.version)
+    ) {
+      throw new Error(`Stale or unknown document version for ${label}`);
+    }
+    if (snapshot && originals.get(op.file)?.content !== snapshot.content) {
+      throw new Error(`File changed since language-server request: ${label}`);
+    }
+    const after = applyTextEdits(before.content, op.edits);
+    if (after === before.content) {
+      return;
+    }
+    return {
+      entry: { ...before, content: after },
+      change: {
+        op,
+        files: op.documentFile ? [op.file, op.documentFile] : [op.file],
+        before: before.content,
+        after,
+        summary: `Applied ${op.edits.length} edit(s) to ${label}`,
+      },
+    };
+  };
   const canonicalNames = new Map<string, string>();
   for (const op of operations(edit)) {
     options.signal?.throwIfAborted();
@@ -658,37 +707,10 @@ async function plan(
     const before = await load(op.file);
     const label = path.relative(options.cwd, op.file) || op.file;
     if (op.kind === "text") {
-      if (op.edits.length === 0) {
-        continue;
-      }
-      if (before?.kind !== "file" || before.content === undefined) {
-        throw new Error(`Text edit target is not a regular file: ${op.file}`);
-      }
-      const snapshot = options.documents?.get(op.documentFile ?? op.file);
-      const live = options.document?.(op.documentFile ?? op.file);
-      if (
-        op.version !== null &&
-        (!(snapshot && live) ||
-          op.version !== snapshot.version ||
-          op.version !== live.version)
-      ) {
-        throw new Error(`Stale or unknown document version for ${label}`);
-      }
-      if (snapshot && originals.get(op.file)?.content !== snapshot.content) {
-        throw new Error(
-          `File changed since the language-server request: ${label}`,
-        );
-      }
-      const after = applyTextEdits(before.content, op.edits);
-      virtual.set(op.file, { ...before, content: after });
-      if (after !== before.content) {
-        changes.push({
-          op,
-          files: op.documentFile ? [op.file, op.documentFile] : [op.file],
-          before: before.content,
-          after,
-          summary: `Applied ${op.edits.length} edit(s) to ${label}`,
-        });
+      const planned = planTextEdit(op, before, label);
+      if (planned) {
+        virtual.set(op.file, planned.entry);
+        changes.push(planned.change);
       }
     } else if (op.kind === "create") {
       if (before && !op.overwrite) {
@@ -857,9 +879,105 @@ async function renameWithRestore(
 }
 
 /**
+ * Restores committed text edits in reverse order under caller-owned file locks.
+ * @param changes - Committed edits in execution order, with pre-write and post-write text snapshots.
+ * @returns Per-file restoration failures; an empty list means all committed text edits were restored.
+ * Does not modify the plan or execution report, and never overwrites intervening content changes.
+ * @example For a committed "old" → "new" edit, disk text "new" is restored to "old".
+ * Disk text "host" is retained and reported as a failure; earlier edits are still restored.
+ */
+async function restoreTextEdits(
+  changes: readonly PlannedChange[],
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const previous of changes.toReversed()) {
+    if (previous.op.kind !== "text" || previous.before === undefined) {
+      continue;
+    }
+    try {
+      if ((await fs.readFile(previous.op.file, "utf8")) !== previous.after) {
+        throw new Error("content changed after edit");
+      }
+      await fs.writeFile(previous.op.file, previous.before, "utf8");
+    } catch (rollbackError) {
+      failures.push(`${previous.op.file}: ${message(rollbackError)}`);
+    }
+  }
+  return failures;
+}
+
+/**
+ * Inspects filesystem effects from a rejected mutation while the caller retains file locks.
+ * @param change - Failed operation and its planned contents or affected files.
+ * @param originals - Pre-mutation snapshots used to detect lost or changed entries.
+ * @returns Observed changes and summaries without modifying the plan or execution report.
+ * @throws If inspecting the resulting filesystem state fails.
+ * @example A rejected write that truncates a file returns an edit and a partial-change summary.
+ */
+async function inspectFailedMutationEffects(
+  change: PlannedChange,
+  originals: ReadonlyMap<string, Entry | null>,
+): Promise<{ changes: ExecutedChange[]; summary: string[] }> {
+  const result: { changes: ExecutedChange[]; summary: string[] } = {
+    changes: [],
+    summary: [],
+  };
+  const { op } = change;
+  if (op.kind === "text" || op.kind === "create") {
+    const current = await entry(op.file);
+    const before =
+      op.kind === "text" ? change.before : originals.get(op.file)?.content;
+    if (current?.content !== before) {
+      result.changes.push({
+        kind: op.kind === "text" ? "edit" : "create",
+        file: op.file,
+        files: [op.file],
+      });
+      result.summary.push(
+        `Partially changed ${op.file} before filesystem failure`,
+      );
+    }
+  } else if (op.kind === "delete") {
+    const removed: string[] = [];
+    for (const file of change.files) {
+      if (!(await entry(file))) {
+        removed.push(file);
+      }
+    }
+    if (removed.length > 0) {
+      result.changes.push({
+        kind: "delete",
+        file: op.file,
+        files: removed,
+      });
+      result.summary.push(
+        `Partially deleted ${removed.length} file(s) before filesystem failure`,
+      );
+    }
+  } else if (
+    (await entry(op.file)) &&
+    !(await entry(op.newFile)) &&
+    originals.get(op.newFile)
+  ) {
+    result.changes.push({
+      kind: "delete",
+      file: op.newFile,
+      files: change.removedFiles ?? [op.newFile],
+    });
+  }
+  return result;
+}
+
+/**
  * Validates a raw workspace edit before mutation, then rechecks under Pi's shared file locks.
  * Preview and validation failures never write. A later failure can include committed changes;
  * callers must reconcile those changes even when applied is false.
+ * @param edit - Untrusted workspace edit; all operations are planned before any disk writes.
+ * @param options - Snapshot, cancellation, preview, and rename-rollback policy.
+ * @returns The committed changes and summaries, with a failure reason if validation or mutation fails.
+ * Shared file locks cover stale-state checks, mutations, and any text rollback.
+ * @example applyWorkspaceEdit({ changes: {} }, { cwd: "/project" }) resolves
+ * with applied true and no changes.
  */
 export async function applyWorkspaceEdit(
   edit: unknown,
@@ -928,35 +1046,11 @@ export async function applyWorkspaceEdit(
                 result.changes.every((previous) => previous.kind === "edit") &&
                 (await entry(op.file))
               ) {
-                const failures: string[] = [];
-                for (const previous of [
-                  ...planned.changes.slice(0, result.changes.length),
-                ].reverse()) {
-                  if (
-                    previous.op.kind !== "text" ||
-                    previous.before === undefined
-                  ) {
-                    continue;
-                  }
-                  try {
-                    if (
-                      (await fs.readFile(previous.op.file, "utf8")) !==
-                      previous.after
-                    ) {
-                      // biome-ignore lint/style/useErrorCause: This is a new rollback precondition failure, not a wrapper for the outer rename error.
-                      throw new Error("content changed after edit");
-                    }
-                    await fs.writeFile(
-                      previous.op.file,
-                      previous.before,
-                      "utf8",
-                    );
-                  } catch (rollbackError) {
-                    failures.push(
-                      `${previous.op.file}: ${message(rollbackError)}`,
-                    );
-                  }
-                }
+                const committedChanges = planned.changes.slice(
+                  0,
+                  result.changes.length,
+                );
+                const failures = await restoreTextEdits(committedChanges);
                 if (failures.length === 0) {
                   result.changes = [];
                   result.summary = [
@@ -983,52 +1077,12 @@ export async function applyWorkspaceEdit(
             }
           }
         } catch (error) {
-          // A rejected filesystem call can still truncate a file or partially remove a tree.
-          // Report those effects too, so document reconciliation never assumes the failed call was atomic.
-          if (op.kind === "text" || op.kind === "create") {
-            const current = await entry(op.file);
-            const before =
-              op.kind === "text"
-                ? change.before
-                : planned.originals.get(op.file)?.content;
-            if (current?.content !== before) {
-              result.changes.push({
-                kind: op.kind === "text" ? "edit" : "create",
-                file: op.file,
-                files: [op.file],
-              });
-              result.summary.push(
-                `Partially changed ${op.file} before filesystem failure`,
-              );
-            }
-          } else if (op.kind === "delete") {
-            const removed: string[] = [];
-            for (const file of change.files) {
-              if (!(await entry(file))) {
-                removed.push(file);
-              }
-            }
-            if (removed.length > 0) {
-              result.changes.push({
-                kind: "delete",
-                file: op.file,
-                files: removed,
-              });
-              result.summary.push(
-                `Partially deleted ${removed.length} file(s) before filesystem failure`,
-              );
-            }
-          } else if (
-            (await entry(op.file)) &&
-            !(await entry(op.newFile)) &&
-            planned.originals.get(op.newFile)
-          ) {
-            result.changes.push({
-              kind: "delete",
-              file: op.newFile,
-              files: change.removedFiles ?? [op.newFile],
-            });
-          }
+          const effects = await inspectFailedMutationEffects(
+            change,
+            planned.originals,
+          );
+          result.changes.push(...effects.changes);
+          result.summary.push(...effects.summary);
           throw error;
         }
         result.changes.push({

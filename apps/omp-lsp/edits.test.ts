@@ -280,11 +280,12 @@ describe("applyWorkspaceEdit", () => {
     ]);
   });
 
-  test("should restore reference edits when the subsequent file rename fails", async () => {
+  test("should restore only committed reference edits when a rename fails before later edits", async () => {
     const referenceTextEndOffset = 3;
     const fixture = memoryFiles({
       "/project/ref.ts": "old",
       "/project/a.ts": "source",
+      "/project/pending.ts": "old",
     });
     fixture.failMove();
     const result = await applyWorkspaceEdit(
@@ -299,6 +300,13 @@ describe("applyWorkspaceEdit", () => {
             oldUri: fileToUri("/project/a.ts"),
             newUri: fileToUri("/project/b.ts"),
           },
+          {
+            textDocument: {
+              uri: fileToUri("/project/pending.ts"),
+              version: null,
+            },
+            edits: [replacement(0, referenceTextEndOffset, "new")],
+          },
         ],
       },
       { cwd: "/project", rollbackTextOnRenameFailure: true },
@@ -306,7 +314,59 @@ describe("applyWorkspaceEdit", () => {
     expect(result.applied).toBe(false);
     expect(fixture.files.get("/project/ref.ts")?.content).toBe("old");
     expect(fixture.files.get("/project/a.ts")?.content).toBe("source");
+    expect(fixture.files.get("/project/pending.ts")?.content).toBe("old");
     expect(fixture.files.has("/project/b.ts")).toBe(false);
     expect(result.changes).toEqual([]);
+  });
+
+  test("should preserve intervening changes and restore other edits when rename rollback is incomplete", async () => {
+    const referenceTextEndOffset = 3;
+    const fixture = memoryFiles({
+      "/project/other.ts": "old",
+      "/project/ref.ts": "old",
+      "/project/a.ts": "source",
+    });
+    const renameFailure = new Error("Rename failed");
+    spyOn(fs, "rename").mockImplementation(() => {
+      fixture.files.set("/project/ref.ts", {
+        content: "host update",
+        revision: 2,
+      });
+      return Promise.reject(renameFailure);
+    });
+
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            textDocument: {
+              uri: fileToUri("/project/other.ts"),
+              version: null,
+            },
+            edits: [replacement(0, referenceTextEndOffset, "new")],
+          },
+          {
+            textDocument: { uri: fileToUri("/project/ref.ts"), version: null },
+            edits: [replacement(0, referenceTextEndOffset, "new")],
+          },
+          {
+            kind: "rename",
+            oldUri: fileToUri("/project/a.ts"),
+            newUri: fileToUri("/project/b.ts"),
+          },
+        ],
+      },
+      { cwd: "/project", rollbackTextOnRenameFailure: true },
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain(renameFailure.message);
+    expect(fixture.files.get("/project/ref.ts")?.content).toBe("host update");
+    expect(fixture.files.get("/project/other.ts")?.content).toBe("old");
+    expect(result.changes).toContainEqual({
+      kind: "edit",
+      file: "/project/ref.ts",
+      files: ["/project/ref.ts"],
+    });
   });
 });

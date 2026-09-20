@@ -14,6 +14,7 @@ export const DEFAULT_STATUS_BG = "\x1b[48;2;18;18;18m";
 export const TRANSPARENT_BG = "\x1b[49m";
 export const STATUS_BG_AS_FG = "\x1b[38;2;18;18;18m";
 export const STATUS_SEPARATOR_FG = "\x1b[38;5;244m";
+export const EMPTY_END_CAPS = { left: "", right: "" } as const;
 
 export const statusColor = {
   model: "\x1b[38;2;215;135;175m",
@@ -100,7 +101,7 @@ export function getIcons(ascii: boolean): StatusIcons {
 export interface SeparatorDef {
   left: string;
   right: string;
-  endCaps?: { left: string; right: string };
+  endCaps: { left: string; right: string };
 }
 
 /**
@@ -108,11 +109,12 @@ export interface SeparatorDef {
  *
  * @param style The configured separator style.
  * @param ascii Whether the status line should override the configured style with ASCII separators.
- * @returns The left and right separators, including caps when the style uses them.
+ * @returns Left/right separators and a required cap pair; unused caps are empty strings.
+ * @throws If the configured style is unsupported.
  *
  * @example
  * getSeparator("powerline", true);
- * // { left: ">", right: "<" }
+ * // { left: ">", right: "<", endCaps: { left: "", right: "" } }
  */
 export function getSeparator(
   style: StatusLineSeparatorStyle,
@@ -121,19 +123,19 @@ export function getSeparator(
   const effectiveStyle = ascii ? "ascii" : style;
   switch (effectiveStyle) {
     case "ascii":
-      return { left: ">", right: "<" };
+      return { left: ">", right: "<", endCaps: EMPTY_END_CAPS };
     case "powerline":
       return { left: "▶", right: "◀", endCaps: { left: "◀", right: "▶" } };
     case "powerline-thin":
       return { left: ">", right: "<", endCaps: { left: "◀", right: "▶" } };
     case "slash":
-      return { left: "/", right: "/" };
+      return { left: "/", right: "/", endCaps: EMPTY_END_CAPS };
     case "pipe":
-      return { left: "│", right: "│" };
+      return { left: "│", right: "│", endCaps: EMPTY_END_CAPS };
     case "block":
-      return { left: "▌", right: "▌" };
+      return { left: "▌", right: "▌", endCaps: EMPTY_END_CAPS };
     case "none":
-      return { left: " ", right: " " };
+      return { left: " ", right: " ", endCaps: EMPTY_END_CAPS };
     default:
       throw new Error(`Unexpected value: ${effectiveStyle satisfies never}`);
   }
