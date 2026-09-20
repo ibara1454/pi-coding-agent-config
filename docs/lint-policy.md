@@ -5,6 +5,12 @@ Biome's `all` preset with explicit project decisions and comments explaining dis
 rules. This reference covers the 29 rules reviewed during the lint cleanup, not
 every rule enabled by the preset or the custom Grit plugins.
 
+Every workspace under `apps/*` and `packages/*` has a `biome.jsonc` with
+`"root": false` and `"extends": "//"` to inherit the root configuration. Put
+package-specific rules and `overrides` in that package's file; override globs
+are relative to the package. App configs allow default exports only in their
+root `index.ts` entrypoint.
+
 - **Error:** enabled and enforced by `bun run check` and `bun run lint`.
 - **Off:** deliberately disabled or deferred; no diagnostic is emitted.
 
