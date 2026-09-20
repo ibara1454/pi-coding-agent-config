@@ -1,7 +1,7 @@
 language js
 
 // Requires every leaf test title to start with `should `, as
-// `docs/agents/engineering.md` requires of every rendered leaf title. The
+// `.agents/skills/repo-testing/SKILL.md` requires for each rendered leaf title.
 // callee pattern accepts `test` and `it` plus any chain built on them, so
 // `test.only`, `it.each(rows)`, and `test.skip.each(rows)` are all covered.
 // Only a quoted title is inspected: a title assembled from an identifier or a

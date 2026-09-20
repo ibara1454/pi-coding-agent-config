@@ -1,6 +1,6 @@
 language js
 
-// Rejects an asynchronous `describe` callback: `docs/agents/engineering.md`
+// Rejects an asynchronous `describe` callback: `.agents/skills/repo-testing/SKILL.md`
 // requires the `describe` callback to be synchronous. The callee pattern
 // accepts `describe` plus any chain built on it, so `describe.only` and
 // `describe.each(rows)` are covered. Asynchronous work belongs in the leaf

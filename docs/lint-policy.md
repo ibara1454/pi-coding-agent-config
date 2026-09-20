@@ -13,12 +13,12 @@ the configuration aligned when changing policy. Preserve external protocol/schem
 spellings when resolving naming violations; do not rename public contracts solely
 to satisfy a naming convention.
 
-Gradual adoption keeps rules at **Error** while starting metric limits above the
-existing baseline: cognitive complexity is capped at **120** (Biome default: 15)
-and function length at **750** counted lines (Biome default: 50). These initial
-ceilings include production code and test-suite callbacks; lower them as the
-owning operations are simplified rather than splitting cohesive code solely to
-meet a metric. `noMagicNumbers` is enforced in both production and test code,
+Gradual adoption keeps metric rules at **Error** while lowering their limits:
+cognitive complexity is capped at **80** (Biome default: 15), reduced from 120,
+with **50** as the next target. Function length remains capped at **750** counted
+lines (Biome default: 50). These ceilings include production code and test-suite
+callbacks; lower them as owning operations are simplified rather than splitting
+cohesive code solely to meet a metric. `noMagicNumbers` is enforced in both production and test code,
 using named constants for flagged numeric literals without changing their values.
 
 ## Conditional expressions and loops
@@ -74,7 +74,7 @@ All rules in this section use the `lint/style/` prefix.
 | Rule | Meaning | Severity |
 |---|---|---|
 | `lint/complexity/noExcessiveLinesPerFunction` | Flags functions exceeding the configured limit of 750 counted lines. | Error |
-| `lint/complexity/noExcessiveCognitiveComplexity` | Flags branching/nesting complexity above the configured limit of 120. | Error |
+| `lint/complexity/noExcessiveCognitiveComplexity` | Flags branching/nesting complexity above the configured limit of 80. | Error |
 | `lint/complexity/useSimplifiedLogicExpression` | Flags redundant terms in logical expressions. | Error |
 | `lint/complexity/noImplicitCoercions` | Prefers explicit conversions, such as `Boolean(value)` instead of `!!value`. | Error |
 | `lint/style/useNumberNamespace` | Prefers equivalent `Number` properties, such as `Number.NaN` instead of global `NaN`. | Error |

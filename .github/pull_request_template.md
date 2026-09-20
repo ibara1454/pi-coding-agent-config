@@ -29,6 +29,5 @@ Write "None" if not applicable. Never include credentials or private session dat
 
 ## Checklist
 
-- [ ] Followed `docs/agents/engineering.md`, or recorded an authorized override or accepted waiver.
 - [ ] Updated affected callers, tests, and documentation, or no updates were needed.
 - [ ] Removed obsolete paths and compatibility aliases, unless compatibility is explicitly required or not applicable.

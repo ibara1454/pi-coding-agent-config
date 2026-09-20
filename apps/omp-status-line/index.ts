@@ -18,6 +18,7 @@ import { getPreset } from "./presets.ts";
 import { renderSegment, sanitizeInlineText } from "./segments.ts";
 import {
   DEFAULT_STATUS_BG,
+  EMPTY_END_CAPS,
   getSeparator,
   RESET,
   STATUS_BG_AS_FG,
@@ -689,14 +690,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const leftSeparatorWidth = visibleWidth(separator.left);
     const rightSeparatorWidth = visibleWidth(separator.right);
-    const leftCapWidth =
-      separator.endCaps && !transparent
-        ? visibleWidth(separator.endCaps.right)
-        : 0;
-    const rightCapWidth =
-      separator.endCaps && !transparent
-        ? visibleWidth(separator.endCaps.left)
-        : 0;
+    const endCaps = transparent ? EMPTY_END_CAPS : separator.endCaps;
+    const leftCapWidth = visibleWidth(endCaps.right);
+    const rightCapWidth = visibleWidth(endCaps.left);
     const groupWidth = (
       parts: string[],
       capWidth: number,
@@ -789,6 +785,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
     }
 
+    /**
+     * Styles a segment group with its outward-facing cap, omitted when transparent.
+     * @param parts Visible ANSI segments, left unmodified.
+     * @param direction Selects separators and the cap's side.
+     * @returns Styled text, or empty text for an empty group; performs no I/O.
+     * @example renderGroup([], "left"); // ""
+     */
     const renderGroup = (
       parts: string[],
       direction: "left" | "right",
@@ -798,14 +801,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       }
       const separatorText =
         direction === "left" ? separator.left : separator.right;
-      let cap = "";
-      if (separator.endCaps && !transparent) {
-        if (direction === "left") {
-          cap = separator.endCaps.right;
-        } else {
-          cap = separator.endCaps.left;
-        }
-      }
+      const cap = direction === "left" ? endCaps.right : endCaps.left;
       const capText = cap ? `${STATUS_BG_AS_FG}${cap}${RESET}` : "";
       const content = `${bg}${foreground} ${parts.join(` ${STATUS_SEPARATOR_FG}${separatorText}${foreground} `)} ${RESET}`;
       return direction === "right"
@@ -815,9 +811,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const leftGroup = renderGroup(left, "left");
     const rightGroup = renderGroup(right, "right");
-    if (!(leftGroup || rightGroup)) {
-      return "";
-    }
     if (!(leftGroup && rightGroup)) {
       return `${leftGroup}${rightGroup}`;
     }
