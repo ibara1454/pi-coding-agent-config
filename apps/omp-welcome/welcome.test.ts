@@ -61,7 +61,7 @@ describe("wide welcome box", () => {
     const component = header({ extensions, recentSessions: sessions });
     const rendered = component.render(102);
     const lines = rendered.map(sanitizeInline);
-    const first = lines[0];
+    const [first] = lines;
     const bottom = lines.find((line) => line.startsWith("╰"));
     expect(first).toBeDefined();
     expect(first).not.toBeNull();
@@ -168,7 +168,7 @@ describe("narrow welcome box", () => {
       }),
       32,
     );
-    const first = lines[0];
+    const [first] = lines;
     const bottom = lines.find((line) => line.startsWith("╰"));
     expect(first).toBeDefined();
     expect(first).not.toBeNull();

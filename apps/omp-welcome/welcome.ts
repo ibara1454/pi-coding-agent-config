@@ -34,13 +34,13 @@ const FIXED_TIP_ROWS = [
 ] as const;
 
 export interface WelcomeTheme {
-  fg(
+  fg: (
     color: "accent" | "customMessageLabel" | "dim" | "muted",
     text: string,
-  ): string;
-  bold(text: string): string;
-  italic(text: string): string;
-  getColorMode(): "truecolor" | "256color";
+  ) => string;
+  bold: (text: string) => string;
+  italic: (text: string) => string;
+  getColorMode: () => "truecolor" | "256color";
 }
 
 export interface WelcomeHeaderOptions {
@@ -523,12 +523,14 @@ export class WelcomeHeader {
   private readonly animation: IntroAnimation;
   private readonly options: WelcomeHeaderOptions;
   private cache: { width: number; rows: number; lines: string[] } | undefined;
-  private disposed: boolean = false;
+  // `!== false` guards work around Biome's mutable-boolean false positive:
+  // https://github.com/biomejs/biome/issues/11174
+  private disposed = false;
 
   constructor(options: WelcomeHeaderOptions) {
     this.options = sanitizeOptions(options);
     this.animation = new IntroAnimation(() => {
-      if (this.disposed) {
+      if (this.disposed !== false) {
         return;
       }
       this.invalidate();
@@ -544,7 +546,7 @@ export class WelcomeHeader {
   }
 
   dispose(): void {
-    if (this.disposed) {
+    if (this.disposed !== false) {
       return;
     }
     this.disposed = true;

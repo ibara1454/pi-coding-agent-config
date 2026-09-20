@@ -38,7 +38,7 @@ function resolveRows(
   baseParticipation: ReadonlyMap<string, boolean>,
   staged: ReadonlyMap<string, boolean>,
 ): boolean {
-  const winner = rows
+  const [winner] = rows
     .filter((row) => {
       if (!row.resolutionCandidate) {
         return false;
@@ -56,7 +56,7 @@ function resolveRows(
       }
       return baseParticipation.get(row.id) ?? target.participates;
     })
-    .sort((left, right) => left.resolutionOrder - right.resolutionOrder)[0];
+    .sort((left, right) => left.resolutionOrder - right.resolutionOrder);
   return winner === undefined
     ? false
     : (staged.get(winner.id) ?? winner.configured);
@@ -164,23 +164,27 @@ function projectRow(
     patterns: row.filters,
   });
   const filters = projected.keepField ? [...projected.patterns] : [];
-  const configurationReason = target.autoloadDelta
-    ? explainFilterState(
-        target.resolvedPath,
-        filters,
-        target.packageRoot,
-        "autoload-disabled",
-      ).reason
-    : !projected.keepField
-      ? "Enabled by package autoload: no kind filter is configured"
-      : filters.length === 0
-        ? "Disabled by explicit empty package filter"
-        : explainFilterState(
-            target.resolvedPath,
-            filters,
-            target.packageRoot,
-            "normal",
-          ).reason;
+  let configurationReason: string;
+  if (target.autoloadDelta) {
+    configurationReason = explainFilterState(
+      target.resolvedPath,
+      filters,
+      target.packageRoot,
+      "autoload-disabled",
+    ).reason;
+  } else if (!projected.keepField) {
+    configurationReason =
+      "Enabled by package autoload: no kind filter is configured";
+  } else if (filters.length === 0) {
+    configurationReason = "Disabled by explicit empty package filter";
+  } else {
+    configurationReason = explainFilterState(
+      target.resolvedPath,
+      filters,
+      target.packageRoot,
+      "normal",
+    ).reason;
+  }
   return { ...row, configured: desired, filters, configurationReason };
 }
 

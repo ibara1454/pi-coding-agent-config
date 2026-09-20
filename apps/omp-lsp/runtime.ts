@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, resolve } from "node:path";
+import process from "node:process";
 import { Transform, type TransformCallback } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -32,28 +33,32 @@ export interface LanguageServer {
   readonly config: ServerConfig;
   readonly capabilities: ServerCapabilities;
   readonly isAlive: boolean;
-  /** Sends a bounded RPC; the result type does not replace validation of peer data. */
-  request<T = unknown>(
+  /** Sends bounded RPC; result type does not replace validation peer data. */
+  request: <T = unknown>(
     method: string,
     params: unknown,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<T>;
-  notify(method: string, params: unknown): Promise<void>;
+  ) => Promise<T>;
+  notify: (method: string, params: unknown) => Promise<void>;
   /** Opens or updates an absolute-path document in per-file order using UTF-16 positions. */
-  syncFile(file: string, content?: string, signal?: AbortSignal): Promise<void>;
-  saved(file: string): Promise<void>;
-  closeFile(file: string): Promise<void>;
+  syncFile: (
+    file: string,
+    content?: string,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  saved: (file: string) => Promise<void>;
+  closeFile: (file: string) => Promise<void>;
   /** Reports diagnostic provenance; silence or an unversioned report is not verified clean state. */
-  diagnostics(
+  diagnostics: (
     file: string,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<DiagnosticReport>;
-  /** Returns a detached snapshot for validating later edits against the observed document. */
-  document(file: string): { version: number; content: string } | undefined;
-  /** Idempotently cancels outstanding work and releases the owned process and transport. */
-  shutdown(): Promise<void>;
+  ) => Promise<DiagnosticReport>;
+  /** Returns detached snapshot validating later edits against observed document. */
+  document: (file: string) => { version: number; content: string } | undefined;
+  /** Idempotently cancels outstanding work and releases owned process transport. */
+  shutdown: () => Promise<void>;
 }
 
 interface PoolOptions {
@@ -84,7 +89,7 @@ interface Registration {
 }
 
 const REQUEST_TIMEOUT_MS = 30_000;
-const WRITE_TIMEOUT_MS = 5_000;
+const WRITE_TIMEOUT_MS = 5000;
 const DIAGNOSTIC_TIMEOUT_MS = 10_000;
 const DIAGNOSTIC_SETTLE_MS = 250;
 
@@ -223,10 +228,12 @@ function fileKey(file: string): string {
 
 function diagnosticItems(value: unknown): Diagnostic[] {
   if (
-    !Array.isArray(value) ||
-    !value.every(
-      (item: unknown): item is Diagnostic =>
-        Diagnostic.is(item) && typeof item.message === "string",
+    !(
+      Array.isArray(value) &&
+      value.every(
+        (item: unknown): item is Diagnostic =>
+          Diagnostic.is(item) && typeof item.message === "string",
+      )
     )
   ) {
     throw new Error("Language server returned malformed diagnostics");
@@ -405,8 +412,8 @@ function clientCapabilities(): ClientCapabilities {
 /** Validate framing before vscode-jsonrpc can grow its message buffer. */
 class BoundedLspInput extends Transform {
   private readonly header = Buffer.allocUnsafe(16 * 1024);
-  private headerBytes: number = 0;
-  private bodyRemaining: number = 0;
+  private headerBytes = 0;
+  private bodyRemaining = 0;
 
   override _transform(
     chunk: Buffer,
@@ -453,7 +460,7 @@ class BoundedLspInput extends Transform {
           lengths.length === 1
             ? lengths[0]?.match(CONTENT_LENGTH_VALUE)?.[1]
             : undefined;
-        const length = rawLength === undefined ? NaN : Number(rawLength);
+        const length = rawLength === undefined ? Number.NaN : Number(rawLength);
         if (!Number.isSafeInteger(length) || length <= 0) {
           throw new Error("Invalid LSP Content-Length header");
         }
@@ -471,9 +478,14 @@ class BoundedLspInput extends Transform {
     }
   }
 
+  /**
+   * Rejects end-of-stream when an LSP header or body is incomplete.
+   * @param callback - Receives the framing error, or no error at a message boundary.
+   * @example Ending after a partial header reports an incomplete message.
+   */
   override _flush(callback: TransformCallback): void {
     callback(
-      this.headerBytes || this.bodyRemaining
+      this.headerBytes > 0 || this.bodyRemaining > 0
         ? new Error("LSP transport ended with an incomplete message")
         : undefined,
     );
@@ -892,7 +904,7 @@ class StdioLanguageServer implements LanguageServer {
       this.state.publications.delete(key);
       this.state.diagnosticErrors.delete(key);
       const uri = pathToFileURL(file).href;
-      if (!prior || !sync.change) {
+      if (!(prior && sync.change)) {
         if (prior && sync.openClose) {
           await this.notify("textDocument/didClose", { textDocument: { uri } });
         }
@@ -955,8 +967,9 @@ class StdioLanguageServer implements LanguageServer {
    */
   saved(file: string): Promise<void> {
     return queue(this, file, undefined, async () => {
-      const snapshot = this.state.documents.get(fileKey(file));
-      const save = syncOptions(this.capabilities.textDocumentSync).save;
+      const { documents } = this.state;
+      const snapshot = documents.get(fileKey(file));
+      const { save } = syncOptions(this.capabilities.textDocumentSync);
       const uri = pathToFileURL(file).href;
       if (snapshot && save) {
         await this.notify("textDocument/didSave", {
@@ -1147,7 +1160,7 @@ class StdioLanguageServer implements LanguageServer {
           });
           try {
             await rpc(this, "shutdown", null, {
-              timeoutMs: 1_000,
+              timeoutMs: 1000,
               stopping: true,
             });
             await bounded(this.connection.sendNotification("exit"), [], {
@@ -1310,7 +1323,7 @@ async function waitForWorkspace(
         {},
         signal,
         Math.min(
-          duration(timings?.statusRequestTimeoutMs, 1_000),
+          duration(timings?.statusRequestTimeoutMs, 1000),
           Math.max(1, deadline - Date.now()),
         ),
       );
@@ -1320,7 +1333,7 @@ async function waitForWorkspace(
       if (
         !status.startsWith("No workspaces") &&
         state.progress.size === 0 &&
-        Date.now() - start >= duration(timings?.settleMs, 2_000)
+        Date.now() - start >= duration(timings?.settleMs, 2000)
       ) {
         return;
       }
@@ -1396,7 +1409,7 @@ async function rpc<T>(
       onCancel: () => {
         source.cancel();
         // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
-        if (!settled && !state.lifetime.signal.aborted && !stopping) {
+        if (!(settled || state.lifetime.signal.aborted || stopping)) {
           cleanupTimer = setTimeout(() => {
             if (cleanupTimer) {
               state.cancellationTimers.delete(cleanupTimer);
@@ -1410,7 +1423,7 @@ async function rpc<T>(
                 ),
               );
             }
-          }, 1_000);
+          }, 1000);
           state.cancellationTimers.add(cleanupTimer);
         }
       },
@@ -1734,14 +1747,16 @@ async function serverRequest(
       const { unregisterations, unregistrations } = params;
       const entries = unregisterations ?? unregistrations;
       if (
-        !Array.isArray(entries) ||
-        !entries.every((entry: unknown) => {
-          if (!record(entry)) {
-            return false;
-          }
-          const { id } = entry;
-          return typeof id === "string";
-        })
+        !(
+          Array.isArray(entries) &&
+          entries.every((entry: unknown) => {
+            if (!record(entry)) {
+              return false;
+            }
+            const { id } = entry;
+            return typeof id === "string";
+          })
+        )
       ) {
         throw new ResponseError(
           ErrorCodes.InvalidParams,
@@ -1796,7 +1811,10 @@ export class LanguageServerPool {
   private readonly entries = new Map<string, PoolEntry>();
   private readonly idleTimer: NodeJS.Timeout | undefined;
   private disposePromise: Promise<void> | undefined;
-  private disposed: boolean = false;
+  // `!== false` guards work around Biome's mutable-boolean false positive:
+  // https://github.com/biomejs/biome/issues/11174
+  // Unlike `=== true`, they also avoid TypeScript's TS2367 after `await`.
+  private disposed = false;
 
   /**
    * Owns shared server entries and an optional unreferenced idle-expiry timer.
@@ -1824,7 +1842,7 @@ export class LanguageServerPool {
             }
           }
         },
-        Math.min(timeout, 1_000),
+        Math.min(timeout, 1000),
       );
       this.idleTimer.unref();
     }
@@ -1849,7 +1867,7 @@ export class LanguageServerPool {
     signal?: AbortSignal,
   ): Promise<LanguageServer> {
     check(signal);
-    if (this.disposed) {
+    if (this.disposed !== false) {
       throw new Error("LSP pool is disposed");
     }
     if (config.disabled) {
@@ -1883,7 +1901,11 @@ export class LanguageServerPool {
       current.ready = server
         .initialize(controller.signal)
         .then(() => {
-          if (this.disposed || current.stopping || controller.signal.aborted) {
+          if (
+            this.disposed !== false ||
+            current.stopping ||
+            controller.signal.aborted
+          ) {
             throw new Error(`LSP ${config.name} startup was stopped`);
           }
           current.initialized = true;
@@ -1894,6 +1916,7 @@ export class LanguageServerPool {
           try {
             await server.shutdown();
           } catch (cleanupError) {
+            // biome-ignore lint/style/useErrorCause: AggregateError retains both failures; Biome 2.5.14 does not recognize its constructor signature.
             throw new AggregateError(
               [error, cleanupError],
               `LSP ${config.name} startup and cleanup failed`,
@@ -1908,7 +1931,7 @@ export class LanguageServerPool {
     entry.server.touch();
     const server = await bounded(entry.ready, [signal]);
     check(signal);
-    if (this.disposed || entry.stopping || !server.isAlive) {
+    if (this.disposed !== false || entry.stopping || !server.isAlive) {
       throw new Error(
         `LSP ${config.name} was stopped before acquisition completed`,
       );
@@ -1945,7 +1968,7 @@ export class LanguageServerPool {
     const errors = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason as unknown] : [],
     );
-    if (errors.length) {
+    if (errors.length > 0) {
       throw new AggregateError(errors, "Failed to stop language servers");
     }
   }
@@ -1996,11 +2019,10 @@ function stopEntry(
     new Error(`LSP ${entry.server.config.name} startup was stopped`),
   );
   entry.stopping = (async () => {
-    const results = await Promise.allSettled([
+    const [shutdown] = await Promise.allSettled([
       entry.server.shutdown(),
       entry.ready,
     ]);
-    const shutdown = results[0];
     if (shutdown?.status === "rejected") {
       throw shutdown.reason;
     }

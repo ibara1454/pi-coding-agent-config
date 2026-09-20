@@ -48,7 +48,7 @@ function fixture(
       stdin,
       stdout,
       stderr,
-      pid: 12345,
+      pid: 12_345,
       exitCode: null as number | null,
       signalCode: null,
     },

@@ -23,7 +23,7 @@ function memoryFiles(initial: Record<string, string>) {
   spyOn(fs, "lstat").mockImplementation(((value: unknown) => {
     const file = String(value);
     const content = files.get(file);
-    if (!content && !directories.has(file)) {
+    if (!(content || directories.has(file))) {
       return Promise.reject(
         Object.assign(new Error(`Missing ${file}`), { code: "ENOENT" }),
       );

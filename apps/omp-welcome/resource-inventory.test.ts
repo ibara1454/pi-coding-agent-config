@@ -37,7 +37,12 @@ function host() {
     options = { verbose: false };
   }
 
-  return { InteractiveMode, calls, manager };
+  return {
+    // biome-ignore lint/style/useNamingConvention: fixture constructor mirrors host identity
+    InteractiveMode,
+    calls,
+    manager,
+  };
 }
 
 describe("native resource inventory override", () => {
@@ -159,7 +164,7 @@ describe("native resource inventory override", () => {
         },
       };
       // Declaration-only by design: this fixture exercises an unavailable runtime settings-manager seam.
-      declare settingsManager: { getQuietStartup(): boolean };
+      declare settingsManager: { getQuietStartup: () => boolean };
     }
 
     const override = installResourceInventoryOverride("0.84.1", MissingManager);

@@ -1,3 +1,4 @@
+// Rule meanings and severity policy: ./docs/lint-policy.md
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   "plugins": [
@@ -25,12 +26,23 @@
   "linter": {
     "enabled": true,
     "domains": {
+      // Pi extensions do not use Qwik.
       "qwik": "none"
     },
     "rules": {
       "preset": "all",
+      "complexity": {
+        // Defer metric-driven rewrites until behavior or ownership needs to change.
+        "noExcessiveCognitiveComplexity": "off",
+        // Do not split cohesive operations or test suites just to meet line limits.
+        "noExcessiveLinesPerFunction": "off",
+        "noImplicitCoercions": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
       "correctness": {
-        "noNodejsModules": "off"
+        // Pi extensions run on Node/Bun and need built-in modules.
+        "noNodejsModules": "off",
+        "noProcessGlobal": "error"
       },
       "nursery": {
         "noFloatingPromises": "error",
@@ -54,7 +66,17 @@
           }
         }
       },
+      "performance": {
+        // Ordered IO, rollback, retries, and bounded workers require sequential awaits.
+        "noAwaitInLoops": "off"
+      },
+      "security": {
+        // False positives on terminal fixtures and protocol names; defer until tuned.
+        "noSecrets": "off"
+      },
       "suspicious": {
+        // Bitwise operations are intentional in hashing and token estimation.
+        "noBitwiseOperators": "off",
         "noImportCycles": {
           "level": "error",
           "options": {
@@ -63,6 +85,38 @@
         }
       },
       "style": {
+        // Guard-style continue keeps filtering loops flat.
+        "noContinue": "off",
+        // Related implementation and host-fixture classes can share a module.
+        "noExcessiveClassesPerFile": "off",
+        // File length alone is not a module boundary.
+        "noExcessiveLinesPerFile": "off",
+        // Increment/decrement is clear for counters and indexed loops.
+        "noIncrementDecrement": "off",
+        // Name real limits case by case, not every index, protocol value, or fixture.
+        "noMagicNumbers": "off",
+        // Choose branch order for readability rather than banning negative conditions.
+        "noNegationElse": "off",
+        // Environment access belongs at runtime/config boundaries and in isolated tests.
+        "noProcessEnv": "off",
+        "noInferrableTypes": "error",
+        // Simple conditional values are readable; nested ternaries remain flagged.
+        "noTernary": "off",
+        "noNestedTernary": "error",
+        // Review function variance when converting existing method signatures.
+        "useConsistentMethodSignatures": "error",
+        // Keep exported declarations beside the code they describe.
+        "useExportsLast": "off",
+        // Enforce naming without changing required external protocol/schema spellings.
+        "useNamingConvention": "error",
+        "useAtIndex": "error",
+        "useConsistentArrayType": "error",
+        "useConsistentTypeDefinitions": "error",
+        "useDestructuring": "error",
+        "useErrorCause": "error",
+        "useExplicitLengthCheck": "error",
+        "useNumberNamespace": "error",
+        "useNumericSeparators": "error",
         "noRestrictedGlobals": {
           "level": "error",
           "options": {
@@ -85,6 +139,7 @@
       "linter": {
         "rules": {
           "style": {
+            // Pi loads extension entrypoints through their default-exported factories.
             "noDefaultExport": "off"
           }
         }

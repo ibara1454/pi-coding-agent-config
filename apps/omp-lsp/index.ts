@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
   type ExtensionAPI,
@@ -59,6 +60,7 @@ const parameters = Type.Object(
           "Symbol search, code-action title/index/kind, or raw LSP method name.",
       }),
     ),
+    // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
     new_name: Type.Optional(
       Type.String({
         description: "New symbol name or destination file/directory path.",

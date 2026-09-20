@@ -17,7 +17,7 @@ interface ResourceOptions {
 }
 
 interface QuietStartupManager {
-  getQuietStartup?(): boolean;
+  getQuietStartup?: () => boolean;
 }
 
 interface InteractiveModeLike {
@@ -47,7 +47,7 @@ interface PatchRegistry {
 export interface ResourceInventoryOverride {
   supported: boolean;
   reason?: string;
-  release(): void;
+  release: () => void;
 }
 
 function patchRegistry(): PatchRegistry {
@@ -119,7 +119,7 @@ export function installResourceInventoryOverride(
     );
   }
 
-  const prototype = interactiveMode.prototype;
+  const { prototype } = interactiveMode;
   const registry = patchRegistry();
   const existing = registry.patches.get(prototype);
   if (existing) {

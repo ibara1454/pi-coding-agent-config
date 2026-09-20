@@ -16,7 +16,10 @@ function createContext(options?: {
         reasoning: false,
       },
       thinkingLevel: "off",
-      modelRegistry: { isUsingOAuth: () => false },
+      modelRegistry: {
+        // biome-ignore lint/style/useNamingConvention: host API method name
+        isUsingOAuth: () => false,
+      },
       sessionManager: {
         getSessionId: () => "session-id",
         getSessionName: () => undefined,

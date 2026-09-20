@@ -18,6 +18,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const RELATIVE_PREFIX = /^\.\//;
@@ -504,7 +505,10 @@ function applyAutoloadDisabledPatterns(
           ? matchesExactPath(file, [target], baseDir)
           : matchesPattern(file, [target], baseDir)
       ) {
-        enabled.set(file, !pattern.startsWith("-") && !pattern.startsWith("!"));
+        enabled.set(
+          file,
+          !(pattern.startsWith("-") || pattern.startsWith("!")),
+        );
       }
     }
   }
@@ -582,12 +586,12 @@ function gitPackagePath(source: string): string | undefined {
 
   const hosted = raw.match(HOSTED_GIT_SOURCE);
   if (hosted) {
-    const domain =
-      hosted[1] === "github"
-        ? "github.com"
-        : hosted[1] === "gitlab"
-          ? "gitlab.com"
-          : "bitbucket.org";
+    let domain = "bitbucket.org";
+    if (hosted[1] === "github") {
+      domain = "github.com";
+    } else if (hosted[1] === "gitlab") {
+      domain = "gitlab.com";
+    }
     raw = `${domain}/${hosted[2]}`;
   }
 
@@ -724,7 +728,7 @@ function packageRoot(
 
 function packageEntryPaths(entry: string, root: string): string[] {
   const pattern = toPosixPath(entry).replace(RELATIVE_PREFIX, "");
-  if (!pattern.includes("*") && !pattern.includes("?")) {
+  if (!(pattern.includes("*") || pattern.includes("?"))) {
     return [resolvePiPath(pattern, root)];
   }
 
@@ -826,9 +830,11 @@ function packageFiles(
     const files = packageExtensionFiles(
       entries.filter(
         (entry) =>
-          !entry.startsWith("!") &&
-          !entry.startsWith("+") &&
-          !entry.startsWith("-"),
+          !(
+            entry.startsWith("!") ||
+            entry.startsWith("+") ||
+            entry.startsWith("-")
+          ),
       ),
       root,
     );
@@ -1028,7 +1034,7 @@ export function collectWelcomeExtensions(
       agentDir,
       projectDir,
     );
-    if (!root || !existsSync(root)) {
+    if (!(root && existsSync(root))) {
       continue;
     }
     let stats: Stats;
@@ -1053,13 +1059,17 @@ export function collectWelcomeExtensions(
       continue;
     }
 
-    const collectionMode: PackageCollectionMode =
-      entry.filter === undefined
-        ? "package"
-        : entry.filter.autoload === false ||
-            entry.filter.extensions !== undefined
-          ? "filter"
-          : "default";
+    let collectionMode: PackageCollectionMode;
+    if (entry.filter === undefined) {
+      collectionMode = "package";
+    } else if (
+      entry.filter.autoload === false ||
+      entry.filter.extensions !== undefined
+    ) {
+      collectionMode = "filter";
+    } else {
+      collectionMode = "default";
+    }
     const collected = packageFiles(root, collectionMode);
     if (
       collected.files.length === 0 &&
@@ -1096,12 +1106,14 @@ export function collectWelcomeExtensions(
       }
       continue;
     }
-    const enabled =
-      entry.filter?.extensions === undefined
-        ? new Set(collected.files)
-        : entry.filter.extensions.length === 0
-          ? new Set<string>()
-          : applyPatterns(collected.files, entry.filter.extensions, root);
+    let enabled: Set<string>;
+    if (entry.filter?.extensions === undefined) {
+      enabled = new Set(collected.files);
+    } else if (entry.filter.extensions.length === 0) {
+      enabled = new Set<string>();
+    } else {
+      enabled = applyPatterns(collected.files, entry.filter.extensions, root);
+    }
     for (const file of collected.files) {
       add({
         path: file,

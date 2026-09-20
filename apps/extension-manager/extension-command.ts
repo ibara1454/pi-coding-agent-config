@@ -9,14 +9,14 @@ import {
 import type { CatalogSeed } from "./types.ts";
 
 export interface ExtensionManagerApi {
-  on(event: "session_shutdown", handler: () => void): void;
-  registerCommand(
+  on: (event: "session_shutdown", handler: () => void) => void;
+  registerCommand: (
     name: string,
     options: {
       description: string;
       handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
     },
-  ): void;
+  ) => void;
 }
 
 export function registerExtensionManager(

@@ -65,7 +65,7 @@ export default function welcome(pi: ExtensionAPI): void {
       return;
     }
     const state = processState();
-    if (!inventoryOverride.supported && !state.inventoryWarningShown) {
+    if (!(inventoryOverride.supported || state.inventoryWarningShown)) {
       state.inventoryWarningShown = true;
       ctx.ui.notify(
         `Welcome could not suppress Pi's startup resource inventory: ${inventoryOverride.reason ?? "unsupported host implementation"}.`,
@@ -87,7 +87,7 @@ export default function welcome(pi: ExtensionAPI): void {
     }
 
     state.selectedTip ??= pickStartupTip();
-    const selectedTip = state.selectedTip;
+    const { selectedTip } = state;
     const playIntro = event.reason === "startup" && !state.introPlayed;
     if (playIntro) {
       state.introPlayed = true;

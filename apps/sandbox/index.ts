@@ -45,6 +45,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
@@ -186,12 +187,14 @@ function findSymlinkedConfigPaths(
       continue;
     }
 
-    const expandedPath =
-      configuredPath === "~"
-        ? homedir()
-        : configuredPath.startsWith("~/")
-          ? join(homedir(), configuredPath.slice(2))
-          : configuredPath;
+    let expandedPath: string;
+    if (configuredPath === "~") {
+      expandedPath = homedir();
+    } else if (configuredPath.startsWith("~/")) {
+      expandedPath = join(homedir(), configuredPath.slice(2));
+    } else {
+      expandedPath = configuredPath;
+    }
     const absolutePath = resolve(cwd, expandedPath);
 
     try {
@@ -524,7 +527,7 @@ export default function sandbox(pi: ExtensionAPI): void {
       return;
     }
 
-    const platform = process.platform;
+    const { platform } = process;
     if (platform !== "darwin" && platform !== "linux") {
       ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
       return;

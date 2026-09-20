@@ -1,4 +1,5 @@
 import { warn } from "node:console";
+import process from "node:process";
 import type {
   Api,
   Model,
@@ -23,11 +24,11 @@ type TransportOptions = ProviderRequestOptions & {
   azureBaseUrl?: string;
 };
 
-type ProviderRoutes = {
+interface ProviderRoutes {
   root: string;
   openAi: string;
   googleGenerative: string;
-};
+}
 
 // ponytail: use optional spreads; keep getter reads single and ordered.
 type NonNullRecord<T extends Record<string, unknown>> = {
@@ -123,31 +124,31 @@ function routedBaseUrl(
   }
 }
 
-function routeModel<TApi extends Api>(
-  model: Model<TApi>,
+function routeModel<ApiType extends Api>(
+  model: Model<ApiType>,
   routes: ProviderRoutes,
-): Model<TApi> {
+): Model<ApiType> {
   const snapshot = { ...model };
   snapshot.baseUrl = routedBaseUrl(snapshot, routes);
   return snapshot;
 }
 
-function routeModels<TApi extends Api>(
-  models: readonly Model<TApi>[],
+function routeModels<ApiType extends Api>(
+  models: readonly Model<ApiType>[],
   routes: ProviderRoutes,
-): Model<TApi>[] {
-  const routedModels: Model<TApi>[] = [];
+): Model<ApiType>[] {
+  const routedModels: Model<ApiType>[] = [];
   for (const model of models) {
     routedModels.push(routeModel(model, routes));
   }
   return routedModels;
 }
 
-function routeTransportOptions<TOptions extends ProviderRequestOptions>(
+function routeTransportOptions<OptionsType extends ProviderRequestOptions>(
   api: Api,
   routedModelBaseUrl: string,
-  options: TOptions | undefined,
-): TOptions | undefined;
+  options: OptionsType | undefined,
+): OptionsType | undefined;
 
 function routeTransportOptions(
   api: Api,
@@ -164,19 +165,20 @@ function routeTransportOptions(
     azureBaseUrl: routedModelBaseUrl,
     env: {
       ...optionsSnapshot.env,
+      // biome-ignore lint/style/useNamingConvention: preserve Azure OpenAI environment variable key
       AZURE_OPENAI_BASE_URL: routedModelBaseUrl,
     },
   };
 }
 
 function routeRequest<
-  TApi extends Api,
-  TOptions extends ProviderRequestOptions,
+  ApiType extends Api,
+  OptionsType extends ProviderRequestOptions,
 >(
-  model: Model<TApi>,
+  model: Model<ApiType>,
   routes: ProviderRoutes,
-  options: TOptions | undefined,
-): { model: Model<TApi>; options: TOptions | undefined } {
+  options: OptionsType | undefined,
+): { model: Model<ApiType>; options: OptionsType | undefined } {
   const routedModel = routeModel(model, routes);
   return {
     model: routedModel,
@@ -215,12 +217,12 @@ function wrapProvider(
     );
   };
 
-  const refreshModels = provider.refreshModels;
+  const { refreshModels } = provider;
   const wrappedRefreshModels: Provider["refreshModels"] = refreshModels
     ? (context) => refreshModels.call(provider, context)
     : undefined;
 
-  const filterModels = provider.filterModels;
+  const { filterModels } = provider;
   const wrappedFilterModels: Provider["filterModels"] = filterModels
     ? (models, credential) => {
         const routedModels = routeModels(models, routes);
@@ -233,7 +235,7 @@ function wrapProvider(
       }
     : undefined;
 
-  const fetchDeferred = provider.fetchDeferred;
+  const { fetchDeferred } = provider;
   const wrappedFetchDeferred: Provider["fetchDeferred"] = fetchDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, routes, options);
@@ -246,7 +248,7 @@ function wrapProvider(
       }
     : undefined;
 
-  const cancelDeferred = provider.cancelDeferred;
+  const { cancelDeferred } = provider;
   const wrappedCancelDeferred: Provider["cancelDeferred"] = cancelDeferred
     ? (model, handle, options) => {
         const request = routeRequest(model, routes, options);

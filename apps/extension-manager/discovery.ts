@@ -177,8 +177,10 @@ function scopedSettings(
       continue;
     }
     if (
-      !Array.isArray(candidate) ||
-      !candidate.every((item) => typeof item === "string")
+      !(
+        Array.isArray(candidate) &&
+        candidate.every((item) => typeof item === "string")
+      )
     ) {
       diagnostics.push({
         scope,
@@ -235,7 +237,7 @@ function expandTopLevelGlobs(
         entry.startsWith("!") ||
         entry.startsWith("+") ||
         entry.startsWith("-") ||
-        (!entry.includes("*") && !entry.includes("?"))
+        !(entry.includes("*") || entry.includes("?"))
       ) {
         return [entry];
       }
@@ -504,8 +506,7 @@ function packagePatterns(
     return { autoloadDisabled: entry.autoload === false };
   }
   if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "string")
+    !(Array.isArray(value) && value.every((item) => typeof item === "string"))
   ) {
     diagnostics.push({
       scope,
@@ -957,14 +958,12 @@ function resolutionOrder(draft: ResourceDraft, draftIndex: number): number {
       draftIndex
     );
   }
-  const rank =
-    draft.scope === "project"
-      ? draft.sourceType === "local"
-        ? 0
-        : 1
-      : draft.sourceType === "local"
-        ? 2
-        : 3;
+  let rank: number;
+  if (draft.scope === "project") {
+    rank = draft.sourceType === "local" ? 0 : 1;
+  } else {
+    rank = draft.sourceType === "local" ? 2 : 3;
+  }
   return rank * 1_000_000_000_000 + draftIndex;
 }
 
@@ -1090,15 +1089,17 @@ function materializeCatalog(
       draft.kind === "skill"
         ? readBoundedSkillPreview(draft.canonicalPath)
         : undefined;
-    const shadowedBy = duplicatePackageOccurrence
-      ? `${draft.scope === "project" ? "Project" : "Global"} package ${draft.source} occurrence 1`
-      : projectPackageWinner !== undefined
-        ? `Project package ${projectPackageWinner}`
-        : !resolutionParticipant && canonicalWinner !== undefined
-          ? winnerLabel(canonicalWinner)
-          : !resolutionParticipant && draft.target.type === "package"
-            ? "Package precedence"
-            : undefined;
+    let shadowedBy: string | undefined;
+    if (duplicatePackageOccurrence) {
+      const scopeLabel = draft.scope === "project" ? "Project" : "Global";
+      shadowedBy = `${scopeLabel} package ${draft.source} occurrence 1`;
+    } else if (projectPackageWinner !== undefined) {
+      shadowedBy = `Project package ${projectPackageWinner}`;
+    } else if (!resolutionParticipant && canonicalWinner !== undefined) {
+      shadowedBy = winnerLabel(canonicalWinner);
+    } else if (!resolutionParticipant && draft.target.type === "package") {
+      shadowedBy = "Package precedence";
+    }
     rows.push({
       id,
       kind: draft.kind,

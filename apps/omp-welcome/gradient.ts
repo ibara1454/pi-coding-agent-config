@@ -15,7 +15,7 @@ const GRADIENT_STOPS = [
 ] as const;
 const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
 const SHINE_HALF_WIDTH = 0.18;
-const INTRO_MS = 3_000;
+const INTRO_MS = 3000;
 const INTRO_TICK_MS = 33;
 
 interface ShineConfig {
@@ -113,9 +113,9 @@ export function introFrame(progress: number, colorMode: ColorMode): string[] {
 type IntroTimerHandle = NodeJS.Timeout;
 
 interface IntroTimer {
-  now(): number;
-  setInterval(handler: () => void, milliseconds: number): IntroTimerHandle;
-  clearInterval(timer: IntroTimerHandle): void;
+  now: () => number;
+  setInterval: (handler: () => void, milliseconds: number) => IntroTimerHandle;
+  clearInterval: (timer: IntroTimerHandle) => void;
 }
 
 const systemTimer: IntroTimer = {

@@ -8,7 +8,7 @@ function scopeLabel(scope: ResourceScope): string {
 export function commitNotification(
   panelResult: Extract<PanelResult, { type: "commit" }>,
 ): { readonly message: string; readonly level: "info" | "warning" } {
-  const result = panelResult.result;
+  const { result } = panelResult;
   const parts = [
     `Saved ${result.committedScopes.map(scopeLabel).join(" and ")} settings.`,
   ];

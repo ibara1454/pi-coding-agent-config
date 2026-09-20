@@ -11,20 +11,20 @@ const installed = "/installed/language-server";
 const projectConfig = join(cwd, ".pi", "lsp.json");
 
 const filesystem: {
-  access(file: string): Promise<void>;
-  stat(file: string): Promise<{ isFile(): boolean }>;
-  open(
+  access: (file: string) => Promise<void>;
+  stat: (file: string) => Promise<{ isFile: () => boolean }>;
+  open: (
     file: string,
     flags: string,
-  ): Promise<{
-    stat(): Promise<{ isFile(): boolean; size: number }>;
-    read(
+  ) => Promise<{
+    stat: () => Promise<{ isFile: () => boolean; size: number }>;
+    read: (
       buffer: Buffer,
       offset: number,
       length: number,
       position: null,
-    ): Promise<{ bytesRead: number }>;
-    close(): Promise<void>;
+    ) => Promise<{ bytesRead: number }>;
+    close: () => Promise<void>;
   }>;
 } = fs;
 

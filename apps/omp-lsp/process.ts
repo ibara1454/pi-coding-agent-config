@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
+import process from "node:process";
 
 interface ProcessOptions {
   cwd: string;
@@ -19,8 +20,7 @@ function signalProcess(
       return;
     } catch (error) {
       if (
-        !(error instanceof Error) ||
-        !("code" in error) ||
+        !(error instanceof Error && "code" in error) ||
         error.code !== "ESRCH"
       ) {
         throw error;
@@ -39,6 +39,7 @@ export function spawnProcess(
   args: readonly string[],
   options: ProcessOptions,
 ): ChildProcessWithoutNullStreams {
+  // biome-ignore lint/style/useNamingConvention: PATH is the required OS environment variable name.
   const env: NodeJS.ProcessEnv & { PATH?: string } = {
     ...process.env,
     ...options.env,
@@ -106,8 +107,8 @@ export async function stopProcess(
       deadlineTimer = setTimeout(() => {
         cleanup();
         reject(new Error("Language-server process did not exit after SIGKILL"));
-      }, 2_000);
-    }, 1_000);
+      }, 2000);
+    }, 1000);
   });
 }
 

@@ -22,17 +22,18 @@ function gitPackageIdentity(source: string): string | undefined {
   const trimmed = source.trim();
   const hasGitPrefix = trimmed.startsWith("git:");
   let candidate = hasGitPrefix ? trimmed.slice("git:".length).trim() : trimmed;
-  if (!hasGitPrefix && !GIT_URL_SCHEME.test(candidate)) {
+  if (!(hasGitPrefix || GIT_URL_SCHEME.test(candidate))) {
     return undefined;
   }
   if (GIT_PROVIDER.test(candidate)) {
     const [provider, path] = candidate.split(PROVIDER_PATH, 2);
-    const host =
-      provider?.toLowerCase() === "github"
-        ? "github.com"
-        : provider?.toLowerCase() === "gitlab"
-          ? "gitlab.com"
-          : "bitbucket.org";
+    let host = "bitbucket.org";
+    const providerName = provider?.toLowerCase();
+    if (providerName === "github") {
+      host = "github.com";
+    } else if (providerName === "gitlab") {
+      host = "gitlab.com";
+    }
     candidate = `${host}/${path ?? ""}`;
   }
 

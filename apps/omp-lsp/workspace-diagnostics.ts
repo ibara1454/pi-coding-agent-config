@@ -186,7 +186,7 @@ async function runChecker(
       );
     }
     const options = { cwd, ...(signal ? { signal } : {}) };
-    let args = checker.args;
+    let { args } = checker;
     if (checker.goWorkspace) {
       const workspace = await runCommand(command, ["work", "edit", "-json"], {
         ...options,

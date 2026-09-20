@@ -309,7 +309,7 @@ function handleDialogInput(
   panel: ExtensionManagerPanel,
   data: string,
 ): void {
-  const dialog = state.dialog;
+  const { dialog } = state;
   if (dialog === undefined) {
     return;
   }
@@ -530,16 +530,15 @@ function renderMain(
     banners.push("Saved settings are pending /reload");
   }
   if (view.diagnostics.length > 0) {
-    const diagnostic = view.diagnostics[0];
-    const marker = [
-      diagnostic?.scope === undefined
-        ? undefined
-        : diagnostic.scope === "global"
-          ? "Global"
-          : "Project",
-      diagnostic?.source,
-      diagnostic?.path,
-    ]
+    const [diagnostic] = view.diagnostics;
+    let scopeLabel: string | undefined;
+    if (diagnostic?.scope !== undefined) {
+      scopeLabel = "Project";
+      if (diagnostic.scope === "global") {
+        scopeLabel = "Global";
+      }
+    }
+    const marker = [scopeLabel, diagnostic?.source, diagnostic?.path]
       .filter((part): part is string => part !== undefined)
       .join(" · ");
     banners.push(

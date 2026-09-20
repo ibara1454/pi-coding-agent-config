@@ -102,11 +102,13 @@ function expandResourceEntries(
 function fileSystemKind(path: string): "file" | "directory" | undefined {
   try {
     const stats = statSync(path);
-    return stats.isFile()
-      ? "file"
-      : stats.isDirectory()
-        ? "directory"
-        : undefined;
+    if (stats.isFile()) {
+      return "file";
+    }
+    if (stats.isDirectory()) {
+      return "directory";
+    }
+    return undefined;
   } catch {
     return undefined;
   }

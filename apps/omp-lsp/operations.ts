@@ -46,8 +46,7 @@ export function object(value: unknown, label: string): Record<string, unknown> {
 function protocolPosition(value: unknown): Position {
   const { line, character } = object(value, "position");
   if (
-    !Number.isSafeInteger(line) ||
-    !Number.isSafeInteger(character) ||
+    !(Number.isSafeInteger(line) && Number.isSafeInteger(character)) ||
     Number(line) < 0 ||
     Number(character) < 0
   ) {
@@ -106,11 +105,11 @@ export function resolvePosition(
         break;
       }
       from = index + Math.max(1, needle.length);
-      if (
-        !bare ||
-        (!IDENTIFIER_CHARACTER.test(haystack[index - 1] ?? "") &&
-          !IDENTIFIER_CHARACTER.test(haystack[index + needle.length] ?? ""))
-      ) {
+      const isStandalone = !(
+        IDENTIFIER_CHARACTER.test(haystack[index - 1] ?? "") ||
+        IDENTIFIER_CHARACTER.test(haystack[index + needle.length] ?? "")
+      );
+      if (!bare || isStandalone) {
         indexes.push(index);
       }
     }
@@ -257,7 +256,7 @@ export function symbols(
   }
   const result: DisplaySymbol[] = [];
   const visit = (raw: unknown, depth: number): void => {
-    if (depth > 100 || result.length > 10000) {
+    if (depth > 100 || result.length > 10_000) {
       throw new Error("Symbol response exceeds nesting or size limits");
     }
     const {
@@ -286,7 +285,7 @@ export function symbols(
           ? undefined
           : protocolRange(locationRange).start;
     } else {
-      start = protocolRange(selectionRange ?? range).start;
+      ({ start } = protocolRange(selectionRange ?? range));
     }
     if (!file) {
       throw new Error("Symbol is missing its document URI");
@@ -385,7 +384,7 @@ export async function diagnosticTargets(
     const handle = await fs.opendir(directory);
     for await (const item of handle) {
       signal?.throwIfAborted();
-      if (++visited > 10000) {
+      if (++visited > 10_000) {
         throw new Error(
           "Diagnostics glob search exceeds 10000 entries; narrow the pattern",
         );
@@ -418,9 +417,15 @@ export async function diagnosticTargets(
     }
   }
   return {
-    files: files.sort((left, right) =>
-      left < right ? -1 : left > right ? 1 : 0,
-    ),
+    files: files.sort((left, right) => {
+      if (left < right) {
+        return -1;
+      }
+      if (left > right) {
+        return 1;
+      }
+      return 0;
+    }),
     truncated,
   };
 }
@@ -516,17 +521,18 @@ export async function formattingOptions(
   const configuredWidth = Number(
     indentSize === "tab" ? tabWidth : (indentSize ?? tabWidth),
   );
+  let insertSpacesValue = insertSpaces ?? true;
+  if (indentStyle === "tab") {
+    insertSpacesValue = false;
+  } else if (indentStyle === "space") {
+    insertSpacesValue = true;
+  }
   return {
     tabSize:
       Number.isSafeInteger(configuredWidth) && configuredWidth > 0
         ? configuredWidth
         : width || 2,
-    insertSpaces:
-      indentStyle === "tab"
-        ? false
-        : indentStyle === "space"
-          ? true
-          : (insertSpaces ?? true),
+    insertSpaces: insertSpacesValue,
     trimTrailingWhitespace: true,
     insertFinalNewline: true,
     trimFinalNewlines: true,

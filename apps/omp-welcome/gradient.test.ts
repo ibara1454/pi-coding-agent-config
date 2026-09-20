@@ -78,7 +78,7 @@ describe("welcome intro lifecycle", () => {
     animation.start();
     expect(animation.isActive()).toBe(true);
     expect(renders).toBe(1);
-    now = 3_000;
+    now = 3000;
     timer?.();
     expect(animation.isActive()).toBe(false);
     expect(cleared).toBe(1);

@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the extension's live warning import.
 import * as console from "node:console";
+import process from "node:process";
 import type {
   Api,
   AssistantMessageEventStream,
@@ -54,7 +55,7 @@ interface ProviderCalls {
   getModels: number;
   stream: StreamCall[];
   streamSimple: StreamSimpleCall[];
-  refreshModels: Array<Parameters<RefreshModels>[0]>;
+  refreshModels: Parameters<RefreshModels>[0][];
   filterModels: Array<{
     models: Parameters<FilterModels>[0];
     credential: Parameters<FilterModels>[1];
@@ -70,8 +71,8 @@ interface ProviderResults {
 }
 
 interface TestModelRegistry {
-  getAll(): readonly TestModel[];
-  getProvider(id: string): Provider | undefined;
+  getAll: () => readonly TestModel[];
+  getProvider: (id: string) => Provider | undefined;
 }
 
 type SessionHandler = (
@@ -79,13 +80,13 @@ type SessionHandler = (
   context: {
     modelRegistry: TestModelRegistry;
     ui: {
-      notify(message: string, level: "warning"): void;
+      notify: (message: string, level: "warning") => void;
     };
   },
 ) => void | Promise<void>;
 
 interface HarnessBehavior {
-  registerProvider?(provider: Provider): void;
+  registerProvider?: (provider: Provider) => void;
 }
 
 interface HarnessNotification {
@@ -366,6 +367,7 @@ describe("providerBaseUrlOverrides", () => {
   test("should disable silently when PROVIDER_BASE_URL is missing or blank", () => {
     for (const value of [undefined, "", "   \t\n"]) {
       const harness = runExtension(
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
         value === undefined ? {} : { PROVIDER_BASE_URL: value },
       );
 
@@ -386,6 +388,7 @@ describe("providerBaseUrlOverrides", () => {
     ];
 
     for (const value of invalidValues) {
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       const harness = runExtension({ PROVIDER_BASE_URL: value });
 
       expect(harness.handlers).toEqual([]);
@@ -415,6 +418,7 @@ describe("providerBaseUrlOverrides", () => {
     );
     const alpha = makeProvider("alpha", [alphaModel, alphaSecondModel]);
     const beta = makeProvider("beta", [betaModel]);
+    // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
     const harness = runExtension({ PROVIDER_BASE_URL: baseUrl });
     const { registry, lookups } = makeRegistry(
       [alphaModel, alphaSecondModel, betaModel, alphaModel],
@@ -465,6 +469,7 @@ describe("providerBaseUrlOverrides", () => {
     const validModel = makeModel("valid", "valid", "https://origin.test/valid");
     const validProvider = makeProvider("valid", [validModel]);
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test",
     });
     const { registry, lookups } = makeRegistry([missingModel, validModel], {
@@ -516,6 +521,7 @@ describe("providerBaseUrlOverrides", () => {
       },
     });
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test",
     });
     const { registry } = makeRegistry([model], {
@@ -542,6 +548,7 @@ describe("providerBaseUrlOverrides", () => {
     const beta = makeProvider("beta", [betaModel]);
     let registrationAttempts = 0;
     const harness = runExtension(
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       { PROVIDER_BASE_URL: "https://proxy.test" },
       {
         registerProvider(provider) {
@@ -609,6 +616,7 @@ describe("providerBaseUrlOverrides", () => {
       originalModel,
     ]);
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test",
     });
     const { registry } = makeRegistry([originalModel], {
@@ -642,6 +650,7 @@ describe("providerBaseUrlOverrides", () => {
       },
     };
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test",
     });
     const { registry } = makeRegistry([model], {
@@ -727,6 +736,7 @@ describe("providerBaseUrlOverrides", () => {
       ),
     ];
     const { provider, calls } = makeProvider("routing", models);
+    // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
     const harness = runExtension({ PROVIDER_BASE_URL: providerBaseUrl });
     const { registry } = makeRegistry(models, { routing: provider });
 
@@ -781,6 +791,7 @@ describe("providerBaseUrlOverrides", () => {
     );
     const models = [anthropicModel, openAiModel, googleModel, vertexModel];
     const { provider } = makeProvider("routing", models);
+    // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
     const harness = runExtension({ PROVIDER_BASE_URL: providerBaseUrl });
     const { registry } = makeRegistry(models, { routing: provider });
 
@@ -801,6 +812,7 @@ describe("providerBaseUrlOverrides", () => {
     const model = makeModel("metadata", "model", "https://origin.test/model");
     const { provider } = makeProvider("metadata", [model]);
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test/v1",
     });
     const { registry } = makeRegistry([model], { metadata: provider });
@@ -832,6 +844,7 @@ describe("providerBaseUrlOverrides", () => {
       true,
     );
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test/override",
     });
     const { registry } = makeRegistry([originalModel], { transport: provider });
@@ -906,6 +919,7 @@ describe("providerBaseUrlOverrides", () => {
       true,
     );
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test/catalog",
     });
     const { registry } = makeRegistry([model], { catalog: provider });
@@ -962,6 +976,7 @@ describe("providerBaseUrlOverrides", () => {
       true,
     );
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test/deferred",
     });
     const { registry } = makeRegistry([originalModel], { deferred: provider });
@@ -1022,6 +1037,7 @@ describe("providerBaseUrlOverrides", () => {
     );
     const { provider, calls } = makeProvider("azure", [originalModel], true);
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test/azure/",
     });
     const { registry } = makeRegistry([originalModel], { azure: provider });
@@ -1035,8 +1051,11 @@ describe("providerBaseUrlOverrides", () => {
       id: "azure-handle",
     };
     const callerEnv = {
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       AZURE_OPENAI_BASE_URL: "https://configured.azure",
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       AZURE_OPENAI_API_VERSION: "2024-10-21",
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       KEEP_ENV: "keep",
     };
     const callerOptions = {
@@ -1050,7 +1069,11 @@ describe("providerBaseUrlOverrides", () => {
     const expectedOptions = {
       ...callerOptions,
       azureBaseUrl: expectedBaseUrl,
-      env: { ...callerEnv, AZURE_OPENAI_BASE_URL: expectedBaseUrl },
+      env: {
+        ...callerEnv,
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+        AZURE_OPENAI_BASE_URL: expectedBaseUrl,
+      },
     };
     const streamInput = {
       ...originalModel,
@@ -1093,8 +1116,11 @@ describe("providerBaseUrlOverrides", () => {
       unrelated: { preserve: true },
     });
     expect(callerEnv).toEqual({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       AZURE_OPENAI_BASE_URL: "https://configured.azure",
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       AZURE_OPENAI_API_VERSION: "2024-10-21",
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       KEEP_ENV: "keep",
     });
   });
@@ -1134,6 +1160,7 @@ describe("providerBaseUrlOverrides", () => {
       },
     };
     const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
       PROVIDER_BASE_URL: "https://proxy.test",
     });
     const { registry } = makeRegistry([model], {
@@ -1149,7 +1176,9 @@ describe("providerBaseUrlOverrides", () => {
       apiKey: "key",
       azureBaseUrl: "https://proxy.test/v1",
       env: {
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
         KEEP_ENV: "keep",
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
         AZURE_OPENAI_BASE_URL: "https://proxy.test/v1",
       },
     });

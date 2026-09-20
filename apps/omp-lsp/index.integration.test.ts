@@ -15,7 +15,7 @@ import lsp from "./index.ts";
 import type { LspConfig, LspParams } from "./types.ts";
 
 const filesystem: {
-  stat(file: string): Promise<{ isFile(): boolean }>;
+  stat: (file: string) => Promise<{ isFile: () => boolean }>;
 } = fs;
 const shutdowns: Array<() => unknown> = [];
 type HostHandler = (event: unknown, context: ExtensionContext) => unknown;
@@ -60,12 +60,13 @@ function fixture() {
   lsp(pi as ExtensionAPI);
   const context = {
     cwd: "/project",
+    // biome-ignore lint/style/useNamingConvention: Host ExtensionContext uses the public hasUI field.
     hasUI: false,
     isProjectTrusted: () => true,
   } as ExtensionContext;
   const tool = tools.get("lsp");
   const shutdown = handlers.get("session_shutdown");
-  if (!tool || !shutdown) {
+  if (!(tool && shutdown)) {
     throw new Error("LSP extension registration failed");
   }
   shutdowns.push(() =>

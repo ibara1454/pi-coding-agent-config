@@ -345,6 +345,7 @@ export async function lintWithCli(
   } catch (error) {
     throw new Error(
       `${server.name}: invalid or missing JSON diagnostics (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 1500) || result.stdout.trim().slice(0, 1500) || String(error)}`,
+      { cause: error },
     );
   }
   const diagnostics =

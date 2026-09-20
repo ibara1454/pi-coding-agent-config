@@ -18,6 +18,7 @@ import {
 let agentDir = "";
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
+  // biome-ignore lint/style/useNamingConvention: preserve exported host configuration key
   CONFIG_DIR_NAME: ".pi",
   createBashTool: () => ({
     name: "bash",
@@ -40,15 +41,16 @@ let resetBehavior: () => Promise<void>;
 
 interface TestContext {
   cwd: string;
+  // biome-ignore lint/style/useNamingConvention: preserve host context property name
   hasUI: boolean;
-  isProjectTrusted(): boolean;
+  isProjectTrusted: () => boolean;
   mode: "tui";
   ui: {
-    notify(message: string, level: string): void;
-    setStatus(key: string, value: string | undefined): void;
-    setWidget(key: string, value: unknown): void;
+    notify: (message: string, level: string) => void;
+    setStatus: (key: string, value: string | undefined) => void;
+    setWidget: (key: string, value: unknown) => void;
     theme: {
-      fg(color: string, text: string): string;
+      fg: (color: string, text: string) => string;
     };
   };
 }
@@ -69,6 +71,7 @@ function createContext(cwd: string): ContextFixture {
     statuses,
     context: {
       cwd,
+      // biome-ignore lint/style/useNamingConvention: preserve host context property name
       hasUI: true,
       isProjectTrusted: () => true,
       mode: "tui",
@@ -143,7 +146,7 @@ async function createConfigFiles(
 }
 
 function requireInitializeCall(): SandboxRuntimeConfig {
-  const config = initializeCalls[0];
+  const [config] = initializeCalls;
   if (!config) {
     throw new Error("Expected SandboxManager.initialize call");
   }

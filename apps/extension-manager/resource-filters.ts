@@ -160,7 +160,7 @@ export function explainFilterState(
 ): FilterExplanation {
   if (mode === "autoload-disabled") {
     const match = lastMatchingPattern(patterns, (pattern) => {
-      const prefix = pattern[0];
+      const [prefix] = pattern;
       const target =
         prefix === "+" || prefix === "-" || prefix === "!"
           ? pattern.slice(1)
@@ -175,31 +175,33 @@ export function explainFilterState(
         reason: "Disabled: autoload is false and no filter matches",
       };
     }
-    const enabled = !match.startsWith("-") && !match.startsWith("!");
+    const enabled = !(match.startsWith("-") || match.startsWith("!"));
     return {
       enabled,
       reason: `${enabled ? "Enabled" : "Disabled"} by last matching autoload:false filter \`${match}\``,
     };
   }
 
-  const applicable =
-    mode === "overrides"
-      ? patterns.filter(
-          (pattern) =>
-            pattern.startsWith("!") ||
-            pattern.startsWith("+") ||
-            pattern.startsWith("-"),
-        )
-      : mode === "top-level"
-        ? patterns.filter(
-            (pattern) =>
-              pattern.startsWith("!") ||
-              pattern.startsWith("+") ||
-              pattern.startsWith("-") ||
-              pattern.includes("*") ||
-              pattern.includes("?"),
-          )
-        : patterns;
+  let applicable: readonly string[];
+  if (mode === "overrides") {
+    applicable = patterns.filter(
+      (pattern) =>
+        pattern.startsWith("!") ||
+        pattern.startsWith("+") ||
+        pattern.startsWith("-"),
+    );
+  } else if (mode === "top-level") {
+    applicable = patterns.filter(
+      (pattern) =>
+        pattern.startsWith("!") ||
+        pattern.startsWith("+") ||
+        pattern.startsWith("-") ||
+        pattern.includes("*") ||
+        pattern.includes("?"),
+    );
+  } else {
+    applicable = patterns;
+  }
   const forceExclude = lastMatchingPattern(
     applicable,
     (pattern) =>
@@ -238,9 +240,11 @@ export function explainFilterState(
   }
   const includes = applicable.filter(
     (pattern) =>
-      !pattern.startsWith("!") &&
-      !pattern.startsWith("+") &&
-      !pattern.startsWith("-"),
+      !(
+        pattern.startsWith("!") ||
+        pattern.startsWith("+") ||
+        pattern.startsWith("-")
+      ),
   );
   if (includes.length === 0) {
     return {
@@ -283,7 +287,7 @@ export function isEnabledByAutoloadDisabledPatterns(
 ): boolean {
   let enabled = false;
   for (const pattern of patterns) {
-    const prefix = pattern[0];
+    const [prefix] = pattern;
     const target =
       prefix === "+" || prefix === "-" || prefix === "!"
         ? pattern.slice(1)
@@ -305,7 +309,7 @@ export function matchesAutoloadDisabledPattern(
   baseDir: string,
 ): boolean {
   return patterns.some((pattern) => {
-    const prefix = pattern[0];
+    const [prefix] = pattern;
     const target =
       prefix === "+" || prefix === "-" || prefix === "!"
         ? pattern.slice(1)
@@ -326,7 +330,7 @@ export interface PatternMutation {
 
 export function mutateExactPattern(input: PatternMutation): string[] {
   const withoutExactToggle = input.patterns.filter((pattern) => {
-    if (!pattern.startsWith("+") && !pattern.startsWith("-")) {
+    if (!(pattern.startsWith("+") || pattern.startsWith("-"))) {
       return true;
     }
     return !matchesExactPattern(
@@ -371,7 +375,7 @@ export function mutatePackagePatterns(
   let removedPlainExact = false;
   let removedSignedExact = false;
   const remaining = input.patterns.filter((pattern) => {
-    const prefix = pattern[0];
+    const [prefix] = pattern;
     if (prefix === "+" || prefix === "-") {
       const matches = matchesExactPattern(
         input.filePath,
@@ -406,18 +410,22 @@ export function mutatePackagePatterns(
     keepField = true;
   }
 
-  const enabled = input.autoloadDisabled
-    ? isEnabledByAutoloadDisabledPatterns(
+  let enabled: boolean;
+  if (input.autoloadDisabled) {
+    enabled = isEnabledByAutoloadDisabledPatterns(
+      input.filePath,
+      remaining,
+      input.baseDir,
+    );
+  } else if (keepField) {
+    enabled =
+      remaining.length > 0 &&
+      applyPatterns(input.allPaths, remaining, input.baseDir).has(
         input.filePath,
-        remaining,
-        input.baseDir,
-      )
-    : keepField
-      ? remaining.length > 0 &&
-        applyPatterns(input.allPaths, remaining, input.baseDir).has(
-          input.filePath,
-        )
-      : true;
+      );
+  } else {
+    enabled = true;
+  }
   if (enabled === input.desired) {
     return { keepField, patterns: remaining };
   }

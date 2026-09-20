@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 // biome-ignore lint/correctness/noUnresolvedImports: Biome 2.5.14 misses proper-lockfile's CommonJS default export, which Node and Bun provide.
 import lockfile from "proper-lockfile";
@@ -72,7 +73,8 @@ async function atomicReplace(path: string, content: string): Promise<void> {
 
   let mode: number | undefined;
   try {
-    mode = (await stat(path)).mode;
+    const { mode: fileMode } = await stat(path);
+    mode = fileMode;
   } catch (error: unknown) {
     if (!isMissingFile(error)) {
       throw error;

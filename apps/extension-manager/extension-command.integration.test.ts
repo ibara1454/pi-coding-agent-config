@@ -101,7 +101,7 @@ function piHarness(runtime: ExtensionManagerRuntime): PiHarness {
     commands,
     events,
     async run(ctx) {
-      const command = commands[0];
+      const [command] = commands;
       if (command === undefined) {
         throw new Error("Command was not registered");
       }

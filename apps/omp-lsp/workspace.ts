@@ -127,7 +127,7 @@ function methodNotFound(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    error.code === -32601
+    error.code === -32_601
   );
 }
 
@@ -219,8 +219,7 @@ async function applyServerEdit(
   server: LanguageServer,
 ): Promise<{ applied: boolean; failureReason?: string }> {
   if (
-    !state.options.trusted ||
-    !state.config.settings.enabled ||
+    !(state.options.trusted && state.config.settings.enabled) ||
     state.lifetime.signal.aborted
   ) {
     return {
@@ -328,8 +327,8 @@ function workspaceResult(
   serverName?: string,
 ): LspResult {
   const bounded =
-    text.length > 60000
-      ? `${text.slice(0, 60000)}\n…output truncated at 60000 characters…`
+    text.length > 60_000
+      ? `${text.slice(0, 60_000)}\n…output truncated at 60000 characters…`
       : text;
   return {
     text: bounded,
@@ -376,7 +375,7 @@ async function languageServerFor(
   file: string | undefined,
   signal: AbortSignal,
 ): Promise<LanguageServer> {
-  const config = selectedServers(state.config, file)[0];
+  const [config] = selectedServers(state.config, file);
   if (!config) {
     throw new Error(
       file
@@ -465,15 +464,18 @@ function workspaceStatus(
     const client = clients.find(
       (candidate) => candidate.config.name === server.name,
     );
-    const state = server.disabled
-      ? "disabled"
-      : !server.resolvedCommand
-        ? "unavailable (executable not installed)"
-        : isCliLinter(server)
-          ? "CLI linter (runs on demand)"
-          : client?.isAlive
-            ? "running"
-            : "configured, not started";
+    let state: string;
+    if (server.disabled) {
+      state = "disabled";
+    } else if (!server.resolvedCommand) {
+      state = "unavailable (executable not installed)";
+    } else if (isCliLinter(server)) {
+      state = "CLI linter (runs on demand)";
+    } else if (client?.isAlive) {
+      state = "running";
+    } else {
+      state = "configured, not started";
+    }
     lines.push(
       `${server.name}: ${state}; root=${server.root}; command=${server.resolvedCommand ?? server.command}`,
     );
@@ -481,7 +483,7 @@ function workspaceStatus(
   if (config.servers.length === 0) {
     lines.push("No language servers configured");
   }
-  if (config.warnings.length) {
+  if (config.warnings.length > 0) {
     lines.push("Configuration warnings:", ...config.warnings);
   }
   return workspaceResult(params, lines.join("\n"));
@@ -619,19 +621,19 @@ async function dispatchAction(
     case "references": {
       const methods = {
         definition: "textDocument/definition",
-        type_definition: "textDocument/typeDefinition",
+        typeDefinition: "textDocument/typeDefinition",
         implementation: "textDocument/implementation",
         references: "textDocument/references",
       };
+      const method =
+        action === "type_definition" ? methods.typeDefinition : methods[action];
       const request = {
         ...target,
         ...(action === "references"
           ? { context: { includeDeclaration: true } }
           : {}),
       };
-      let found = locations(
-        await server.request(methods[action], request, signal),
-      );
+      let found = locations(await server.request(method, request, signal));
       if (action === "references" && !server.config.isLinter) {
         for (
           let attempt = 0;
@@ -643,9 +645,7 @@ async function dispatchAction(
           attempt++
         ) {
           await delay(250, undefined, { signal });
-          found = locations(
-            await server.request(methods[action], request, signal),
-          );
+          found = locations(await server.request(method, request, signal));
         }
       }
       const label = action === "type_definition" ? "type definition" : action;
@@ -710,7 +710,7 @@ async function dispatchAction(
       );
       return workspaceResult(
         params,
-        found.length
+        found.length > 0
           ? `Symbols in ${params.file}:\n${symbolLines(state.options.cwd, found).join("\n")}`
           : "No symbols found",
         true,
@@ -784,7 +784,9 @@ async function rawRequest(
     try {
       payload = JSON.parse(params.payload);
     } catch (error) {
-      throw new Error(`Invalid JSON in payload: ${errorText(error)}`);
+      throw new Error(`Invalid JSON in payload: ${errorText(error)}`, {
+        cause: error,
+      });
     }
   }
   const server = await languageServerFor(state, file, signal);
@@ -839,7 +841,7 @@ async function collectDiagnostics(
   state: WorkspaceState,
   file: string,
   signal: AbortSignal,
-  timeoutMs = 10000,
+  timeoutMs = 10_000,
 ): Promise<DiagnosticReport> {
   const configs = serversForFile(state.config, file);
   if (configs.length === 0) {
@@ -899,9 +901,15 @@ async function collectDiagnostics(
     file,
     diagnostics: normalizeDiagnostics(findings),
     failures,
-    unverifiedSources: unverifiedSources.sort((left, right) =>
-      left < right ? -1 : left > right ? 1 : 0,
-    ),
+    unverifiedSources: unverifiedSources.sort((left, right) => {
+      if (left < right) {
+        return -1;
+      }
+      if (left > right) {
+        return 1;
+      }
+      return 0;
+    }),
     responders,
   };
 }
@@ -949,7 +957,7 @@ async function diagnosticsResult(
       state,
       file,
       signal,
-      targets.files.length > 1 ? 400 : 10000,
+      targets.files.length > 1 ? 400 : 10_000,
     ),
   );
   const lines: string[] = [];
@@ -968,7 +976,7 @@ async function diagnosticsResult(
         `${path.relative(state.options.cwd, report.file)}: all language servers failed; diagnostics unavailable`,
       );
     }
-    if (report.failures.length) {
+    if (report.failures.length > 0) {
       lines.push(`Server failures:\n${report.failures.join("\n")}`);
     }
   }
@@ -1073,13 +1081,14 @@ async function workspaceSymbols(
   const failures = responses
     .map((response) => response.failure)
     .filter(Boolean);
-  const lines = found.length
-    ? [
-        `${found.length} workspace symbol(s) matching "${query}":`,
-        ...symbolLines(state.options.cwd, found),
-      ]
-    : [`No symbols matching "${query}"`];
-  if (failures.length) {
+  const lines =
+    found.length > 0
+      ? [
+          `${found.length} workspace symbol(s) matching "${query}":`,
+          ...symbolLines(state.options.cwd, found),
+        ]
+      : [`No symbols matching "${query}"`];
+  if (failures.length > 0) {
     lines.push("Server failures:", ...failures);
   }
   return workspaceResult(
@@ -1115,7 +1124,7 @@ async function codeActions(
   let diagnosticWarning = "";
   let diagnosticContextFailed = false;
   try {
-    const report = await server.diagnostics(file, signal, 10000);
+    const report = await server.diagnostics(file, signal, 10_000);
     diagnostics = normalizeDiagnostics(report.items);
     if (report.freshness === "unversioned") {
       diagnosticWarning = `Diagnostic context freshness-unverified from ${server.config.name}: unversioned diagnostics may be stale.`;
@@ -1182,7 +1191,7 @@ async function codeActions(
     : actions.filter((candidate) =>
         candidate.title.toLowerCase().includes(query.toLowerCase()),
       );
-  let action = selected[0];
+  let [action] = selected;
   if (!action || selected.length !== 1) {
     return workspaceResult(
       params,
@@ -1265,15 +1274,16 @@ async function runCodeAction(
     } catch (error) {
       return workspaceResult(
         params,
-        `Code action command failed: ${errorText(error)}${summary.length ? `\nAlready applied:\n${summary.join("\n")}` : ""}`,
+        `Code action command failed: ${errorText(error)}${summary.length > 0 ? `\nAlready applied:\n${summary.join("\n")}` : ""}`,
         false,
         server.config.name,
       );
     }
   }
-  const text = summary.length
-    ? `Applied code action "${action.title}":\n${summary.join("\n")}`
-    : `Code action "${action.title}" has no edits or commands`;
+  const text =
+    summary.length > 0
+      ? `Applied code action "${action.title}":\n${summary.join("\n")}`
+      : `Code action "${action.title}" has no edits or commands`;
   return workspaceResult(
     params,
     `${text}${diagnosticWarning ? `\n${diagnosticWarning}` : ""}`,
@@ -1311,7 +1321,7 @@ async function applyEdit(
   });
   if (!options.preview && result.changes.length > 0) {
     const failures = await reconcileChanges(state, result.changes);
-    if (failures.length) {
+    if (failures.length > 0) {
       result.summary.push(
         "Filesystem changes committed, but server synchronization failed:",
         ...failures,
@@ -1342,7 +1352,7 @@ function editResult(
 ): LspResult {
   return workspaceResult(
     params,
-    `${label}:\n${result.summary.length ? result.summary.join("\n") : "No file changes"}${result.failureReason ? `\nError: ${result.failureReason}` : ""}`,
+    `${label}:\n${result.summary.length > 0 ? result.summary.join("\n") : "No file changes"}${result.failureReason ? `\nError: ${result.failureReason}` : ""}`,
     result.applied,
     serverName,
   );
@@ -1449,12 +1459,12 @@ async function reconcileChanges(
               : 2,
         })),
       );
-      if (watched.length) {
+      if (watched.length > 0) {
         await server.notify("workspace/didChangeWatchedFiles", {
           changes: watched,
         });
       }
-      if (renamed.length) {
+      if (renamed.length > 0) {
         await server.notify("workspace/didRenameFiles", { files: renamed });
       }
     } catch (error) {
@@ -1478,7 +1488,7 @@ async function renameFile(
   params: LspParams,
   signal: AbortSignal,
 ): Promise<LspResult> {
-  if (!params.file || !params.new_name?.trim()) {
+  if (!(params.file && params.new_name?.trim())) {
     throw new Error(
       "rename_file requires file (source) and new_name (destination)",
     );
@@ -1594,9 +1604,15 @@ async function renameFile(
               annotationId: `${config.name}:${String(value.annotationId)}`,
             }
           : value;
+      /**
+       * Collects a document's edits, giving earlier servers conflict precedence.
+       * @param uri - Document URI receiving the edits.
+       * @param incoming - Edits from the current server.
+       * @example A duplicate from a later server is discarded and reported.
+       */
       const add = (uri: string, incoming: readonly TextEdit[]): void => {
         const previous = buckets.get(uri) ?? [];
-        let discarded: number = 0;
+        let discarded = 0;
         for (const raw of incoming) {
           const edit = annotate(raw);
           const compare = (a: Position, b: Position): number =>
@@ -1616,7 +1632,7 @@ async function renameFile(
             previous.push({ edit, server: config.name });
           }
         }
-        if (discarded) {
+        if (discarded > 0) {
           notes.push(
             `${config.name}: discarded ${discarded} overlapping/duplicate reference edit(s) for ${uriToFile(uri)}; earlier semantic server takes precedence`,
           );
@@ -1647,10 +1663,10 @@ async function renameFile(
     }
   }
   signal.throwIfAborted();
-  if (failures.length) {
+  if (failures.length > 0) {
     return workspaceResult(
       params,
-      `Aborted rename: workspace/willRenameFiles failed. No files moved.\n${failures.join("\n")}${notes.length ? `\nServer notes:\n${notes.join("\n")}` : ""}`,
+      `Aborted rename: workspace/willRenameFiles failed. No files moved.\n${failures.join("\n")}${notes.length > 0 ? `\nServer notes:\n${notes.join("\n")}` : ""}`,
       false,
     );
   }
@@ -1679,7 +1695,7 @@ async function renameFile(
       rollbackTextOnRenameFailure: true,
     },
   );
-  if (notes.length) {
+  if (notes.length > 0) {
     result.summary.push("Server notes:", ...notes);
   }
   return editResult(
@@ -1738,7 +1754,7 @@ async function reloadWorkspace(
     )
     .map((server) => server.name);
   if (concrete) {
-    const selected = selectedServers(state.config, concrete)[0];
+    const [selected] = selectedServers(state.config, concrete);
     if (selected) {
       changed.push(selected.name);
     }
@@ -1750,7 +1766,7 @@ async function reloadWorkspace(
       "LSP configuration reloaded; LSP is disabled.",
     );
   }
-  if (changed.length) {
+  if (changed.length > 0) {
     await state.pool.stop([...new Set(changed)]);
   }
   const configs = concrete
@@ -1759,7 +1775,7 @@ async function reloadWorkspace(
   if (configs.length === 0) {
     return workspaceResult(
       params,
-      `LSP configuration reloaded; no language servers available.${state.config.warnings.length ? `\n${state.config.warnings.join("\n")}` : ""}`,
+      `LSP configuration reloaded; no language servers available.${state.config.warnings.length > 0 ? `\n${state.config.warnings.join("\n")}` : ""}`,
       false,
     );
   }
@@ -1844,7 +1860,7 @@ async function mutationFeedback(
         controller.abort(
           new Error("LSP mutation feedback timed out after 15s"),
         ),
-      15000,
+      15_000,
     );
     const signal = AbortSignal.any([
       state.lifetime.signal,
@@ -1871,7 +1887,7 @@ async function mutationFeedback(
         const failures = await reconcileChanges(state, [
           { kind: "delete", file, files: [file] },
         ]);
-        return failures.length ? failures.join("\n") : "";
+        return failures.length > 0 ? failures.join("\n") : "";
       }
       state.knownFiles.add(file);
       const relevant = serversForFile(state.config, file).length > 0;
@@ -1951,7 +1967,7 @@ async function mutationFeedback(
             unverified,
           });
         }
-        if (report.failures.length) {
+        if (report.failures.length > 0) {
           notes.push(
             `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
           );
@@ -1985,8 +2001,8 @@ async function mutationFeedback(
   return text
     ? {
         text:
-          text.length > 20000
-            ? `${text.slice(0, 20000)}\n…LSP feedback truncated…`
+          text.length > 20_000
+            ? `${text.slice(0, 20_000)}\n…LSP feedback truncated…`
             : text,
         details: { action: "afterMutation", source },
       }
@@ -2019,7 +2035,7 @@ async function formatDocument(
       return [];
     }
     const lines = content.split(ANY_LINE_BREAK);
-    const last = lines[lines.length - 1] ?? "";
+    const last = lines.at(-1) ?? "";
     const edit: WorkspaceEdit = {
       changes: {
         [fileToUri(file)]: [
@@ -2077,7 +2093,7 @@ async function formatDocument(
     if (!result.applied) {
       throw new Error(result.failureReason ?? "Formatting edit failed");
     }
-    return result.changes.length
+    return result.changes.length > 0
       ? [
           `Formatted ${path.relative(state.options.cwd, file)} with ${config.name}`,
         ]
@@ -2207,8 +2223,7 @@ export class LspWorkspace {
   ): Promise<LspResult | undefined> {
     const state = this.#state;
     if (
-      !state.options.trusted ||
-      !state.config.settings.enabled ||
+      !(state.options.trusted && state.config.settings.enabled) ||
       state.lifetime.signal.aborted
     ) {
       return Promise.resolve(undefined);
@@ -2231,7 +2246,7 @@ export class LspWorkspace {
           text: `LSP feedback timed out; the host ${source} already succeeded. Cancellation was requested for pending LSP work.`,
           details: { action: "afterMutation", source },
         });
-      }, 16000);
+      }, 16_000);
       job.then(
         () => clearTimeout(timer),
         () => clearTimeout(timer),

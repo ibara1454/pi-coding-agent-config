@@ -30,8 +30,8 @@ function formatNumber(value: number): string {
   if (abs >= 1_000_000) {
     return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}M`;
   }
-  if (abs >= 1_000) {
-    return `${(value / 1_000).toFixed(abs >= 10_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}K`;
+  if (abs >= 1000) {
+    return `${(value / 1000).toFixed(abs >= 10_000 ? 0 : 1).replace(TRAILING_DECIMAL_ZERO_RE, "")}K`;
   }
   return Math.round(value).toString();
 }
@@ -121,9 +121,16 @@ function thinkingDisplay(ctx: SegmentContext): string {
   const level = ctx.extensionContext.thinkingLevel ?? "off";
   const ascii = ctx.settings.preset === "ascii";
   if (ascii) {
-    return level === "off"
-      ? "[off]"
-      : `[${level === "medium" ? "med" : level === "xhigh" ? "xhi" : level}]`;
+    if (level === "off") {
+      return "[off]";
+    }
+    let label: string = level;
+    if (level === "medium") {
+      label = "med";
+    } else if (level === "xhigh") {
+      label = "xhi";
+    }
+    return `[${label}]`;
   }
   const glyphs: Record<string, string> = {
     off: "⊘ off",
@@ -152,13 +159,15 @@ function renderModel(ctx: SegmentContext): RenderedSegment {
   if (GPT_MODEL_ID_RE.test(modelId)) {
     name = modelId
       .split("-")
-      .map((part, index) =>
-        index === 0
-          ? part.toUpperCase()
-          : MODEL_VERSION_RE.test(part)
-            ? part
-            : `${part[0]?.toUpperCase()}${part.slice(1)}`,
-      )
+      .map((part, index) => {
+        if (index === 0) {
+          return part.toUpperCase();
+        }
+        if (MODEL_VERSION_RE.test(part)) {
+          return part;
+        }
+        return `${part[0]?.toUpperCase()}${part.slice(1)}`;
+      })
       .join("-");
   }
   const thinking = thinkingDisplay(ctx);
@@ -176,7 +185,7 @@ function renderModel(ctx: SegmentContext): RenderedSegment {
 function renderPath(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const opts = ctx.options.path ?? {};
-  let cwd = ctx.extensionContext.cwd;
+  let { cwd } = ctx.extensionContext;
   if (opts.stripWorkPrefix !== false) {
     for (const root of [join(homedir(), "Projects"), "/work"]) {
       const relativePath = relative(root, cwd);

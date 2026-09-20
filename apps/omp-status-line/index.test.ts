@@ -2,8 +2,10 @@ import { expect, mock, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
+  // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
   estimateTokens: () => 0,
 }));
@@ -24,7 +26,7 @@ async function createSettingsFixture(
   projectStatusLine?: Record<string, unknown>,
 ): Promise<{
   projectDir: string;
-  cleanup(): Promise<void>;
+  cleanup: () => Promise<void>;
 }> {
   const root = await mkdtemp(join(tmpdir(), "omp-status-line-"));
   const agentDir = join(root, "agent");
@@ -105,7 +107,10 @@ function createHarness(options: {
     thinkingLevel: "off",
     getContextUsage: () => ({ tokens: 18_768, contextWindow: 272_000 }),
     getSystemPrompt: () => "",
-    modelRegistry: { isUsingOAuth: () => false },
+    modelRegistry: {
+      // biome-ignore lint/style/useNamingConvention: host API method name
+      isUsingOAuth: () => false,
+    },
     sessionManager: {
       getBranch: () => [
         {

@@ -3,7 +3,7 @@
   "globalDependencies": [
     "test/setup.ts",
     "bunfig.toml",
-    "biome.json",
+    "biome.jsonc",
     "packages/biome-rules/src/*.grit",
     "tsconfig.base.json"
   ],

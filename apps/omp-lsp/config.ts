@@ -9,6 +9,7 @@ import {
   stat,
 } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Minimatch } from "minimatch";
 import { parseDocument } from "yaml";
@@ -164,7 +165,7 @@ function validateJsonPayload(
   if (typeof value === "number" && Number.isFinite(value)) {
     return;
   }
-  if (!Array.isArray(value) && !record(value)) {
+  if (!(Array.isArray(value) || record(value))) {
     throw new Error(
       "server configuration payload must contain JSON-compatible values",
     );
@@ -247,23 +248,16 @@ function normalizeServer(
       "extensionToLanguage language identifiers must not be empty",
     );
   }
-  const fileTypes = strings(
-    rawFileTypes === undefined
-      ? extensionToLanguage
-        ? Object.keys(extensionToLanguage)
-        : undefined
-      : rawFileTypes,
-    "fileTypes",
-  );
-  const rootMarkers = strings(
-    rawRootMarkers === undefined
-      ? extensionToLanguage
-        ? ["."]
-        : undefined
-      : rawRootMarkers,
-    "rootMarkers",
-    true,
-  );
+  let fileTypesValue = rawFileTypes;
+  if (fileTypesValue === undefined && extensionToLanguage !== undefined) {
+    fileTypesValue = Object.keys(extensionToLanguage);
+  }
+  const fileTypes = strings(fileTypesValue, "fileTypes");
+  let rootMarkersValue = rawRootMarkers;
+  if (rootMarkersValue === undefined && extensionToLanguage !== undefined) {
+    rootMarkersValue = ["."];
+  }
+  const rootMarkers = strings(rootMarkersValue, "rootMarkers", true);
   if (rootMarkers.some((marker) => !marker.trim())) {
     throw new Error("rootMarkers must not contain empty markers");
   }
@@ -582,7 +576,7 @@ export async function loadLspConfig(
         }
         for (const [name, override] of Object.entries(rawServers)) {
           try {
-            if (!name.trim() || !record(override)) {
+            if (!(name.trim() && record(override))) {
               throw new Error(
                 "server definition must be an object with a non-empty name",
               );
@@ -659,14 +653,18 @@ export async function loadLspConfig(
     (server) => server.name === "typescript-native",
   );
   if (
-    !customizedLaunchers.has("typescript-native") &&
-    !customizedLaunchers.has("typescript-language-server")
+    !(
+      customizedLaunchers.has("typescript-native") ||
+      customizedLaunchers.has("typescript-language-server")
+    )
   ) {
     try {
+      const nativeCommand = native?.resolvedCommand;
       const useNative =
-        !!native?.resolvedCommand &&
+        native !== undefined &&
+        nativeCommand !== undefined &&
         !native.disabled &&
-        (await typescriptSpeaksLsp(native.resolvedCommand));
+        (await typescriptSpeaksLsp(nativeCommand));
       result.servers = result.servers.filter(
         (server) =>
           server.name !==
@@ -704,7 +702,7 @@ export function serversForFile(
           );
         }),
     )
-    .sort((left, right) => Number(!!left.isLinter) - Number(!!right.isLinter));
+    .sort((left, right) => (left.isLinter ? 1 : 0) - (right.isLinter ? 1 : 0));
 }
 
 export function isCliLinter(server: ServerConfig): boolean {

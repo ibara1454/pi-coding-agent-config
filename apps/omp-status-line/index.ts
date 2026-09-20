@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 import { stripVTControlCharacters } from "node:util";
 import {
   CustomEditor,
@@ -43,20 +44,31 @@ const SEGMENT_IDS: Record<StatusLineSegmentId, true> = {
   git: true,
   pr: true,
   subagents: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   token_in: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   token_out: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   token_total: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   token_rate: true,
   cost: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   context_pct: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   context_total: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   time_spent: true,
   time: true,
   session: true,
   hostname: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   cache_read: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   cache_write: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   cache_hit: true,
+  // biome-ignore lint/style/useNamingConvention: public status segment identifier
   session_name: true,
   usage: true,
   collab: true,
@@ -86,7 +98,7 @@ const STATUS_KEYS: Record<string, true> = {
   subagents: true,
   usage: true,
 };
-const GIT_TTL_MS = 1_000;
+const GIT_TTL_MS = 1000;
 const EDITOR_BORDER_RE = /^─{3,}/;
 const GIT_BRANCH_COMMAND_RE =
   /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/;
@@ -294,7 +306,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   let currentCtx: ExtensionContext | null = null;
   let settings: StatusLineSettings = readSettings(process.cwd(), false);
   let footerData: ReadonlyFooterDataProvider | null = null;
-  let tui: { requestRender(): void } | null = null;
+  let tui: { requestRender: () => void } | null = null;
   let footerUnsubscribe: (() => void) | null = null;
   let ticker: NodeJS.Timeout | undefined;
   let delayedRefresh: NodeJS.Timeout | undefined;
@@ -350,7 +362,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     force = false,
   ): Promise<void> => {
     const ctx = currentCtx;
-    if (!ctx || !branch || branch === "detached" || prInFlight) {
+    if (!(ctx && branch) || branch === "detached" || prInFlight) {
       if (!branch || branch === "detached") {
         gitState.pr = null;
       }
@@ -368,7 +380,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       const result = await pi.exec(
         "gh",
         ["pr", "view", "--json", "number,url"],
-        { cwd: ctx.cwd, timeout: 2_000, signal: controller.signal },
+        { cwd: ctx.cwd, timeout: 2000, signal: controller.signal },
       );
       if (
         prController !== controller ||
@@ -424,7 +436,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       const result = await pi.exec(
         "git",
         ["status", "--porcelain=v1", "--untracked-files=normal"],
-        { cwd: ctx.cwd, timeout: 2_000, signal: controller.signal },
+        { cwd: ctx.cwd, timeout: 2000, signal: controller.signal },
       );
       if (gitController !== controller || currentCtx !== ctx) {
         return;
@@ -446,8 +458,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           if (line.length < 2) {
             continue;
           }
-          const x = line[0];
-          const y = line[1];
+          const [x, y] = line;
           if (x === "?" && y === "?") {
             untracked++;
             continue;
@@ -625,8 +636,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       preset.separator,
       settings.preset === "ascii",
     );
-    const bg = settings.transparent ? TRANSPARENT_BG : DEFAULT_STATUS_BG;
-    const transparent = settings.transparent;
+    const { transparent } = settings;
+    const bg = transparent ? TRANSPARENT_BG : DEFAULT_STATUS_BG;
     const foreground = theme.getFgAnsi("text");
 
     const left: string[] = [];
@@ -719,7 +730,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
             }
             nextMaxLength = correctedMaxLength;
             const rerendered = renderSegment("path", pathCtx(nextMaxLength));
-            if (!rerendered.visible || !rerendered.content) {
+            if (!(rerendered.visible && rerendered.content)) {
               break;
             }
             adjusted = rerendered;
@@ -752,12 +763,14 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       }
       const separatorText =
         direction === "left" ? separator.left : separator.right;
-      const cap =
-        separator.endCaps && !transparent
-          ? direction === "left"
-            ? separator.endCaps.right
-            : separator.endCaps.left
-          : "";
+      let cap = "";
+      if (separator.endCaps && !transparent) {
+        if (direction === "left") {
+          cap = separator.endCaps.right;
+        } else {
+          cap = separator.endCaps.left;
+        }
+      }
       const capText = cap ? `${STATUS_BG_AS_FG}${cap}${RESET}` : "";
       const content = `${bg}${foreground} ${parts.join(` ${STATUS_SEPARATOR_FG}${separatorText}${foreground} `)} ${RESET}`;
       return direction === "right"
@@ -767,10 +780,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
     const leftGroup = renderGroup(left, "left");
     const rightGroup = renderGroup(right, "right");
-    if (!leftGroup && !rightGroup) {
+    if (!(leftGroup || rightGroup)) {
       return "";
     }
-    if (!leftGroup || !rightGroup) {
+    if (!(leftGroup && rightGroup)) {
       return `${leftGroup}${rightGroup}`;
     }
 
@@ -815,7 +828,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           }
         }
 
-        const theme = currentCtx.ui.theme;
+        const { theme } = currentCtx.ui;
         const border = theme.getFgAnsi("border");
         const paintBorder = (text: string): string =>
           `${border}${text}\x1b[39m`;
@@ -957,7 +970,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay this render tick.
       void refreshGit();
       requestRender();
-    }, 1_000);
+    }, 1000);
     return Promise.resolve();
   });
 

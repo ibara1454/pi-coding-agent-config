@@ -30,7 +30,7 @@ function declaredEntryPath(): string {
     readFileSync(resolve(packageDir, "package.json"), "utf8"),
   ) as PackageManifest;
   const declared = manifest.pi?.extensions ?? [];
-  const entry = declared[0];
+  const [entry] = declared;
   if (declared.length !== 1 || entry === undefined) {
     throw new Error(
       `Expected exactly one declared pi.extensions entry, found ${declared.length}`,

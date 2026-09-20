@@ -119,8 +119,7 @@ function within(file: string, directory: string): boolean {
 function position(value: unknown): Position {
   const { line, character } = record(value, "text edit position");
   if (
-    !Number.isSafeInteger(line) ||
-    !Number.isSafeInteger(character) ||
+    !(Number.isSafeInteger(line) && Number.isSafeInteger(character)) ||
     Number(line) < 0 ||
     Number(character) < 0
   ) {
@@ -197,10 +196,10 @@ export function applyTextEdits(
     const previous = content.charCodeAt(index - 1);
     const next = content.charCodeAt(index);
     if (
-      previous >= 0xd800 &&
-      previous <= 0xdbff &&
-      next >= 0xdc00 &&
-      next <= 0xdfff
+      previous >= 0xd8_00 &&
+      previous <= 0xdb_ff &&
+      next >= 0xdc_00 &&
+      next <= 0xdf_ff
     ) {
       throw new Error("Text edit splits a UTF-16 surrogate pair");
     }
@@ -407,13 +406,14 @@ function operations(value: unknown): Operation[] {
 async function entry(file: string): Promise<Entry | null> {
   try {
     const stat = await fs.lstat(file);
-    const kind = stat.isSymbolicLink()
-      ? "link"
-      : stat.isDirectory()
-        ? "directory"
-        : stat.isFile()
-          ? "file"
-          : undefined;
+    let kind: Entry["kind"] | undefined;
+    if (stat.isSymbolicLink()) {
+      kind = "link";
+    } else if (stat.isDirectory()) {
+      kind = "directory";
+    } else if (stat.isFile()) {
+      kind = "file";
+    }
     if (!kind) {
       throw new Error(`Unsupported filesystem object: ${file}`);
     }
@@ -448,7 +448,7 @@ export async function directoryFiles(
     const handle = await fs.opendir(current);
     for await (const item of handle) {
       signal?.throwIfAborted();
-      if (++visited > 10000) {
+      if (++visited > 10_000) {
         throw new Error(
           "Directory traversal exceeds 10000 entries; use smaller targets",
         );
@@ -469,9 +469,15 @@ export async function directoryFiles(
     }
   };
   await visit(directory);
-  return files.sort((left, right) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  );
+  return files.sort((left, right) => {
+    if (left < right) {
+      return -1;
+    }
+    if (left > right) {
+      return 1;
+    }
+    return 0;
+  });
 }
 
 /** Builds a virtual-filesystem plan without writing disk and captures originals for the locked recheck. */
@@ -513,7 +519,7 @@ async function plan(
         const handle = await fs.opendir(directory);
         for await (const item of handle) {
           options.signal?.throwIfAborted();
-          if (++visited > 10000) {
+          if (++visited > 10_000) {
             throw new Error(
               "Resource operation exceeds 10000 directory entries",
             );
@@ -562,7 +568,7 @@ async function plan(
       try {
         op.file = await fs.realpath(documentFile);
       } catch (error) {
-        if (!missing(error) || !virtual.get(documentFile)) {
+        if (!(missing(error) && virtual.get(documentFile))) {
           throw error;
         }
       }
@@ -590,8 +596,7 @@ async function plan(
       const live = options.document?.(op.documentFile ?? op.file);
       if (
         op.version !== null &&
-        (!snapshot ||
-          !live ||
+        (!(snapshot && live) ||
           op.version !== snapshot.version ||
           op.version !== live.version)
       ) {
@@ -714,9 +719,15 @@ async function lockPaths<T>(
       }
     }
   }
-  const keys = [...canonical].sort((left, right) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  );
+  const keys = [...canonical].sort((left, right) => {
+    if (left < right) {
+      return -1;
+    }
+    if (left > right) {
+      return 1;
+    }
+    return 0;
+  });
   const acquire = (index: number): Promise<T> => {
     const key = keys[index];
     return key === undefined
@@ -755,6 +766,7 @@ async function renameWithRestore(
       } catch (restoreError) {
         throw new Error(
           `Rename failed: ${message(error)}; destination restore failed: ${message(restoreError)}. Original retained at ${displaced.file}`,
+          { cause: restoreError },
         );
       }
     }
@@ -766,6 +778,7 @@ async function renameWithRestore(
     } catch (error) {
       throw new Error(
         `Rename committed, but displaced destination cleanup failed at ${displaced.directory}: ${message(error)}`,
+        { cause: error },
       );
     }
   }
@@ -858,6 +871,7 @@ export async function applyWorkspaceEdit(
                       (await fs.readFile(previous.op.file, "utf8")) !==
                       previous.after
                     ) {
+                      // biome-ignore lint/style/useErrorCause: This is a new rollback precondition failure, not a wrapper for the outer rename error.
                       throw new Error("content changed after edit");
                     }
                     await fs.writeFile(
@@ -922,7 +936,7 @@ export async function applyWorkspaceEdit(
                 removed.push(file);
               }
             }
-            if (removed.length) {
+            if (removed.length > 0) {
               result.changes.push({
                 kind: "delete",
                 file: op.file,

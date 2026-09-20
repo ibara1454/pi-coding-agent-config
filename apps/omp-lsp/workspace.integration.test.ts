@@ -14,11 +14,11 @@ import type { LspConfig, ServerConfig } from "./types.ts";
 import { LspWorkspace } from "./workspace.ts";
 
 const filesystem: {
-  stat(file: string): Promise<Stats>;
-  lstat(file: string): Promise<Stats>;
-  realpath(file: string): Promise<string>;
-  readFile(file: string, encoding: "utf8"): Promise<string>;
-  writeFile(file: string, content: string, encoding: "utf8"): Promise<void>;
+  stat: (file: string) => Promise<Stats>;
+  lstat: (file: string) => Promise<Stats>;
+  realpath: (file: string) => Promise<string>;
+  readFile: (file: string, encoding: "utf8") => Promise<string>;
+  writeFile: (file: string, content: string, encoding: "utf8") => Promise<void>;
 } = fs;
 const workspaces: LspWorkspace[] = [];
 const file = "/project/sample.ts";
@@ -31,7 +31,7 @@ async function fixture(linter = false) {
       isFile: () => true,
       isDirectory: () => false,
       isSymbolicLink: () => false,
-      mode: 0o100644,
+      mode: 0o10_0644,
       size: content.length,
     }) as Stats;
   spyOn(filesystem, "stat").mockImplementation(async () => stat());

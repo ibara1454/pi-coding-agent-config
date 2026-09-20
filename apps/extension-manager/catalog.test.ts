@@ -523,7 +523,7 @@ describe("ExtensionCatalog.inspect", () => {
       const catalog = diagnosticCatalog(scenario.diagnostic);
       const first = catalog.inspect("first")?.diagnostics;
       const second = catalog.inspect("second")?.diagnostics;
-      const rows = catalog.view().rows;
+      const { rows } = catalog.view();
       const firstRow = rows.find((candidate) => candidate.id === "first");
 
       expect(first).toEqual([...scenario.first]);
