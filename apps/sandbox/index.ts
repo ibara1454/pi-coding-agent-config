@@ -61,6 +61,8 @@ import {
 import deepMerge from "deepmerge";
 
 const GLOB_META_CHARACTERS = /[*?[\]{}]/;
+const MAX_VISIBLE_SYMLINK_MAPPINGS = 5;
+const MILLISECONDS_PER_SECOND = 1000;
 
 interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
@@ -256,6 +258,12 @@ function hasFilesystemSymlinkWarnings(
   return Object.values(warnings).some((paths) => paths.length > 0);
 }
 
+/**
+ * Formats policy symlink warnings as a bounded widget, reporting overflow.
+ * @param warnings - Resolved mappings grouped by filesystem policy.
+ * @returns Widget lines; no filesystem or UI effects are performed.
+ * @example formatFilesystemSymlinkWidget(warnings) // At most five mappings.
+ */
 function formatFilesystemSymlinkWidget(
   warnings: FilesystemSymlinkWarnings,
 ): string[] {
@@ -270,7 +278,7 @@ function formatFilesystemSymlinkWidget(
       (entry) => `allowWrite (skipped): ${formatSymlinkMapping(entry)}`,
     ),
   ];
-  const visibleMappings = mappings.slice(0, 5);
+  const visibleMappings = mappings.slice(0, MAX_VISIBLE_SYMLINK_MAPPINGS);
   const hiddenCount = mappings.length - visibleMappings.length;
 
   return [
@@ -336,8 +344,23 @@ function formatFilesystemSymlinkWarning(
   return lines.join("\n");
 }
 
+/**
+ * Creates bash operations that enforce the active sandbox policy.
+ * Each execution owns its child process, listeners, and timeout until settlement.
+ * @returns Operations whose executions reject on launch failure, abort, or timeout.
+ * @example createSandboxedBashOps() // Passed to createBashTool as its operations.
+ */
 function createSandboxedBashOps(): BashOperations {
   return {
+    /**
+     * Runs a sandboxed command, streams output, and releases execution resources.
+     * @param command - Bash source wrapped by the active sandbox policy.
+     * @param cwd - Existing working directory for the child.
+     * @param options - Output callback, cancellation signal, and timeout in seconds.
+     * @returns The child exit code after completion.
+     * @throws If the directory is missing, launch fails, or execution is interrupted.
+     * @example await ops.exec("pwd", cwd, { onData }) // { exitCode: 0 }
+     */
     async exec(command, cwd, { onData, signal, timeout }) {
       if (!existsSync(cwd)) {
         throw new Error(`Working directory does not exist: ${cwd}`);
@@ -430,7 +453,7 @@ function createSandboxedBashOps(): BashOperations {
           timeoutHandle = setTimeout(() => {
             timedOut = true;
             terminateChild();
-          }, timeout * 1000);
+          }, timeout * MILLISECONDS_PER_SECOND);
         }
 
         signal?.addEventListener("abort", terminateChild, { once: true });

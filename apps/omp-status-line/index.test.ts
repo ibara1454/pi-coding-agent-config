@@ -11,14 +11,18 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 }));
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+const STATUS_LINE_LEADING_BORDER = "╭──";
+const WIDE_STATUS_RENDER_WIDTH = 160;
+const NARROW_STATUS_WIDTH_PADDING = 4;
+const PATH_STATUS_RENDER_WIDTH = 120;
 
 function statusText(line: string): string {
   const plain = Bun.stripANSI(line);
-  const capIndex = plain.indexOf("▶", 3);
+  const capIndex = plain.indexOf("▶", STATUS_LINE_LEADING_BORDER.length);
   if (capIndex < 0) {
     throw new Error(`Expected status-line end cap in ${plain}`);
   }
-  return plain.slice(3, capIndex + 1);
+  return plain.slice(STATUS_LINE_LEADING_BORDER.length, capIndex + 1);
 }
 
 async function createSettingsFixture(
@@ -186,10 +190,13 @@ test("should shrink the path before dropping context usage", async () => {
       throw new Error("Expected editor component to be installed");
     }
     const editor = editorFactory({}, harness.theme, {});
-    const fullStatus = statusText(editor.render(160)[0] ?? "");
+    const fullStatus = statusText(
+      editor.render(WIDE_STATUS_RENDER_WIDTH)[0] ?? "",
+    );
     expect(fullStatus).toContain("6.9%/272K");
 
-    const narrowWidth = Bun.stringWidth(fullStatus) + 4;
+    const narrowWidth =
+      Bun.stringWidth(fullStatus) + NARROW_STATUS_WIDTH_PADDING;
     const narrowTop = editor.render(narrowWidth)[0] ?? "";
     const narrowStatus = statusText(narrowTop);
     expect(narrowStatus).toContain("6.9%/272K");
@@ -230,7 +237,9 @@ test("should ignore project settings when project is untrusted", async () => {
       throw new Error("Expected editor component to be installed");
     }
     const status = statusText(
-      editorFactory({}, harness.theme, {}).render(120)[0] ?? "",
+      editorFactory({}, harness.theme, {}).render(
+        PATH_STATUS_RENDER_WIDTH,
+      )[0] ?? "",
     );
 
     expect(status).toContain("Test");

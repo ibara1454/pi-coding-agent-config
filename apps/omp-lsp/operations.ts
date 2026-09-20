@@ -7,6 +7,7 @@ import type {
   Position,
   Range,
 } from "vscode-languageserver-protocol";
+import { DiagnosticSeverity } from "vscode-languageserver-protocol";
 import { uriToFile } from "./edits.ts";
 
 const LINE_BREAK = /\r\n|\r|\n/;
@@ -20,6 +21,17 @@ const EDITORCONFIG_ROOT = /^\s*root\s*=\s*true\s*$/im;
 const CONFIG_LINE_BREAK = /\r?\n/;
 const CONFIG_COMMENT = /^[#;]/;
 const CONFIG_SECTION = /^\[(.*)\]$/;
+const DIAGNOSTIC_SEVERITIES: readonly number[] =
+  Object.values(DiagnosticSeverity);
+const MAX_DISPLAYED_DIAGNOSTICS = 200;
+const MAX_SYMBOL_DEPTH = 100;
+const MAX_SYMBOL_RESULTS = 10_000;
+const MAX_GLOB_PATTERN_LENGTH = 2048;
+const MAX_GLOB_ENTRIES = 10_000;
+const MAX_DIAGNOSTIC_TARGET_FILES = 20;
+const MAX_EDITORCONFIG_DEPTH = 64;
+// 1 MiB (1024 * 1024 bytes).
+const MAX_EDITORCONFIG_BYTES = 1_048_576;
 
 /**
  * Recognizes a missing filesystem path without assuming what an external operation threw.
@@ -128,7 +140,13 @@ export function resolvePosition(
   return { line: line - 1, character };
 }
 
-/** Validates and deduplicates findings, retaining the strongest severity at each message/range. */
+/**
+ * Validates and deduplicates findings by message/range, retaining the strongest severity.
+ * @param value - Untrusted diagnostic array with zero-based UTF-16 protocol ranges.
+ * @returns Findings sorted by severity, position, and message; absent severity counts as error.
+ * @throws For malformed arrays, messages, ranges, or severity values.
+ * @example normalizeDiagnostics([]) returns []; normalizeDiagnostics(null) throws.
+ */
 export function normalizeDiagnostics(value: unknown): Diagnostic[] {
   if (!Array.isArray(value)) {
     throw new Error("Invalid diagnostics response: expected an array");
@@ -143,7 +161,8 @@ export function normalizeDiagnostics(value: unknown): Diagnostic[] {
     const range = protocolRange(rawRange);
     if (
       severity !== undefined &&
-      (typeof severity !== "number" || ![1, 2, 3, 4].includes(severity))
+      (typeof severity !== "number" ||
+        !DIAGNOSTIC_SEVERITIES.includes(severity))
     ) {
       throw new Error("Invalid diagnostic severity");
     }
@@ -167,7 +186,15 @@ export function normalizeDiagnostics(value: unknown): Diagnostic[] {
   );
 }
 
-/** Renders a bounded report without presenting unversioned silence as verified clean state. */
+/**
+ * Renders a bounded report without presenting unversioned silence as verified clean.
+ * @param file - Diagnostic file path, displayed relative to cwd when possible.
+ * @param diagnostics - Validated findings in display order.
+ * @param cwd - Root used to shorten paths.
+ * @param unverifiedSources - Sources whose freshness cannot be established.
+ * @returns Counts and at most 200 findings with one-based positions and any freshness warning.
+ * @example diagnosticsText("/project/a.ts", [], "/project", []) returns "a.ts: OK".
+ */
 export function diagnosticsText(
   file: string,
   diagnostics: readonly Diagnostic[],
@@ -193,12 +220,12 @@ export function diagnosticsText(
   ).length;
   const warnings = diagnostics.filter((item) => item.severity === 2).length;
   const lines = diagnostics
-    .slice(0, 200)
+    .slice(0, MAX_DISPLAYED_DIAGNOSTICS)
     .map(
       (item) =>
         `${label}:${item.range.start.line + 1}:${item.range.start.character + 1} [${severities[item.severity ?? 1]}] ${item.message}${item.source ? ` (${item.source})` : ""}`,
     );
-  return `${label}: ${errors} error(s), ${warnings} warning(s), ${diagnostics.length} diagnostic(s)${freshness}\n${lines.join("\n")}${diagnostics.length > 200 ? `\n…${diagnostics.length - 200} diagnostics elided…` : ""}`;
+  return `${label}: ${errors} error(s), ${warnings} warning(s), ${diagnostics.length} diagnostic(s)${freshness}\n${lines.join("\n")}${diagnostics.length > MAX_DISPLAYED_DIAGNOSTICS ? `\n…${diagnostics.length - MAX_DISPLAYED_DIAGNOSTICS} diagnostics elided…` : ""}`;
 }
 
 export interface NavigationLocation {
@@ -243,7 +270,14 @@ export interface DisplaySymbol {
   depth: number;
 }
 
-/** Flattens document or workspace symbols, preserving unresolved positions for later resolution. */
+/**
+ * Flattens document or workspace symbols while preserving unresolved locations.
+ * @param value - Untrusted protocol symbol array; null/undefined means no symbols.
+ * @param documentFile - File path for document symbols that omit their own URI.
+ * @returns Depth-first display symbols with zero-based UTF-16 positions, when supplied.
+ * @throws For invalid metadata, missing file locations, or excessive nesting/result size.
+ * @example symbols(null, "/project/a.ts") returns [].
+ */
 export function symbols(
   value: unknown,
   documentFile?: string,
@@ -255,8 +289,15 @@ export function symbols(
     throw new Error("Invalid symbol response: expected an array");
   }
   const result: DisplaySymbol[] = [];
+  /**
+   * Appends one validated symbol and its descendants in depth-first order.
+   * @param raw - Untrusted document/workspace symbol.
+   * @param depth - Zero-based nesting level recorded on the output entry.
+   * @throws On invalid metadata, depth over 100, or more than 10000 results already accumulated.
+   * @example A parent with one child appends entries at depths 0 and 1 when visited at depth 0.
+   */
   const visit = (raw: unknown, depth: number): void => {
-    if (depth > 100 || result.length > 10_000) {
+    if (depth > MAX_SYMBOL_DEPTH || result.length > MAX_SYMBOL_RESULTS) {
       throw new Error("Symbol response exceeds nesting or size limits");
     }
     const {
@@ -337,8 +378,15 @@ export function hoverText(value: unknown): string {
   return render(hoverContents);
 }
 
+/**
+ * Compiles a bounded, dotfile-aware glob without negation or comment interpretation.
+ * @param pattern - Glob limited to 2048 UTF-16 code units, with bounded brace/globstar expansion.
+ * @returns A matcher used for diagnostic targets and EditorConfig sections.
+ * @throws If the pattern exceeds the length limit or compilation fails.
+ * @example globMatcher("*.ts").match(".hidden.ts") returns true.
+ */
 function globMatcher(pattern: string): Minimatch {
-  if (pattern.length > 2048) {
+  if (pattern.length > MAX_GLOB_PATTERN_LENGTH) {
     throw new Error("Glob pattern exceeds 2048 characters");
   }
   return new Minimatch(pattern, {
@@ -351,7 +399,16 @@ function globMatcher(pattern: string): Minimatch {
   });
 }
 
-/** Resolves a file or bounded glob walk, reporting truncation instead of claiming complete coverage. */
+/**
+ * Resolves a literal file or bounded glob walk without claiming complete truncated coverage.
+ * @param pattern - Literal or glob resolved relative to cwd; missing literals are returned unchanged.
+ * @param cwd - Base directory for relative targets.
+ * @param signal - Optional cancellation during directory traversal.
+ * @returns Sorted glob matches (at most 20) and truncation status, or one resolved literal.
+ * @throws For cancellation, invalid globs, over 10000 visited entries, or non-missing I/O errors.
+ * Walks skip .git/node_modules and do not descend symlinks; iterators close directory handles.
+ * @example diagnosticTargets("a.ts", "/project") yields { files: ["/project/a.ts"], truncated: false }.
+ */
 export async function diagnosticTargets(
   pattern: string,
   cwd: string,
@@ -379,12 +436,19 @@ export async function diagnosticTargets(
   const files: string[] = [];
   let visited = 0;
   let truncated = false;
+  /**
+   * Accumulates glob matches without descending ignored or symlinked directories.
+   * @param directory - Directory whose iterator owns and closes its handle.
+   * Marks truncation on a twenty-first match; shares a 10000-entry traversal budget.
+   * @throws On cancellation, traversal-budget exhaustion, or filesystem errors.
+   * @example Visiting a directory with 21 matching files retains 20 and sets truncated to true.
+   */
   const visit = async (directory: string): Promise<void> => {
     signal?.throwIfAborted();
     const handle = await fs.opendir(directory);
     for await (const item of handle) {
       signal?.throwIfAborted();
-      if (++visited > 10_000) {
+      if (++visited > MAX_GLOB_ENTRIES) {
         throw new Error(
           "Diagnostics glob search exceeds 10000 entries; narrow the pattern",
         );
@@ -398,7 +462,7 @@ export async function diagnosticTargets(
         (item.isFile() || item.isSymbolicLink()) &&
         matcher.match(file.split(path.sep).join("/"))
       ) {
-        if (files.length === 20) {
+        if (files.length === MAX_DIAGNOSTIC_TARGET_FILES) {
           truncated = true;
           return;
         }
@@ -430,7 +494,15 @@ export async function diagnosticTargets(
   };
 }
 
-/** Infers indentation from content, then applies EditorConfig overrides through the workspace root. */
+/**
+ * Infers indentation from a snapshot, then applies matching ancestor EditorConfig overrides.
+ * @param file - Target path used for ancestor lookup and section matching.
+ * @param content - Document text supplying fallback indentation.
+ * @param cwd - Workspace boundary; lookup also stops at root=true or after 64 directories.
+ * @returns LSP formatting options with a positive tab width and whitespace/newline cleanup enabled.
+ * @throws For non-missing I/O failures, configs over 1 MiB, or invalid/oversized globs.
+ * @example With no EditorConfig, formattingOptions("/project/a.ts", "  x\n", "/project") uses tabSize: 2 and insertSpaces: true.
+ */
 export async function formattingOptions(
   file: string,
   content: string,
@@ -456,10 +528,10 @@ export async function formattingOptions(
   }
   const configs: Array<{ directory: string; content: string }> = [];
   let directory = path.dirname(file);
-  for (let depth = 0; depth < 64; depth++) {
+  for (let depth = 0; depth < MAX_EDITORCONFIG_DEPTH; depth++) {
     try {
       const configPath = path.join(directory, ".editorconfig");
-      if ((await fs.stat(configPath)).size > 1024 * 1024) {
+      if ((await fs.stat(configPath)).size > MAX_EDITORCONFIG_BYTES) {
         throw new Error(`EditorConfig exceeds 1 MiB: ${configPath}`);
       }
       const text = await fs.readFile(configPath, "utf8");

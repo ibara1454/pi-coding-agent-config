@@ -13,6 +13,14 @@ the configuration aligned when changing policy. Preserve external protocol/schem
 spellings when resolving naming violations; do not rename public contracts solely
 to satisfy a naming convention.
 
+Gradual adoption keeps rules at **Error** while starting metric limits above the
+existing baseline: cognitive complexity is capped at **120** (Biome default: 15)
+and function length at **750** counted lines (Biome default: 50). These initial
+ceilings include production code and test-suite callbacks; lower them as the
+owning operations are simplified rather than splitting cohesive code solely to
+meet a metric. `noMagicNumbers` is enforced in both production and test code,
+using named constants for flagged numeric literals without changing their values.
+
 ## Conditional expressions and loops
 
 All rules in this section use the `lint/style/` prefix.
@@ -31,7 +39,7 @@ All rules in this section use the `lint/style/` prefix.
 
 | Rule | Meaning | Severity |
 |---|---|---|
-| `noMagicNumbers` | Requests named constants instead of numeric literals used directly. | Off |
+| `noMagicNumbers` | Requests named constants instead of numeric literals used directly. | Error |
 | `useNumericSeparators` | Requests separators in long numeric literals, such as `10_000`. | Error |
 | `useDestructuring` | Prefers destructuring over supported property/index access patterns. | Error |
 | `useExplicitLengthCheck` | Requires explicit comparisons of length/size properties, such as `items.length > 0`. | Error |
@@ -65,8 +73,8 @@ All rules in this section use the `lint/style/` prefix.
 
 | Rule | Meaning | Severity |
 |---|---|---|
-| `lint/complexity/noExcessiveLinesPerFunction` | Flags functions exceeding the code-line limit, currently 50 by default. | Off |
-| `lint/complexity/noExcessiveCognitiveComplexity` | Flags excessive branching/nesting complexity, currently above 15 by default. | Off |
+| `lint/complexity/noExcessiveLinesPerFunction` | Flags functions exceeding the configured limit of 750 counted lines. | Error |
+| `lint/complexity/noExcessiveCognitiveComplexity` | Flags branching/nesting complexity above the configured limit of 120. | Error |
 | `lint/complexity/useSimplifiedLogicExpression` | Flags redundant terms in logical expressions. | Error |
 | `lint/complexity/noImplicitCoercions` | Prefers explicit conversions, such as `Boolean(value)` instead of `!!value`. | Error |
 | `lint/style/useNumberNamespace` | Prefers equivalent `Number` properties, such as `Number.NaN` instead of global `NaN`. | Error |

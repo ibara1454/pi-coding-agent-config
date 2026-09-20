@@ -44,6 +44,18 @@ import type {
 
 const RESOURCE_FIELDS = ["extensions", "skills"] as const;
 const EXTENSION_SUFFIX = /\.(?:[cm]?[jt]s)$/i;
+const TAB_CHARACTER_CODE = 9;
+const LINE_FEED_CHARACTER_CODE = 10;
+const PRINTABLE_CHARACTER_START_CODE = 32;
+const DELETE_CHARACTER_CODE = 127;
+// 4 KiB (4 * 1024 bytes).
+const SKILL_PREVIEW_BUFFER_SIZE = 4096;
+const MAX_SKILL_PREVIEW_LENGTH = 2000;
+const PACKAGE_GLOBAL_SCOPE_OFFSET = 500_000_000_000;
+const PACKAGE_RESOLUTION_BASE = 4_000_000_000_000;
+const PACKAGE_PRECEDENCE_STEP = 1_000_000;
+const GLOBAL_AUTO_DISCOVERY_RANK = 3;
+const RESOLUTION_RANK_STEP = 1_000_000_000_000;
 
 class SnapshotSettingsStorage {
   readonly #global: string;
@@ -820,19 +832,36 @@ async function discoverPackageScope(
   return drafts;
 }
 
+/**
+ * Removes C0 controls and DEL while preserving tabs, line feeds, and other text.
+ * @param value - Preview text after terminal escape sequences have been removed.
+ * @returns Filtered text without changing printable Unicode characters.
+ * @example stripUnsafeControlCharacters("a\u0000\tb\n") returns "a\tb\n".
+ */
 function stripUnsafeControlCharacters(value: string): string {
   let safe = "";
   for (const character of value) {
     const code = character.charCodeAt(0);
-    if (code === 9 || code === 10 || (code >= 32 && code !== 127)) {
+    if (
+      code === TAB_CHARACTER_CODE ||
+      code === LINE_FEED_CHARACTER_CODE ||
+      (code >= PRINTABLE_CHARACTER_START_CODE && code !== DELETE_CHARACTER_CODE)
+    ) {
       safe += character;
     }
   }
   return safe;
 }
 
+/**
+ * Reads at most 4096 bytes, strips frontmatter and terminal controls, and trims a skill preview.
+ * @param path - Skill file to open synchronously as UTF-8.
+ * @returns At most 2000 UTF-16 code units, or undefined for empty text or read/processing failure.
+ * @throws If closing an opened descriptor fails; the descriptor is closed in finally.
+ * @example A file containing "# Review\n" yields "# Review"; a missing file yields undefined.
+ */
 function readBoundedSkillPreview(path: string): string | undefined {
-  const buffer = Buffer.allocUnsafe(4096);
+  const buffer = Buffer.allocUnsafe(SKILL_PREVIEW_BUFFER_SIZE);
   let descriptor: number | undefined;
   try {
     descriptor = openSync(path, "r");
@@ -841,7 +870,7 @@ function readBoundedSkillPreview(path: string): string | undefined {
     const safe = stripUnsafeControlCharacters(
       stripTerminalSequences(body).replaceAll("\r", ""),
     ).trim();
-    return safe === "" ? undefined : safe.slice(0, 2000);
+    return safe === "" ? undefined : safe.slice(0, MAX_SKILL_PREVIEW_LENGTH);
   } catch {
     return undefined;
   } finally {
@@ -948,13 +977,21 @@ function rowName(path: string, kind: ResourceKind): string {
     : stem;
 }
 
+/**
+ * Assigns an ascending precedence key: project local/auto, global local/auto, then packages.
+ * @param draft - Resource origin; packages sort by project/global scope and precedence slot.
+ * @param draftIndex - Discovery-order tie breaker within the origin's numeric band.
+ * @returns Numeric sorting key; lower values take precedence.
+ * @example A project-local draft at index 7 has key 7, before every auto-discovered draft.
+ */
 function resolutionOrder(draft: ResourceDraft, draftIndex: number): number {
   if (draft.target.type === "package") {
-    const scopeOffset = draft.scope === "project" ? 0 : 500_000_000_000;
+    const scopeOffset =
+      draft.scope === "project" ? 0 : PACKAGE_GLOBAL_SCOPE_OFFSET;
     return (
-      4_000_000_000_000 +
+      PACKAGE_RESOLUTION_BASE +
       scopeOffset +
-      draft.target.precedenceSlot * 1_000_000 +
+      draft.target.precedenceSlot * PACKAGE_PRECEDENCE_STEP +
       draftIndex
     );
   }
@@ -962,9 +999,9 @@ function resolutionOrder(draft: ResourceDraft, draftIndex: number): number {
   if (draft.scope === "project") {
     rank = draft.sourceType === "local" ? 0 : 1;
   } else {
-    rank = draft.sourceType === "local" ? 2 : 3;
+    rank = draft.sourceType === "local" ? 2 : GLOBAL_AUTO_DISCOVERY_RANK;
   }
-  return rank * 1_000_000_000_000 + draftIndex;
+  return rank * RESOLUTION_RANK_STEP + draftIndex;
 }
 
 /**

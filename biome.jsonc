@@ -32,10 +32,16 @@
     "rules": {
       "preset": "all",
       "complexity": {
-        // Defer metric-driven rewrites until behavior or ownership needs to change.
-        "noExcessiveCognitiveComplexity": "off",
-        // Do not split cohesive operations or test suites just to meet line limits.
-        "noExcessiveLinesPerFunction": "off",
+        // Initial rollout ceilings cover existing code; lower as owners simplify it.
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 120 }
+        },
+        // Includes cohesive extension setup and test-suite callbacks.
+        "noExcessiveLinesPerFunction": {
+          "level": "error",
+          "options": { "maxLines": 750 }
+        },
         "noImplicitCoercions": "error",
         "useSimplifiedLogicExpression": "error"
       },
@@ -93,8 +99,7 @@
         "noExcessiveLinesPerFile": "off",
         // Increment/decrement is clear for counters and indexed loops.
         "noIncrementDecrement": "off",
-        // Name real limits case by case, not every index, protocol value, or fixture.
-        "noMagicNumbers": "off",
+        "noMagicNumbers": "error",
         // Choose branch order for readability rather than banning negative conditions.
         "noNegationElse": "off",
         // Environment access belongs at runtime/config boundaries and in isolated tests.

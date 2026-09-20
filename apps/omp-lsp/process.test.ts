@@ -6,6 +6,11 @@ import process from "node:process";
 import { PassThrough } from "node:stream";
 import { runCommand } from "./process.ts";
 
+const OUTPUT_OVERFLOW_BYTES = 600_000;
+// 512 KiB (512 * 1024 bytes).
+const DEFAULT_OUTPUT_LIMIT_BYTES = 524_288;
+const TEST_CHILD_PID = 12_345;
+
 const spawning: {
   spawn: (
     command: string,
@@ -36,7 +41,7 @@ describe("runCommand", () => {
     );
     spyOn(spawning, "spawn").mockImplementation(() => {
       queueMicrotask(() => {
-        stdout.end(Buffer.alloc(600_000, "x"));
+        stdout.end(Buffer.alloc(OUTPUT_OVERFLOW_BYTES, "x"));
         stderr.end();
         child.exitCode = 0;
         child.emit("exit", 0, null);
@@ -48,7 +53,7 @@ describe("runCommand", () => {
       await expect(
         runCommand("formatter", [], {
           cwd: "/project",
-          maxOutputBytes: 512 * 1024,
+          maxOutputBytes: DEFAULT_OUTPUT_LIMIT_BYTES,
         }),
       ).rejects.toThrow("output is incomplete");
     } finally {
@@ -71,7 +76,7 @@ describe("runCommand", () => {
         stdin: new PassThrough(),
         stdout,
         stderr,
-        pid: 12_345,
+        pid: TEST_CHILD_PID,
         exitCode: null,
         signalCode: null,
       },
@@ -101,6 +106,6 @@ describe("runCommand", () => {
     expect(await result).toMatchObject({
       message: expect.stringContaining("stdout exceeded"),
     });
-    expect(signals.mock.calls).toEqual([[-12_345, "SIGTERM"]]);
+    expect(signals.mock.calls).toEqual([[-TEST_CHILD_PID, "SIGTERM"]]);
   });
 });

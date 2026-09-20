@@ -8,6 +8,17 @@ const APPLIED_PREFIX = /^Applied /;
 const CREATED_PREFIX = /^Created /;
 const DELETED_PREFIX = /^Deleted /;
 const RENAMED_PREFIX = /^Renamed /;
+const HIGH_SURROGATE_START = 0xd8_00;
+const HIGH_SURROGATE_END = 0xdb_ff;
+const LOW_SURROGATE_START = 0xdc_00;
+const LOW_SURROGATE_END = 0xdf_ff;
+const MAX_WORKSPACE_OPERATIONS = 2000;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const MAX_ENTRY_BYTES = 16_777_216;
+const MAX_DIRECTORY_ENTRIES = 10_000;
+const MAX_DIRECTORY_FILES = 1000;
+// 64 MiB (64 * 1024 * 1024 bytes).
+const MAX_SNAPSHOT_BYTES = 67_108_864;
 
 export interface DocumentSnapshot {
   version: number;
@@ -156,7 +167,14 @@ function textEdits(
   });
 }
 
-/** Applies LSP UTF-16 ranges without normalizing line endings or splitting surrogate pairs. */
+/**
+ * Applies snapshot-relative LSP edits without normalizing line endings or splitting surrogate pairs.
+ * @param content - Original document text; neither input is mutated.
+ * @param edits - Zero-based UTF-16 ranges; same-position insertions retain input order.
+ * @returns Edited text, coalescing identical nonempty-range replacements.
+ * @throws For invalid/snippet edits, invalid ranges, split surrogate pairs, or overlaps.
+ * @example applyTextEdits("abc", []) returns "abc" without filesystem access.
+ */
 export function applyTextEdits(
   content: string,
   edits: readonly TextEdit[],
@@ -172,6 +190,13 @@ export function applyTextEdits(
       starts.push(index + 1);
     }
   }
+  /**
+   * Converts a validated snapshot position to a string offset without splitting a surrogate pair.
+   * @param pos - Zero-based line and UTF-16 character position, excluding line terminators.
+   * @returns UTF-16 offset into the captured content.
+   * @throws For malformed/out-of-bounds positions or an offset inside a surrogate pair.
+   * @example For content "ab\nc", offset({ line: 1, character: 0 }) returns 3.
+   */
   const offset = (pos: Position): number => {
     position(pos);
     const start = starts[pos.line];
@@ -196,10 +221,10 @@ export function applyTextEdits(
     const previous = content.charCodeAt(index - 1);
     const next = content.charCodeAt(index);
     if (
-      previous >= 0xd8_00 &&
-      previous <= 0xdb_ff &&
-      next >= 0xdc_00 &&
-      next <= 0xdf_ff
+      previous >= HIGH_SURROGATE_START &&
+      previous <= HIGH_SURROGATE_END &&
+      next >= LOW_SURROGATE_START &&
+      next <= LOW_SURROGATE_END
     ) {
       throw new Error("Text edit splits a UTF-16 surrogate pair");
     }
@@ -247,7 +272,13 @@ export function applyTextEdits(
   return pieces.join("");
 }
 
-/** Normalizes raw edit variants, coalescing text edits until the next resource operation. */
+/**
+ * Validates raw workspace edits and coalesces text edits between resource operations.
+ * @param value - Untrusted WorkspaceEdit; documentChanges takes precedence over changes.
+ * @returns Ordered text/create/rename/delete operations, limited to 2000.
+ * @throws For invalid metadata, unsupported operations, conflicting edits, or excessive size.
+ * @example operations({ changes: {} }) returns [] without reading or writing files.
+ */
 function operations(value: unknown): Operation[] {
   const edit = record(value, "WorkspaceEdit");
   const { changeAnnotations } = edit;
@@ -395,7 +426,7 @@ function operations(value: unknown): Operation[] {
     }
   }
   flush();
-  if (result.length > 2000) {
+  if (result.length > MAX_WORKSPACE_OPERATIONS) {
     throw new Error(
       "Workspace edit exceeds 2000 operations; split it into smaller changes",
     );
@@ -403,6 +434,13 @@ function operations(value: unknown): Operation[] {
   return result;
 }
 
+/**
+ * Captures a filesystem entry for later stale-state checks without following final symlinks.
+ * @param file - Path whose lstat metadata and, for files, UTF-8 contents are read.
+ * @returns A signature and entry data, or null for a missing path.
+ * @throws For unsupported objects, nondirectory entries over 16 MiB, or other filesystem failures.
+ * @example entry("/missing/a.ts") resolves to null when that path does not exist.
+ */
 async function entry(file: string): Promise<Entry | null> {
   try {
     const stat = await fs.lstat(file);
@@ -421,7 +459,7 @@ async function entry(file: string): Promise<Entry | null> {
     if (kind === "directory") {
       return { kind, signature };
     }
-    if (stat.size > 16 * 1024 * 1024) {
+    if (stat.size > MAX_ENTRY_BYTES) {
       throw new Error(`File exceeds the 16 MiB workspace-edit limit: ${file}`);
     }
     if (kind === "link") {
@@ -436,19 +474,32 @@ async function entry(file: string): Promise<Entry | null> {
   }
 }
 
-/** Enumerates lazily and refuses oversized trees before a rename or recursive delete. */
+/**
+ * Enumerates files and symlinks without following symlinked directories.
+ * @param directory - Root directory to traverse; opened directory handles are iteration-owned.
+ * @param signal - Optional cancellation checked during traversal.
+ * @returns Lexically sorted paths, excluding directories themselves.
+ * @throws On cancellation, filesystem errors, unsupported objects, over 10000 entries or 1000 files.
+ * @example A directory containing only a.ts yields [path.join(directory, "a.ts")].
+ */
 export async function directoryFiles(
   directory: string,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const files: string[] = [];
   let visited = 0;
+  /**
+   * Accumulates descendant file/symlink paths under the shared traversal limits.
+   * @param current - Directory to open; async iteration closes its owned handle on exit.
+   * @throws On cancellation, I/O failure, unsupported entries, or exceeding 10000 entries/1000 files.
+   * @example Visiting an empty directory leaves the captured files array unchanged.
+   */
   const visit = async (current: string): Promise<void> => {
     signal?.throwIfAborted();
     const handle = await fs.opendir(current);
     for await (const item of handle) {
       signal?.throwIfAborted();
-      if (++visited > 10_000) {
+      if (++visited > MAX_DIRECTORY_ENTRIES) {
         throw new Error(
           "Directory traversal exceeds 10000 entries; use smaller targets",
         );
@@ -458,7 +509,7 @@ export async function directoryFiles(
         await visit(file);
       } else if (item.isFile() || item.isSymbolicLink()) {
         files.push(file);
-        if (files.length > 1000) {
+        if (files.length > MAX_DIRECTORY_FILES) {
           throw new Error(
             "Directory contains more than 1000 files; rename in smaller batches",
           );
@@ -480,7 +531,15 @@ export async function directoryFiles(
   });
 }
 
-/** Builds a virtual-filesystem plan without writing disk and captures originals for the locked recheck. */
+/**
+ * Builds a virtual-filesystem edit plan and snapshots originals without writing disk.
+ * @param edit - Untrusted workspace edit whose operations are validated in order.
+ * @param options - Document snapshots and cancellation used to reject stale or unsafe edits.
+ * @returns Planned changes and originals for the caller's locked recheck and commit.
+ * @throws For invalid/stale edits, filesystem failures, cancellation, or size/traversal limits.
+ * Snapshot text is limited to 64 MiB; directory iterators own their handles.
+ * @example plan({ changes: {} }, { cwd: "/project" }) resolves with no changes and an empty originals map.
+ */
 async function plan(
   edit: unknown,
   options: EditOptions,
@@ -489,6 +548,13 @@ async function plan(
   const virtual = new Map<string, Entry | null>();
   const changes: PlannedChange[] = [];
   let snapshotBytes = 0;
+  /**
+   * Loads one original entry into the virtual plan, reusing any prior virtual state.
+   * @param file - Path used as the snapshot/cache key.
+   * @returns The current virtual entry or null for a missing/deleted path.
+   * @throws On entry-read failures or when accumulated UTF-8 snapshot bytes exceed 64 MiB.
+   * @example Loading a missing path records null in originals and virtual without creating it.
+   */
   const load = async (file: string): Promise<Entry | null> => {
     if (virtual.has(file)) {
       return virtual.get(file) ?? null;
@@ -498,7 +564,7 @@ async function plan(
     if (value?.content) {
       snapshotBytes += Buffer.byteLength(value.content);
     }
-    if (snapshotBytes > 64 * 1024 * 1024) {
+    if (snapshotBytes > MAX_SNAPSHOT_BYTES) {
       throw new Error(
         "Workspace edit snapshots exceed 64 MiB; use smaller changes",
       );
@@ -515,11 +581,17 @@ async function plan(
     if (originals.get(file)?.kind === "directory") {
       let visited = 0;
       let fileCount = 0;
+      /**
+       * Snapshots descendants, including empty directories, for resource-operation planning.
+       * @param directory - Directory whose iterator owns and closes its handle.
+       * @throws On cancellation, entry-read failure, or exceeding 10000 entries/1000 nondirectories.
+       * @example Visiting a directory with an empty child records that child for subtree locking.
+       */
       const visit = async (directory: string): Promise<void> => {
         const handle = await fs.opendir(directory);
         for await (const item of handle) {
           options.signal?.throwIfAborted();
-          if (++visited > 10_000) {
+          if (++visited > MAX_DIRECTORY_ENTRIES) {
             throw new Error(
               "Resource operation exceeds 10000 directory entries",
             );
@@ -528,7 +600,7 @@ async function plan(
           await load(child);
           if (item.isDirectory()) {
             await visit(child);
-          } else if (++fileCount > 1000) {
+          } else if (++fileCount > MAX_DIRECTORY_FILES) {
             throw new Error(
               "Resource operation exceeds 1000 files; use smaller changes",
             );

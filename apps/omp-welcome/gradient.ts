@@ -6,17 +6,58 @@ const PI_LOGO = [
   " ▄██▄  ▄██▄ ",
 ] as const;
 
+const RGB_CHANNEL_MAX = 255;
+const GRADIENT_PINK_RED = RGB_CHANNEL_MAX;
+const GRADIENT_PINK_GREEN = 92;
+const GRADIENT_PINK_BLUE = 200;
+const GRADIENT_PURPLE_RED = 200;
+const GRADIENT_PURPLE_GREEN = 110;
+const GRADIENT_PURPLE_BLUE = RGB_CHANNEL_MAX;
+const GRADIENT_BLUE_VIOLET_RED = 120;
+const GRADIENT_BLUE_VIOLET_GREEN = 130;
+const GRADIENT_BLUE_VIOLET_BLUE = RGB_CHANNEL_MAX;
+const GRADIENT_CYAN_RED = 60;
+const GRADIENT_CYAN_GREEN = 200;
+const GRADIENT_CYAN_BLUE = RGB_CHANNEL_MAX;
+const GRADIENT_MINT_RED = 120;
+const GRADIENT_MINT_GREEN = RGB_CHANNEL_MAX;
+const GRADIENT_MINT_BLUE = 220;
+const GRADIENT_RAMP_MAGENTA = 199;
+const GRADIENT_RAMP_VIOLET = 171;
+const GRADIENT_RAMP_BLUE_VIOLET = 135;
+const GRADIENT_RAMP_BLUE = 99;
+const GRADIENT_RAMP_CYAN = 75;
+const GRADIENT_RAMP_TEAL = 51;
+const GRADIENT_RAMP_LILAC = 87;
 const GRADIENT_STOPS = [
-  [255, 92, 200],
-  [200, 110, 255],
-  [120, 130, 255],
-  [60, 200, 255],
-  [120, 255, 220],
+  [GRADIENT_PINK_RED, GRADIENT_PINK_GREEN, GRADIENT_PINK_BLUE],
+  [GRADIENT_PURPLE_RED, GRADIENT_PURPLE_GREEN, GRADIENT_PURPLE_BLUE],
+  [
+    GRADIENT_BLUE_VIOLET_RED,
+    GRADIENT_BLUE_VIOLET_GREEN,
+    GRADIENT_BLUE_VIOLET_BLUE,
+  ],
+  [GRADIENT_CYAN_RED, GRADIENT_CYAN_GREEN, GRADIENT_CYAN_BLUE],
+  [GRADIENT_MINT_RED, GRADIENT_MINT_GREEN, GRADIENT_MINT_BLUE],
 ] as const;
-const GRADIENT_RAMP_256 = [199, 171, 135, 99, 75, 51, 87];
+const GRADIENT_RAMP_256 = [
+  GRADIENT_RAMP_MAGENTA,
+  GRADIENT_RAMP_VIOLET,
+  GRADIENT_RAMP_BLUE_VIOLET,
+  GRADIENT_RAMP_BLUE,
+  GRADIENT_RAMP_CYAN,
+  GRADIENT_RAMP_TEAL,
+  GRADIENT_RAMP_LILAC,
+];
 const SHINE_HALF_WIDTH = 0.18;
+const SHINE_REPLACEMENT_THRESHOLD = 0.5;
+const GRADIENT_INDEX_ROUNDING_OFFSET = 0.5;
 const INTRO_MS = 3000;
 const INTRO_TICK_MS = 33;
+const INTRO_EASING_EXPONENT = 3;
+const INTRO_PHASE_CYCLE = 2.5;
+const SHINE_PHASE_CYCLE = 3;
+const SHINE_STRENGTH_EXPONENT = 1.5;
 
 interface ShineConfig {
   strength: number;
@@ -29,7 +70,14 @@ function wrappedUnit(value: number): number {
   return ((value % 1) + 1) % 1;
 }
 
-/** Exact OMP five-stop logo gradient with Pi's 256-color fallback ramp. */
+/**
+ * Samples the five-stop RGB gradient or nearest entry of its 256-color ramp.
+ * @param t Gradient position in [0, 1], not a terminal-cell coordinate.
+ * @param colorMode Selects 0–255 RGB channels or an indexed ANSI palette color.
+ * @param shine Optional position and strength in [0, 1]; brightens a narrow band.
+ * @returns Foreground escape only; the caller owns the eventual color reset.
+ * @example gradientEscape(0, "truecolor"); // "\x1b[38;2;255;92;200m"
+ */
 function gradientEscape(
   t: number,
   colorMode: ColorMode,
@@ -50,22 +98,27 @@ function gradientEscape(
       const intensity =
         Math.max(0, 1 - Math.abs(t - shinePosition) / SHINE_HALF_WIDTH) *
         shineStrength;
-      red += (255 - red) * intensity;
-      green += (255 - green) * intensity;
-      blue += (255 - blue) * intensity;
+      red += (RGB_CHANNEL_MAX - red) * intensity;
+      green += (RGB_CHANNEL_MAX - green) * intensity;
+      blue += (RGB_CHANNEL_MAX - blue) * intensity;
     }
     return `\x1b[38;2;${Math.round(red)};${Math.round(green)};${Math.round(blue)}m`;
   }
 
   let index = Math.min(
     GRADIENT_RAMP_256.length - 1,
-    Math.max(0, Math.floor(t * (GRADIENT_RAMP_256.length - 1) + 0.5)),
+    Math.max(
+      0,
+      Math.floor(
+        t * (GRADIENT_RAMP_256.length - 1) + GRADIENT_INDEX_ROUNDING_OFFSET,
+      ),
+    ),
   );
   if (shineStrength > 0) {
     const intensity =
       Math.max(0, 1 - Math.abs(t - shinePosition) / SHINE_HALF_WIDTH) *
       shineStrength;
-    if (intensity > 0.5) {
+    if (intensity > SHINE_REPLACEMENT_THRESHOLD) {
       index = GRADIENT_RAMP_256.length - 1;
     }
   }
@@ -100,12 +153,20 @@ export const RESTING_FRAMES: Readonly<Record<ColorMode, readonly string[]>> = {
   "256color": gradientLogo(PI_LOGO, "256color"),
 };
 
+/**
+ * Builds a fresh logo frame from normalized intro progress without reading a clock.
+ * @param progress Elapsed fraction, normally [0, 1]; easing clamps at both ends.
+ * @param colorMode Foreground encoding supported by the caller's terminal.
+ * @returns ANSI-colored rows with resets; the caller owns timing and scheduling.
+ * @example introFrame(1, "truecolor"); // Same row contents as RESTING_FRAMES.truecolor.
+ */
 export function introFrame(progress: number, colorMode: ColorMode): string[] {
-  const eased = 1 - (1 - Math.min(1, Math.max(0, progress))) ** 3;
-  const phase = wrappedUnit((1 - eased) * 2.5);
+  const eased =
+    1 - (1 - Math.min(1, Math.max(0, progress))) ** INTRO_EASING_EXPONENT;
+  const phase = wrappedUnit((1 - eased) * INTRO_PHASE_CYCLE);
   const shine = {
-    pos: wrappedUnit(progress * 3),
-    strength: (1 - eased) ** 1.5,
+    pos: wrappedUnit(progress * SHINE_PHASE_CYCLE),
+    strength: (1 - eased) ** SHINE_STRENGTH_EXPONENT,
   };
   return gradientLogo(PI_LOGO, colorMode, phase, shine);
 }

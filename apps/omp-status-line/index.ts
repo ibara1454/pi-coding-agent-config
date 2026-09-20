@@ -98,10 +98,19 @@ const STATUS_KEYS: Record<string, true> = {
   subagents: true,
   usage: true,
 };
-const GIT_TTL_MS = 1000;
+const MILLISECONDS_PER_SECOND = 1000;
+const GIT_TTL_MS = MILLISECONDS_PER_SECOND;
+const STATUS_REFRESH_INTERVAL_MS = MILLISECONDS_PER_SECOND;
 const EDITOR_BORDER_RE = /^─{3,}/;
 const GIT_BRANCH_COMMAND_RE =
   /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/;
+const TOKEN_ESTIMATE_ROUNDING_OFFSET = 3;
+const PERCENT_SCALE = 100;
+const DEFAULT_PATH_MAX_LENGTH = 40;
+const MIN_PATH_MAX_LENGTH = 4;
+const MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS = 8;
+const MIN_EDITOR_RENDER_LINES = 3;
+const GIT_REFRESH_COALESCE_DELAY_MS = 150;
 
 function readJsonObject(filePath: string): Record<string, unknown> {
   try {
@@ -500,8 +509,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
   };
 
+  /**
+   * Estimates text tokens as UTF-8 bytes rounded up to groups of four.
+   * @param text Text measured in bytes, not characters or terminal cells.
+   * @example estimateTextTokens("hello"); // 2, not an exact tokenizer count.
+   */
   const estimateTextTokens = (text: string): number =>
-    (Buffer.byteLength(text, "utf8") + 3) >> 2;
+    (Buffer.byteLength(text, "utf8") + TOKEN_ESTIMATE_ROUNDING_OFFSET) >> 2;
 
   const estimateNonMessageTokens = (ctx: ExtensionContext): number => {
     let tokens = estimateTextTokens(ctx.getSystemPrompt());
@@ -580,6 +594,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     return false;
   };
 
+  /**
+   * Snapshots host usage and wall-clock active milliseconds without starting timers.
+   * @param theme Styling callbacks retained for segment rendering; host errors propagate.
+   * @param options Per-segment display options, retained without mutation.
+   * @returns Context with 0–100 percentage units, or null before a session is available.
+   * @example With no currentCtx, buildSegmentContext(theme, {}) returns null.
+   */
   const buildSegmentContext = (
     theme: Theme,
     options: StatusLineSegmentOptions,
@@ -609,7 +630,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       usage: aggregateUsage(currentCtx, tokensPerSecond),
       contextTokens,
       contextPercent:
-        contextWindow > 0 ? (contextTokens / contextWindow) * 100 : null,
+        contextWindow > 0
+          ? (contextTokens / contextWindow) * PERCENT_SCALE
+          : null,
       contextWindow,
       autoCompactEnabled: true,
       activeMs:
@@ -621,6 +644,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     };
   };
 
+  /**
+   * Fits ANSI segments to width in terminal cells, not string length; refreshes Git nonblocking.
+   * @param width Available cells, including separators and caps.
+   * Drops right segments, then shortens the path before dropping other left segments.
+   * @returns Styled row or empty text without a session/positive width; host errors propagate.
+   * @example buildStatusLine(0, theme); // ""
+   */
   const buildStatusLine = (width: number, theme: Theme): string => {
     if (width <= 0) {
       return "";
@@ -701,9 +731,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       const shrinkable = currentWidth - minPathWidth;
       if (shrinkable > 0) {
         const shrinkBy = Math.min(shrinkable, overflow);
-        const currentMaxLength = preset.segmentOptions.path?.maxLength ?? 40;
+        const currentMaxLength =
+          preset.segmentOptions.path?.maxLength ?? DEFAULT_PATH_MAX_LENGTH;
         let nextMaxLength = Math.max(
-          4,
+          MIN_PATH_MAX_LENGTH,
           Math.min(currentMaxLength, currentWidth) - shrinkBy,
         );
         const pathCtx = (maxLength: number): SegmentContext => ({
@@ -716,13 +747,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         let adjusted = renderSegment("path", pathCtx(nextMaxLength));
         if (adjusted.visible && adjusted.content) {
           // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
-          for (let attempt = 0; attempt < 8; attempt++) {
+          for (
+            let attempt = 0;
+            attempt < MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS;
+            attempt++
+          ) {
             const saved = currentWidth - visibleWidth(adjusted.content);
             if (saved >= shrinkBy) {
               break;
             }
             const correctedMaxLength = Math.max(
-              4,
+              MIN_PATH_MAX_LENGTH,
               nextMaxLength - (shrinkBy - saved),
             );
             if (correctedMaxLength >= nextMaxLength) {
@@ -798,8 +833,17 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     return `${leftGroup}${gapColor}${"─".repeat(gapWidth)}\x1b[39m${rightGroup}`;
   };
 
+  /**
+   * Wraps the host editor and replaces the footer; teardown restores only still-owned slots.
+   * @param ctx TUI host; UI callback errors propagate and teardown owns branch unsubscription.
+   * @example installUi(ctx) installs status chrome; releaseSessionResources() removes it.
+   */
   const installUi = (ctx: ExtensionContext): void => {
     const previousEditorFactory = ctx.ui.getEditorComponent();
+    /**
+     * Creates the prior/custom editor and decorates its render method without taking disposal ownership.
+     * @example When a prior factory exists, its editor instance is returned with status chrome.
+     */
     const installedEditorFactory: NonNullable<
       Parameters<ExtensionUIContext["setEditorComponent"]>[0]
     > = (editorTui, editorTheme, keybindings) => {
@@ -807,6 +851,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         previousEditorFactory?.(editorTui, editorTheme, keybindings) ??
         new CustomEditor(editorTui, editorTheme, keybindings);
       const originalRender = editor.render.bind(editor);
+      /**
+       * Renders cell-sized status chrome around the original editor; host errors propagate.
+       * @example render(5) delegates at width 5; fewer than three base rows remain unchanged.
+       */
       editor.render = (width: number): string[] => {
         if (width < 10 || !currentCtx) {
           return [...originalRender(width)];
@@ -814,7 +862,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         const chromeWidth = 3;
         const contentWidth = Math.max(1, width - chromeWidth * 2);
         const lines = [...originalRender(contentWidth)];
-        if (lines.length < 3) {
+        if (lines.length < MIN_EDITOR_RENDER_LINES) {
           return lines;
         }
 
@@ -945,6 +993,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   // Executors retain synchronous event effects and turn thrown failures into rejections.
+  /**
+   * Resets session state and installs TUI chrome plus an owned one-second refresh timer.
+   * @example A non-TUI session_start resets counters without installing UI or a ticker.
+   */
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
     settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
@@ -970,7 +1022,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay this render tick.
       void refreshGit();
       requestRender();
-    }, 1000);
+    }, STATUS_REFRESH_INTERVAL_MS);
     return Promise.resolve();
   });
 
@@ -1010,11 +1062,15 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     return Promise.resolve();
   });
   // ponytail: share the identical message_update/message_end usage callback.
+  /**
+   * Updates output tokens/second from wall-clock stream duration and requests a render.
+   * @example 20 output tokens over two seconds sets tokensPerSecond to 10.
+   */
   pi.on("message_update", (event, ctx) => {
     currentCtx = ctx;
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / 1000;
+      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
       const { output } = usage;
       const outputTokens = numeric(output);
       if (elapsed > 0 && outputTokens > 0) {
@@ -1024,11 +1080,15 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     requestRender();
     return Promise.resolve();
   });
+  /**
+   * Records final output tokens/second when positive usage and elapsed time are available.
+   * @example A final message with zero output retains the last rate and requests a render.
+   */
   pi.on("message_end", (event, ctx) => {
     currentCtx = ctx;
     const usage = messageUsage(event.message);
     if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / 1000;
+      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
       const { output } = usage;
       const outputTokens = numeric(output);
       if (elapsed > 0 && outputTokens > 0) {
@@ -1071,6 +1131,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
     return Promise.resolve();
   });
+  /**
+   * Coalesces Git-changing shell commands into one owned 150 ms refresh timeout.
+   * @example Two immediate "git switch" events replace the pending timeout, not duplicate it.
+   */
   pi.on("user_bash", (event, ctx) => {
     currentCtx = ctx;
     if (GIT_BRANCH_COMMAND_RE.test(event.command)) {
@@ -1082,7 +1146,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         prInFlight = false;
         // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and the coalescing timer stays nonblocking.
         void refreshGit(true);
-      }, 150);
+      }, GIT_REFRESH_COALESCE_DELAY_MS);
     }
     return Promise.resolve();
   });

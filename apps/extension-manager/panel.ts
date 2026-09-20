@@ -15,6 +15,20 @@ import type { CommitResult } from "./types.ts";
 const ENABLE_MOUSE = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE = "\u001b[?1006l\u001b[?1000l";
 const MOUSE_REPORT = /^(\d+);(\d+);(\d+)([Mm])$/;
+const PRINTABLE_CODE_START = 32;
+const DELETE_CODE = 127;
+const NARROW_LAYOUT_THRESHOLD = 100;
+const CLOSE_DIALOG_OPTION_COUNT = 3;
+const SELF_DISABLE_DIALOG_OPTION_COUNT = 2;
+const MOUSE_WHEEL_UP_BUTTON = 64;
+const MOUSE_WHEEL_DOWN_BUTTON = 65;
+const MOUSE_WHEEL_SCROLL_ROWS = 3;
+const PANEL_CHROME_ROWS = 7;
+const LIST_FIRST_SCREEN_ROW = 6;
+const MIN_LIST_WIDTH = 36;
+const LIST_WIDTH_FRACTION = 0.45;
+const PANE_GUTTER_WIDTH = 3;
+const DIALOG_VERTICAL_PADDING_DIVISOR = 3;
 
 export type PanelResult =
   | { readonly type: "closed" }
@@ -53,13 +67,19 @@ interface RowHit extends ColumnHit {
   readonly toggleLastColumn: number;
 }
 
+/**
+ * Makes untrusted labels single-line by stripping terminal sequences and C0/DEL controls.
+ * @param value - Display text; carriage returns and line feeds become spaces.
+ * @returns Plain inline text, retaining other Unicode characters.
+ * @example safeInline("alpha\nbeta\u0000") returns "alpha beta".
+ */
 function safeInline(value: string): string {
   let safe = "";
   for (const character of stripTerminalSequences(value)
     .replaceAll("\n", " ")
     .replaceAll("\r", " ")) {
     const code = character.charCodeAt(0);
-    if (code >= 32 && code !== 127) {
+    if (code >= PRINTABLE_CODE_START && code !== DELETE_CODE) {
       safe += character;
     }
   }
@@ -97,13 +117,19 @@ function parseMouse(data: string):
   return { button, column, row, pressed };
 }
 
+/**
+ * Recognizes nonempty search input containing no C0 controls or DEL.
+ * @param data - Raw terminal input, not a decoded key name.
+ * @returns Whether the entire input can be appended to the search query.
+ * @example isPrintableInput("review") is true; isPrintableInput("\t") is false.
+ */
 function isPrintableInput(data: string): boolean {
   if (data === "" || data.startsWith("\u001b")) {
     return false;
   }
   for (const character of data) {
     const code = character.charCodeAt(0);
-    if (code < 32 || code === 127) {
+    if (code < PRINTABLE_CODE_START || code === DELETE_CODE) {
       return false;
     }
   }
@@ -196,7 +222,7 @@ export class ExtensionManagerPanel implements Component {
   render(width: number): string[] {
     const state = this.#state;
     const height = Math.max(1, state.tui.terminal.rows);
-    state.narrow = width < 100;
+    state.narrow = width < NARROW_LAYOUT_THRESHOLD;
     state.rowHits.length = 0;
     state.tabHits.length = 0;
 
@@ -313,7 +339,10 @@ function handleDialogInput(
   if (dialog === undefined) {
     return;
   }
-  const optionCount = dialog.type === "close" ? 3 : 2;
+  const optionCount =
+    dialog.type === "close"
+      ? CLOSE_DIALOG_OPTION_COUNT
+      : SELF_DISABLE_DIALOG_OPTION_COUNT;
   if (matchesKey(data, "escape")) {
     state.dialog = undefined;
     return;
@@ -392,8 +421,15 @@ function handleMouse(
     readonly pressed: boolean;
   },
 ): void {
-  if (mouse.button === 64 || mouse.button === 65) {
-    state.model.moveSelection(mouse.button === 64 ? -3 : 3);
+  if (
+    mouse.button === MOUSE_WHEEL_UP_BUTTON ||
+    mouse.button === MOUSE_WHEEL_DOWN_BUTTON
+  ) {
+    state.model.moveSelection(
+      mouse.button === MOUSE_WHEEL_UP_BUTTON
+        ? -MOUSE_WHEEL_SCROLL_ROWS
+        : MOUSE_WHEEL_SCROLL_ROWS,
+    );
     panel.invalidate();
     return;
   }
@@ -584,15 +620,23 @@ function renderMain(
   );
   lines.push(state.theme.fg("borderMuted", "─".repeat(Math.max(0, width))));
 
-  const bodyHeight = Math.max(0, height - 7);
+  const bodyHeight = Math.max(0, height - PANEL_CHROME_ROWS);
   if (state.model.detailsOpen) {
     lines.push(...renderInspector(state, width, bodyHeight));
   } else if (state.narrow) {
-    lines.push(...renderList(state, width, bodyHeight, 6));
+    lines.push(...renderList(state, width, bodyHeight, LIST_FIRST_SCREEN_ROW));
   } else {
-    const listWidth = Math.max(36, Math.floor(width * 0.45));
-    const inspectorWidth = Math.max(1, width - listWidth - 3);
-    const list = renderList(state, listWidth, bodyHeight, 6);
+    const listWidth = Math.max(
+      MIN_LIST_WIDTH,
+      Math.floor(width * LIST_WIDTH_FRACTION),
+    );
+    const inspectorWidth = Math.max(1, width - listWidth - PANE_GUTTER_WIDTH);
+    const list = renderList(
+      state,
+      listWidth,
+      bodyHeight,
+      LIST_FIRST_SCREEN_ROW,
+    );
     const inspector = renderInspector(state, inspectorWidth, bodyHeight);
     for (let index = 0; index < bodyHeight; index += 1) {
       lines.push(
@@ -742,7 +786,9 @@ function renderDialog(
     return [];
   }
   const lines = Array.from(
-    { length: Math.max(0, Math.floor(height / 3)) },
+    {
+      length: Math.max(0, Math.floor(height / DIALOG_VERTICAL_PADDING_DIVISOR)),
+    },
     () => "",
   );
   if (dialog.type === "self-disable") {

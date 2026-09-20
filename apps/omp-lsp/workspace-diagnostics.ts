@@ -23,6 +23,11 @@ interface CheckerResult {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_CONCURRENT_CHECKERS = 2;
 const MAX_GO_MODULES = 256;
+const MAX_OUTPUT_LINES = 50;
+const MAX_OUTPUT_LINE_LENGTH = 1000;
+const MAX_OUTPUT_CHARACTERS = 20_000;
+// 2 ** 31 - 1 ms: the maximum signed 32-bit timer delay.
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 const TRAILING_SLASHES = /\/+$/;
 const LINE_BREAK = /\r?\n/;
@@ -141,20 +146,28 @@ function goWorkspacePatterns(output: string): string[] {
   return [...patterns];
 }
 
+/**
+ * Trims checker output and bounds its displayed payload, retaining truncation notices.
+ * @param text - Captured checker output.
+ * @returns Up to 50 lines, 1000 UTF-16 code units per line, then 20000 total, plus notices.
+ * @example boundedOutput("  ok\n") returns "ok".
+ */
 function boundedOutput(text: string): string {
   const lines = text.trim().split(LINE_BREAK);
   const displayed = lines
-    .slice(0, 50)
+    .slice(0, MAX_OUTPUT_LINES)
     .map((line) =>
-      line.length > 1000 ? `${line.slice(0, 1000)} [line truncated]` : line,
+      line.length > MAX_OUTPUT_LINE_LENGTH
+        ? `${line.slice(0, MAX_OUTPUT_LINE_LENGTH)} [line truncated]`
+        : line,
     )
     .join("\n");
   const bounded =
-    displayed.length > 20_000
-      ? `${displayed.slice(0, 20_000)}\n[output truncated at 20000 characters]`
+    displayed.length > MAX_OUTPUT_CHARACTERS
+      ? `${displayed.slice(0, MAX_OUTPUT_CHARACTERS)}\n[output truncated at 20000 characters]`
       : displayed;
-  return lines.length > 50
-    ? `${bounded}\n[${lines.length - 50} additional lines omitted]`
+  return lines.length > MAX_OUTPUT_LINES
+    ? `${bounded}\n[${lines.length - MAX_OUTPUT_LINES} additional lines omitted]`
     : bounded;
 }
 
@@ -235,7 +248,15 @@ async function runChecker(
   }
 }
 
-/** Root-only detection; two finite checkers at a time under one deadline. */
+/**
+ * Detects root-level workspace checkers and runs at most two finite commands concurrently.
+ * @param cwd - Workspace root used for marker discovery and command execution.
+ * @param signal - Optional cancellation, propagated to owned commands.
+ * @param timeoutMs - Shared positive deadline in milliseconds, at most 2147483647; defaults to 120000.
+ * @returns Bounded checker output; invalid durations, missing checkers, and operational failures are errors.
+ * @throws On caller cancellation; command failures otherwise become reported error results.
+ * @example With no supported root markers, runWorkspaceDiagnostics("/project") reports an unverified workspace.
+ */
 export async function runWorkspaceDiagnostics(
   cwd: string,
   signal?: AbortSignal,
@@ -245,7 +266,7 @@ export async function runWorkspaceDiagnostics(
   if (
     !Number.isFinite(timeoutMs) ||
     timeoutMs <= 0 ||
-    timeoutMs > 2_147_483_647
+    timeoutMs > MAX_TIMEOUT_MS
   ) {
     return {
       text: "Workspace diagnostics timeout must be a positive, finite millisecond duration no greater than 2147483647",

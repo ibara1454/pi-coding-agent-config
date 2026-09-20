@@ -21,6 +21,11 @@ import * as processes from "./process.ts";
 import { LanguageServerPool } from "./runtime.ts";
 import type { ServerConfig } from "./types.ts";
 
+// 16 * 1024 + 1 bytes: one byte beyond the 16 KiB header limit.
+const OVERSIZED_HEADER_BYTES = 16_385;
+const STARTUP_ABORT_TIMEOUT_MS = 200;
+const UNVERIFIED_DIAGNOSTIC_TIMEOUT_MS = 100;
+
 const resources: Array<{
   pool: LanguageServerPool;
   peer: MessageConnection;
@@ -145,13 +150,16 @@ describe("LanguageServerPool.get", () => {
   });
 
   test.each([
-    ["an oversized header", "x".repeat(16 * 1024 + 1), "header"],
+    ["an oversized header", "x".repeat(OVERSIZED_HEADER_BYTES), "header"],
     ["an oversized message", "Content-Length: 999999999\r\n\r\n", "message"],
   ])(
     "should reject %s before buffering its body",
     async (_label, bytes, error) => {
       const server = fixture({ holdInitialize: true });
-      const pending = server.pool.get(server.config, AbortSignal.timeout(200));
+      const pending = server.pool.get(
+        server.config,
+        AbortSignal.timeout(STARTUP_ABORT_TIMEOUT_MS),
+      );
       const rejected = pending.catch((failure: unknown) => failure);
       await server.initializing;
       server.output.write(bytes);
@@ -184,7 +192,11 @@ describe("LanguageServer.diagnostics", () => {
     spyOn(fs, "readFile").mockResolvedValue("const value = 1;\n");
     const client = await server.pool.get(server.config);
     await expect(
-      client.diagnostics("/project/example.ts", undefined, 100),
+      client.diagnostics(
+        "/project/example.ts",
+        undefined,
+        UNVERIFIED_DIAGNOSTIC_TIMEOUT_MS,
+      ),
     ).rejects.toThrow("unverified");
   });
 

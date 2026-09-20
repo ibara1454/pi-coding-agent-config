@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { renderSegment } from "./segments.ts";
 import type { SegmentContext } from "./types.ts";
 
+const ASCII_PATH_LABEL = "dir: ";
+
 function createContext(options?: {
   cwd?: string;
   modelName?: string;
@@ -100,7 +102,9 @@ test("should clamp paths by terminal cells", () => {
   const rendered = renderSegment("path", context);
   const plain = Bun.stripANSI(rendered.content);
 
-  expect(plain).toStartWith("dir: ");
-  expect(Bun.stringWidth(plain.slice(5))).toBeLessThanOrEqual(10);
+  expect(plain).toStartWith(ASCII_PATH_LABEL);
+  expect(
+    Bun.stringWidth(plain.slice(ASCII_PATH_LABEL.length)),
+  ).toBeLessThanOrEqual(10);
   expect(plain).toEndWith("é.ts");
 });
