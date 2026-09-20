@@ -140,17 +140,6 @@
   },
   "overrides": [
     {
-      "includes": ["apps/*/index.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            // Pi loads extension entrypoints through their default-exported factories.
-            "noDefaultExport": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": ["**/*.test.ts", "test/**"],
       "javascript": {
         "globals": ["Bun"]
