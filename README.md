@@ -17,6 +17,9 @@ This repository contains personal configuration and customized extensions for
 Before introducing one, replace that directory-wide setting with explicit paths
 to the Pi extension packages.
 
+`apps/openshell-sandbox/` currently contains only workspace and Biome
+configuration. It has no runtime entrypoint, so Pi does not load it.
+
 ## Installation
 
 Install [Pi](https://github.com/earendil-works/pi) and [Bun](https://bun.com/)

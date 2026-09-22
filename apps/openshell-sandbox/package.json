@@ -1,0 +1,13 @@
+{
+  "name": "openshell-sandbox",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write --error-on-warnings ."
+  },
+  "pi": {
+    "extensions": []
+  }
+}

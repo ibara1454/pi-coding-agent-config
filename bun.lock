@@ -66,6 +66,10 @@
         "@earendil-works/pi-coding-agent": "^0.84.1",
       },
     },
+    "apps/openshell-sandbox": {
+      "name": "openshell-sandbox",
+      "version": "1.0.0",
+    },
     "apps/provider-base-url-overrides": {
       "name": "provider-base-url-overrides",
       "version": "1.0.0",
@@ -377,6 +381,8 @@
     "omp-welcome": ["omp-welcome@workspace:apps/omp-welcome"],
 
     "openai": ["openai@6.40.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"] }, "sha512-MWtTjd/gQt4jpbji61NTgFWJLoY/PdRJ6wG9/ZDRMYNMlBKrCrSlkLI+KgHP1vR1qT6LKSAyAqIxno6lcK9JiA=="],
+
+    "openshell-sandbox": ["openshell-sandbox@workspace:apps/openshell-sandbox"],
 
     "p-retry": ["p-retry@4.6.2", "", { "dependencies": { "@types/retry": "0.12.0", "retry": "^0.13.1" } }, "sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ=="],
 
