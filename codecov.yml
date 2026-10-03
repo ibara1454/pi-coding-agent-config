@@ -1,0 +1,46 @@
+codecov:
+  require_ci_to_pass: false
+
+coverage:
+  status:
+    project: false
+    patch: false
+
+comment:
+  layout: "header, diff, components, files, footer"
+  behavior: default
+  require_changes: false
+  require_base: true
+  require_head: true
+  hide_project_coverage: false
+
+component_management:
+  individual_components:
+    - component_id: extension-manager
+      name: extension-manager
+      paths:
+        - apps/extension-manager/**
+    - component_id: omp-lsp
+      name: omp-lsp
+      paths:
+        - apps/omp-lsp/**
+    - component_id: omp-status-line
+      name: pi-extension-omp-status-line
+      paths:
+        - apps/omp-status-line/**
+    - component_id: omp-welcome
+      name: omp-welcome
+      paths:
+        - apps/omp-welcome/**
+    - component_id: provider-base-url-overrides
+      name: provider-base-url-overrides
+      paths:
+        - apps/provider-base-url-overrides/**
+    - component_id: sandbox
+      name: sandbox
+      paths:
+        - apps/sandbox/**
+    - component_id: biome-rules
+      name: biome-rules
+      paths:
+        - packages/biome-rules/**

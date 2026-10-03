@@ -1,2 +1,7 @@
 [test]
 preload = ["./test/setup.ts"]
+coverageReporter = ["text", "lcov"]
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["**/test/setup.ts", "**/*-test-fixtures.ts"]
+# ponytail: reporting-only baseline; raise per-file minimums with coverage improvements.
+coverageThreshold = { lines = 0, functions = 0 }
