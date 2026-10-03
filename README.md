@@ -166,12 +166,15 @@ bun test apps/extension-manager/panel.test.ts
 
 ### Coverage
 
-Coverage is diagnostic only. There are no thresholds, nothing fails on a coverage
-number, and CI never collects it:
-
 ```bash
 bun run test:coverage
 ```
+
+Coverage minimums are **0%** for lines and functions (reporting only), configured
+in `bunfig.toml`. Each workspace writes `coverage/lcov.info`.
+
+CI uploads LCOV to Codecov, which updates one PR comment with coverage and
+base-to-head changes for each package.
 
 ### Stress mode
 
@@ -194,5 +197,5 @@ resulting diff before committing:
 bun test --update-snapshots
 ```
 
-CI runs `bun run check` and `bun run test` only. It never updates snapshots, collects
-coverage, or runs stress mode.
+CI runs `bun run check` and `bun run test:coverage`. It never updates snapshots or
+runs stress mode.

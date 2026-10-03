@@ -1,5 +1,6 @@
 node_modules/
 .turbo/
+coverage/
 # The tracked Pi configuration lives under config/pi.
 /settings.json
 # OS and editor files

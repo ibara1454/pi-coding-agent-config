@@ -22,7 +22,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -33,5 +35,39 @@ jobs:
       - name: Run checks
         run: bun run check
 
-      - name: Run tests
-        run: bun run test
+      - name: Run tests with coverage
+        id: coverage
+        shell: bash
+        env:
+          NO_COLOR: "1"
+        run: |
+          set -o pipefail
+          mkdir -p coverage
+          bun run test:coverage --log-order=grouped --continue=always 2>&1 | tee coverage/report.txt
+
+      - name: Publish coverage summary
+        if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          {
+            printf '## Test coverage\n\n'
+            printf 'Bun enforces coverage thresholds; Codecov reports per-package coverage changes in PR comments.\n\n'
+            printf '```text\n'
+            cat coverage/report.txt
+            printf '\n```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Combine coverage reports
+        id: coverage-report
+        if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
+        run: cat apps/*/coverage/lcov.info packages/*/coverage/lcov.info > coverage/lcov.info
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.coverage-report.outcome == 'success' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage/lcov.info
+          disable_search: true
+          disable_file_fixes: true
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
