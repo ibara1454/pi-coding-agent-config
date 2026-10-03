@@ -1,4 +1,5 @@
 # Pi Coding Agent Configuration
+[![codecov](https://codecov.io/gh/ibara1454/pi-coding-agent-config/graph/badge.svg?token=HPIISHJ6TG)](https://codecov.io/gh/ibara1454/pi-coding-agent-config)
 
 This repository contains personal configuration and customized extensions for
 [pi-coding-agent](https://github.com/earendil-works/pi).
