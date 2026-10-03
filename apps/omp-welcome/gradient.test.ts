@@ -1,57 +1,52 @@
-import { describe, expect, test } from "bun:test";
-import { IntroAnimation, RESTING_FRAMES } from "./gradient.ts";
+import { describe, expect, mock, test } from "bun:test";
+import { IntroAnimation, introFrame, RESTING_FRAMES } from "./gradient.ts";
 import { sanitizeInline } from "./terminal.ts";
 
 const INTRO_DURATION_MS = 3000;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Validate truecolor foreground encoding.
+const TRUECOLOR_ESCAPE_RE = /\x1b\[38;2;\d+;\d+;\d+m/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Validate indexed foreground encoding.
+const INDEXED_ESCAPE_RE = /\x1b\[38;5;\d+m/;
 
-describe("Pi logo gradient", () => {
-  const logo = [
-    "▀██████████▀",
-    " ╘██    ██  ",
-    "  ██    ██  ",
-    "  ██    ██  ",
-    " ▄██▄  ▄██▄ ",
-  ];
-  const colorCodes = (frame: readonly string[]) => [
-    ...new Set(
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: Match ANSI SGR color escapes.
-      frame.join("").match(/\x1b\[38;(?:2;\d+;\d+;\d+|5;\d+)m/g) ?? [],
-    ),
-  ];
+describe("introFrame", () => {
+  test.each([
+    { mode: "truecolor" as const, encoding: TRUECOLOR_ESCAPE_RE },
+    { mode: "256color" as const, encoding: INDEXED_ESCAPE_RE },
+  ])(
+    "should preserve logo geometry and change colors before settling when the terminal uses $mode",
+    ({ mode, encoding }) => {
+      const progress = { start: 0, moving: 0.25, ending: 1 };
+      const start = introFrame(progress.start, mode);
+      const moving = introFrame(progress.moving, mode);
+      const resting = RESTING_FRAMES[mode];
 
-  test("should use the exact five-row block logo and truecolor palette", () => {
-    expect(RESTING_FRAMES.truecolor.map(sanitizeInline)).toEqual(logo);
-    expect(colorCodes(RESTING_FRAMES.truecolor)).toEqual([
-      "\x1b[38;2;200;110;255m",
-      "\x1b[38;2;180;115;255m",
-      "\x1b[38;2;160;120;255m",
-      "\x1b[38;2;140;125;255m",
-      "\x1b[38;2;120;130;255m",
-      "\x1b[38;2;105;148;255m",
-      "\x1b[38;2;90;165;255m",
-      "\x1b[38;2;75;183;255m",
-      "\x1b[38;2;60;200;255m",
-      "\x1b[38;2;75;214;246m",
-      "\x1b[38;2;90;228;238m",
-      "\x1b[38;2;105;241;229m",
-      "\x1b[38;2;214;106;241m",
-      "\x1b[38;2;241;97;214m",
-      "\x1b[38;2;228;101;228m",
-    ]);
-  });
+      for (const frame of [start, moving, introFrame(progress.ending, mode)]) {
+        expect(frame.map(sanitizeInline)).toEqual(resting.map(sanitizeInline));
+        expect(frame.map((line) => Bun.stringWidth(line))).toEqual(
+          resting.map((line) => Bun.stringWidth(line)),
+        );
+        for (const line of frame) {
+          expect(line).toMatch(encoding);
+          expect(line.trimEnd()).toEndWith("\x1b[0m");
+        }
+      }
 
-  test("should use the exact OMP 256-color ramp", () => {
-    expect(RESTING_FRAMES["256color"].map(sanitizeInline)).toEqual(logo);
-    expect(colorCodes(RESTING_FRAMES["256color"])).toEqual([
-      "\x1b[38;5;135m",
-      "\x1b[38;5;99m",
-      "\x1b[38;5;75m",
-      "\x1b[38;5;51m",
-      "\x1b[38;5;87m",
-      "\x1b[38;5;171m",
-      "\x1b[38;5;199m",
-    ]);
-  });
+      expect(moving).not.toEqual(start);
+      expect<readonly string[]>(introFrame(progress.ending, mode)).toEqual(
+        resting,
+      );
+    },
+  );
+
+  test.each([{ mode: "truecolor" as const }, { mode: "256color" as const }])(
+    "should clamp late progress to the resting logo when the terminal uses $mode",
+    ({ mode }) => {
+      const lateProgress = { elapsed: 2 };
+      expect<readonly string[]>(introFrame(lateProgress.elapsed, mode)).toEqual(
+        RESTING_FRAMES[mode],
+      );
+    },
+  );
 });
 
 describe("welcome intro lifecycle", () => {
@@ -86,5 +81,68 @@ describe("welcome intro lifecycle", () => {
     expect(cleared).toBe(1);
     animation.dispose();
     expect(cleared).toBe(1);
+  });
+});
+
+describe("IntroAnimation.start", () => {
+  test("should reset progress and release replaced timers when an active intro restarts", () => {
+    const timing = {
+      backward: -100,
+      midway: 1500,
+      midpointProgress: 0.5,
+      restart: 1800,
+      overrun: 6000,
+    };
+    let now = 0;
+    let tick: (() => void) | undefined;
+    const timerHandle: NodeJS.Timeout = Object.create(null);
+    const clearInterval = mock();
+    const setInterval = mock((handler: () => void) => {
+      tick = handler;
+      return timerHandle;
+    });
+    const renderedProgress: (number | undefined)[] = [];
+    const render = mock(() => {
+      renderedProgress.push(animation.progress());
+    });
+    const animation = new IntroAnimation(render, {
+      now: () => now,
+      setInterval,
+      clearInterval,
+    });
+
+    try {
+      expect(animation.progress()).toBeUndefined();
+      expect(animation.isActive()).toBe(false);
+      animation.dispose();
+      expect(clearInterval).not.toHaveBeenCalled();
+
+      animation.start();
+      expect(renderedProgress.at(-1)).toBe(0);
+      now = timing.backward;
+      expect(animation.progress()).toBe(0);
+
+      now = timing.midway;
+      tick?.();
+      expect(renderedProgress.at(-1)).toBe(timing.midpointProgress);
+      expect(animation.isActive()).toBe(true);
+      expect(clearInterval).not.toHaveBeenCalled();
+
+      now = timing.restart;
+      animation.start();
+      expect(clearInterval).toHaveBeenCalledTimes(1);
+      expect(setInterval).toHaveBeenCalledTimes(2);
+      expect(animation.progress()).toBe(0);
+
+      now = timing.overrun;
+      expect(animation.progress()).toBe(1);
+      tick?.();
+      expect(animation.isActive()).toBe(false);
+      expect(renderedProgress.at(-1)).toBeUndefined();
+      expect(clearInterval).toHaveBeenCalledTimes(2);
+    } finally {
+      animation.dispose();
+    }
+    expect(clearInterval).toHaveBeenCalledTimes(2);
   });
 });
