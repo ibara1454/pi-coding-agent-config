@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import {
   mutateExactPattern,
@@ -17,7 +18,7 @@ import type {
 
 const MISSING = Symbol("missing-settings-owner");
 
-export type SettingsOwnerSnapshot =
+type SettingsOwnerSnapshot =
   | {
       readonly type: "field";
       readonly field: ResourceField;
@@ -229,7 +230,12 @@ export function applySettingsMutations(
   return next;
 }
 
-export function captureOwner(
+/**
+ * Captures a detached field or same-source package owner for conflict comparison.
+ * @returns An owner snapshot with an internal marker for a missing owner.
+ * @example captureOwner({ extensions: [] }, target) // detached field owner
+ */
+function captureOwner(
   settings: JsonObject,
   target: ToggleTarget,
 ): SettingsOwnerSnapshot {
@@ -253,7 +259,11 @@ export function captureOwner(
   };
 }
 
-export function captureMutationOwners(
+/**
+ * Captures each selected owner once without modifying settings or mutations.
+ * @example captureMutationOwners({}, []) // []
+ */
+function captureMutationOwners(
   settings: JsonObject,
   mutations: readonly SettingsMutation[],
 ): readonly SettingsOwnerSnapshot[] {
@@ -273,7 +283,11 @@ export function captureMutationOwners(
   return owners;
 }
 
-export function currentOwner(
+/**
+ * Reads a captured owner's current value, using the same missing-owner marker.
+ * @example currentOwner({ extensions: [] }, fieldSnapshot) // []
+ */
+function currentOwner(
   settings: JsonObject,
   snapshot: SettingsOwnerSnapshot,
 ): unknown {
@@ -287,4 +301,24 @@ export function currentOwner(
     (entry) => packageSource(entry) === snapshot.locator.source,
   );
   return sameSource.length === 0 ? MISSING : sameSource;
+}
+
+/**
+ * Detects changes to the settings owners touched by a staged commit.
+ * Package owners include every occurrence with the same source, so inserting or
+ * removing a duplicate cannot silently redirect a staged mutation.
+ * @param snapshot Settings captured when the mutations were staged.
+ * @param current Settings read under the commit's lock.
+ * @param mutations Selects the top-level fields and package sources to compare.
+ * @returns Whether a selected owner changed; inputs remain untouched.
+ * @example hasSettingsConflict({}, { extensions: [] }, []) // false: no selected owner
+ */
+export function hasSettingsConflict(
+  snapshot: JsonObject,
+  current: JsonObject,
+  mutations: readonly SettingsMutation[],
+): boolean {
+  return captureMutationOwners(snapshot, mutations).some(
+    (owner) => !isDeepStrictEqual(owner.value, currentOwner(current, owner)),
+  );
 }

@@ -269,6 +269,8 @@ bun run typecheck
 bun run test
 ```
 
+Process termination tests check POSIX process-group signaling versus Windows child signaling; process-group fallback coverage is POSIX-only.
+
 ## Origin and license
 
 The extension retains server presets from [Oh My Pi](https://github.com/can1357/oh-my-pi). Upstream attribution and MIT license terms are preserved in [LICENSE](./LICENSE).

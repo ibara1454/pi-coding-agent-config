@@ -15,6 +15,11 @@ import {
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { isObjectRecord } from "./guards.ts";
 import { getPreset } from "./presets.ts";
+import {
+  activeRunMilliseconds,
+  EMPTY_RUN_METRICS,
+  updateRunMetrics,
+} from "./run-metrics.ts";
 import { renderSegment, sanitizeInlineText } from "./segments.ts";
 import {
   DEFAULT_STATUS_BG,
@@ -524,10 +529,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   let ticker: NodeJS.Timeout | undefined;
   let delayedRefresh: NodeJS.Timeout | undefined;
   let disposeUi: (() => void) | null = null;
-  let activeMs = 0;
-  let activeStartedAt: number | null = null;
-  let streamStartedAt: number | null = null;
-  let tokensPerSecond: number | null = null;
+  let runMetrics = EMPTY_RUN_METRICS;
   let gitLastFetch = 0;
   let gitController: AbortController | null = null;
   let gitInFlight = false;
@@ -564,10 +566,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     currentCtx = null;
     footerData = null;
     tui = null;
-    activeMs = 0;
-    activeStartedAt = null;
-    streamStartedAt = null;
-    tokensPerSecond = null;
+    runMetrics = EMPTY_RUN_METRICS;
   };
 
   const refreshPr = async (
@@ -818,7 +817,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       theme,
       settings,
       options,
-      usage: aggregateUsage(currentCtx, tokensPerSecond),
+      usage: aggregateUsage(currentCtx, runMetrics.tokensPerSecond),
       contextTokens,
       contextPercent:
         contextWindow > 0
@@ -826,8 +825,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           : null,
       contextWindow,
       autoCompactEnabled: true,
-      activeMs:
-        activeMs + (activeStartedAt === null ? 0 : now - activeStartedAt),
+      activeMs: activeRunMilliseconds(runMetrics, now),
       git: {
         ...gitState,
         branch: footerData?.getGitBranch() ?? gitState.branch,
@@ -1076,10 +1074,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
     settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
-    activeMs = 0;
-    activeStartedAt = null;
-    streamStartedAt = null;
-    tokensPerSecond = null;
+    runMetrics = EMPTY_RUN_METRICS;
     gitLastFetch = 0;
     prBranchKey = null;
     gitState = {
@@ -1128,59 +1123,51 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     requestRender();
     return Promise.resolve();
   });
+  /**
+   * Opens run metrics using one event timestamp and requests a render.
+   * @example A repeated agent_start restarts stream timing without restarting active time.
+   */
   pi.on("agent_start", (_event, ctx) => {
     currentCtx = ctx;
-    if (activeStartedAt === null) {
-      activeStartedAt = Date.now();
-    }
-    streamStartedAt = Date.now();
+    runMetrics = updateRunMetrics(runMetrics, { kind: "start" }, Date.now());
     requestRender();
     return Promise.resolve();
   });
-  // ponytail: share the identical message_update/message_end usage callback.
   /**
-   * Updates output tokens/second from wall-clock stream duration and requests a render.
-   * @example 20 output tokens over two seconds sets tokensPerSecond to 10.
+   * Applies assistant output to run metrics at the event timestamp and requests a render.
+   * @example Missing output retains the previous rate and still requests a render.
    */
   pi.on("message_update", (event, ctx) => {
     currentCtx = ctx;
-    const usage = messageUsage(event.message);
-    if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
-      const { output } = usage;
-      const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0) {
-        tokensPerSecond = outputTokens / elapsed;
-      }
-    }
+    runMetrics = updateRunMetrics(
+      runMetrics,
+      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      Date.now(),
+    );
     requestRender();
     return Promise.resolve();
   });
   /**
-   * Records final output tokens/second when positive usage and elapsed time are available.
-   * @example A final message with zero output retains the last rate and requests a render.
+   * Applies final assistant output to run metrics and requests a render.
+   * @example After agent_end, final output retains the previous rate.
    */
   pi.on("message_end", (event, ctx) => {
     currentCtx = ctx;
-    const usage = messageUsage(event.message);
-    if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
-      const { output } = usage;
-      const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0) {
-        tokensPerSecond = outputTokens / elapsed;
-      }
-    }
+    runMetrics = updateRunMetrics(
+      runMetrics,
+      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      Date.now(),
+    );
     requestRender();
     return Promise.resolve();
   });
+  /**
+   * Closes run metrics at the event timestamp and requests a render.
+   * @example A repeated agent_end retains the accumulated duration and throughput.
+   */
   pi.on("agent_end", (_event, ctx) => {
     currentCtx = ctx;
-    if (activeStartedAt !== null) {
-      activeMs += Date.now() - activeStartedAt;
-      activeStartedAt = null;
-    }
-    streamStartedAt = null;
+    runMetrics = updateRunMetrics(runMetrics, { kind: "end" }, Date.now());
     requestRender();
     return Promise.resolve();
   });

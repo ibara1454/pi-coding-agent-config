@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { renderSegment } from "./segments.ts";
 import type {
   SegmentContext,
@@ -7,6 +7,8 @@ import type {
 } from "./types.ts";
 
 const ASCII_PATH_LABEL = "dir: ";
+const FIXED_CLOCK_MINUTE = 5;
+const FIXED_CLOCK_SECOND = 9;
 
 /**
  * Creates a status-line context with no recorded usage and plain theme effects.
@@ -17,6 +19,9 @@ const ASCII_PATH_LABEL = "dir: ";
 function createContext(options?: {
   cwd?: string;
   modelName?: string;
+  modelId?: string;
+  reasoning?: boolean;
+  thinkingLevel?: string;
   pullRequestUrl?: string;
   subscription?: boolean;
 }): SegmentContext {
@@ -24,11 +29,11 @@ function createContext(options?: {
     extensionContext: {
       cwd: options?.cwd ?? "/tmp/project",
       model: {
-        id: "test-model",
+        id: options?.modelId ?? "test-model",
         name: options?.modelName ?? "Test",
-        reasoning: false,
+        reasoning: options?.reasoning ?? false,
       },
-      thinkingLevel: "off",
+      thinkingLevel: options?.thinkingLevel ?? "off",
       modelRegistry: {
         // biome-ignore lint/style/useNamingConvention: host API method name
         isUsingOAuth: () => options?.subscription ?? false,
@@ -121,6 +126,138 @@ test("should clamp paths by terminal cells", () => {
 });
 
 describe("renderSegment", () => {
+  test.each([
+    {
+      name: "Claude Sonnet",
+      id: "test-model",
+      expected: "Sonnet",
+    },
+    {
+      name: "Friendly label",
+      id: "gpt-5.2-codex",
+      expected: "GPT-5.2-Codex",
+    },
+    { name: "\n\t", id: "fallback-model", expected: "fallback-model" },
+    { name: "", id: "", expected: "no-model" },
+  ])(
+    "should render the model label as $expected when its name is '$name' and ID is '$id'",
+    ({ name, id, expected }) => {
+      const context = createContext({ modelName: name, modelId: id });
+
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        `[M] ${expected}`,
+      );
+    },
+  );
+
+  test.each([
+    {
+      level: "off",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [off]",
+    },
+    {
+      level: "medium",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [med]",
+    },
+    {
+      level: "xhigh",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [xhi]",
+    },
+    {
+      level: "high",
+      ascii: false,
+      compact: false,
+      expected: "⬢ Test · ◒ high",
+    },
+    {
+      level: "high",
+      ascii: false,
+      compact: true,
+      expected: "◒ Test",
+    },
+    {
+      level: "future",
+      ascii: false,
+      compact: false,
+      expected: "⬢ Test · future",
+    },
+  ])(
+    "should render reasoning as '$expected' when level is $level, ascii is $ascii, and compact is $compact",
+    ({ level, ascii, compact, expected }) => {
+      const context = createContext({ reasoning: true, thinkingLevel: level });
+      context.settings.preset = ascii ? "ascii" : "custom";
+      context.settings.compactThinkingLevel = compact;
+
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        expected,
+      );
+      context.options.model = { showThinkingLevel: false };
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        ascii ? "[M] Test" : "⬢ Test",
+      );
+    },
+  );
+
+  test.each([
+    { hours: 0, format: "12h", seconds: false, expected: "12:05am" },
+    { hours: 13, format: "12h", seconds: true, expected: "1:05:09pm" },
+    { hours: 13, format: "24h", seconds: true, expected: "13:05:09" },
+  ] as const)(
+    "should render time as $expected when the hour is $hours in $format format with seconds $seconds",
+    ({ hours, format, seconds, expected }) => {
+      const hour = spyOn(Date.prototype, "getHours").mockReturnValue(hours);
+      const minute = spyOn(Date.prototype, "getMinutes").mockReturnValue(
+        FIXED_CLOCK_MINUTE,
+      );
+      const second = spyOn(Date.prototype, "getSeconds").mockReturnValue(
+        FIXED_CLOCK_SECOND,
+      );
+      try {
+        const context = createContext();
+        context.options.time = { format, showSeconds: seconds };
+
+        expect(renderSegment("time", context)).toEqual({
+          content: `time: ${expected}`,
+          visible: true,
+        });
+      } finally {
+        second.mockRestore();
+        minute.mockRestore();
+        hour.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    {
+      url: "https://example.com/pr/42",
+      expected: "\x1b]8;;https://example.com/pr/42\x07PR #42\x1b]8;;\x07",
+    },
+    {
+      url: "http://example.com/pr/42",
+      expected: "\x1b]8;;http://example.com/pr/42\x07PR #42\x1b]8;;\x07",
+    },
+    { url: "file:///tmp/pr/42", expected: "PR #42" },
+    { url: "not-a-url", expected: "PR #42" },
+    { url: "https://example.com/pr/42 next", expected: "PR #42" },
+  ])(
+    "should render the PR label with only a safe HTTP hyperlink when its URL is $url",
+    ({ url, expected }) => {
+      const context = createContext({ pullRequestUrl: url });
+      const rendered = renderSegment("pr", context);
+
+      expect(rendered.visible).toBe(true);
+      expect(Bun.stripANSI(rendered.content)).toBe("PR #42");
+      expect(rendered.content).toBe(expected);
+    },
+  );
+
   test("should total input, output, and cache writes without cache reads when rendering token_total", () => {
     const context = createContext();
     Object.assign(context.usage, {

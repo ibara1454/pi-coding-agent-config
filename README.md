@@ -171,7 +171,7 @@ bun test apps/extension-manager/panel.test.ts
 bun run test:coverage
 ```
 
-Minimum coverage: **60% lines and functions per instrumented file**, configured in
+Minimum coverage: **80% lines and functions per instrumented file**, configured in
 `bunfig.toml`. `apps/sandbox/**` is excluded.
 
 Each workspace writes `coverage/lcov.info`.

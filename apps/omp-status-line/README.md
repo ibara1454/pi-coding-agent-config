@@ -130,8 +130,12 @@ or when the current branch has no pull request.
 
 The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-status-line` through the `../../apps` directory entry.
 
-Run the unit tests from the extension directory:
+Run the unit and integration tests from the extension directory:
 
 ```bash
 bun test
 ```
+
+Run timing and throughput calculations live in `run-metrics.ts` and take explicit
+timestamps. Unit tests cover their state transitions without host UI or clock
+mocks; integration tests retain rendering, lifecycle, and resource-ownership checks.
