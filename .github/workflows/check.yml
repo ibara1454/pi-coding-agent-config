@@ -51,7 +51,7 @@ jobs:
         run: |
           {
             printf '## Test coverage\n\n'
-            printf 'Bun enforces coverage thresholds; Codecov reports per-package coverage changes in PR comments.\n\n'
+            printf 'Bun enforces per-file coverage floors; Codecov requires 90%% changed-line coverage and reports per-package changes in PR comments.\n\n'
             printf '```text\n'
             cat coverage/report.txt
             printf '\n```\n'
