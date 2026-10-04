@@ -1,4 +1,6 @@
-import { expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Spies must intercept the extension's live named filesystem imports.
+import * as fs from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +17,17 @@ const STATUS_LINE_LEADING_BORDER = "╭──";
 const WIDE_STATUS_RENDER_WIDTH = 160;
 const NARROW_STATUS_WIDTH_PADDING = 4;
 const PATH_STATUS_RENDER_WIDTH = 120;
+const STATUS_LINE_TRAILING_BORDER = "──╮";
+const STATUS_LINE_CHROME_WIDTH = Bun.stringWidth(
+  STATUS_LINE_LEADING_BORDER + STATUS_LINE_TRAILING_BORDER,
+);
+const STATUS_GROUP_GAP_WIDTH = 1;
+const FIXED_STATUS_CLOCK_MS = 10_000;
+const IDLE_REFRESH_INTERVAL_MS = 2_000_000_000;
+const SHORT_PATH_RENDER_WIDTH = 17;
+const MIN_EDITOR_CHROME_RENDER_WIDTH = 10;
+const HOOK_STATUS_RENDER_WIDTH = 9;
+const EMPTY_EDITOR_BORDER = /^╭─+╮$/;
 
 function statusText(line: string): string {
   const plain = Bun.stripANSI(line);
@@ -315,4 +328,388 @@ test("should release owned resources without replacing newer UI", async () => {
     await harness.handlers.get("session_shutdown")?.({});
     await fixture.cleanup();
   }
+});
+
+/**
+ * Installs the exported extension against in-memory settings, commands, and host UI.
+ * @param settings Segment layout to render; no existing config or repository is read.
+ * @param options Deterministic host path, command responses, and hook statuses.
+ * @returns Rendered public components and cleanup owning session shutdown and environment restoration.
+ * @example const fixture = await createRenderedFixture({ leftSegments: ["path"] }); // fixture.top(40)
+ */
+async function createRenderedFixture(
+  settings: Record<string, unknown>,
+  options: {
+    cwd?: string;
+    exec?: Parameters<typeof createHarness>[0]["exec"];
+    statuses?: Map<string, string>;
+  } = {},
+) {
+  const agentDir = "/virtual/status-line-agent";
+  const previousAgentDir = process.env[AGENT_DIR_ENV];
+  process.env[AGENT_DIR_ENV] = agentDir;
+  const settingsIo: {
+    readFileSync: (file: fs.PathOrFileDescriptor, encoding: "utf8") => string;
+  } = fs;
+  const readSettings = spyOn(settingsIo, "readFileSync").mockImplementation(
+    (file) =>
+      String(file) === join(agentDir, "settings.json")
+        ? JSON.stringify({
+            statusLine: {
+              preset: "custom",
+              leftSegments: [],
+              rightSegments: [],
+              separator: "powerline-thin",
+              sessionAccent: false,
+              segmentOptions: {
+                model: { showThinkingLevel: false },
+                path: {
+                  abbreviate: false,
+                  maxLength: 80,
+                  stripWorkPrefix: false,
+                },
+              },
+              ...settings,
+            },
+          })
+        : "{}",
+  );
+  const clock = spyOn(Date, "now").mockReturnValue(FIXED_STATUS_CLOCK_MS);
+  // Own an inert host-compatible handle; no test waits for or observes wall-clock ticks.
+  const idleRefresh = setInterval(() => undefined, IDLE_REFRESH_INTERVAL_MS);
+  const interval = spyOn(globalThis, "setInterval").mockReturnValue(
+    idleRefresh,
+  );
+  const harness = createHarness({
+    cwd: options.cwd ?? "/project/界界/é.ts",
+    trusted: true,
+    ...(options.exec ? { exec: options.exec } : {}),
+  });
+  let branch = "main";
+  let notifyBranchChange = (): void => undefined;
+  const unsubscribe = mock(() => undefined);
+  const requestRender = mock(() => undefined);
+
+  /** Releases session resources and restores every mocked boundary, including on setup failure. */
+  const cleanup = async (): Promise<void> => {
+    try {
+      await harness.handlers.get("session_shutdown")?.({});
+    } finally {
+      readSettings.mockRestore();
+      clock.mockRestore();
+      interval.mockRestore();
+      clearInterval(idleRefresh);
+      if (previousAgentDir === undefined) {
+        delete process.env[AGENT_DIR_ENV];
+      } else {
+        process.env[AGENT_DIR_ENV] = previousAgentDir;
+      }
+    }
+  };
+
+  try {
+    const ompStatusLine = await loadExtension();
+    ompStatusLine(harness.pi as never);
+    await harness.handlers.get("session_start")?.({}, harness.context);
+    const editorFactory = harness.getEditorFactory();
+    const footerFactory = harness.getFooterFactory();
+    if (
+      typeof editorFactory !== "function" ||
+      typeof footerFactory !== "function"
+    ) {
+      throw new Error("Expected status-line components to be installed");
+    }
+    const editor = editorFactory({}, harness.theme, {}) as {
+      render: (width: number) => string[];
+    };
+    const footer = footerFactory({ requestRender }, harness.theme, {
+      getGitBranch: () => branch,
+      getExtensionStatuses: () => options.statuses ?? new Map(),
+      onBranchChange: (callback: () => void) => {
+        notifyBranchChange = callback;
+        return unsubscribe;
+      },
+    }) as {
+      render: (width: number) => string[];
+      dispose: () => void;
+    };
+    return {
+      harness,
+      footer,
+      unsubscribe,
+      cleanup,
+      top: (width = WIDE_STATUS_RENDER_WIDTH): string =>
+        Bun.stripANSI(editor.render(width)[0] ?? ""),
+      async changeBranch(nextBranch: string): Promise<void> {
+        branch = nextBranch;
+        notifyBranchChange();
+        // The command boundary resolves immediately; flush its refresh continuation.
+        await Promise.resolve();
+      },
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
+describe("ompStatusLine", () => {
+  test("should drop right segments from the end before shortening the left path when both groups overflow", async () => {
+    const fixture = await createRenderedFixture({
+      leftSegments: ["model", "path"],
+      rightSegments: ["context_pct", "git"],
+    });
+    try {
+      const full = fixture.top();
+      expect(full).toContain("main");
+      expect(full).toContain("6.9%/272K");
+      expect(full).toContain(fixture.harness.context.cwd);
+      expect(Bun.stringWidth(full)).toBe(WIDE_STATUS_RENDER_WIDTH);
+      const left = statusText(full);
+      const right = full.slice(
+        full.lastIndexOf("◀"),
+        -STATUS_LINE_TRAILING_BORDER.length,
+      );
+      const firstRightWidth = Bun.stringWidth(`${right.split(" < ")[0]} `);
+      const mediumWidth =
+        Bun.stringWidth(left) +
+        firstRightWidth +
+        STATUS_GROUP_GAP_WIDTH +
+        STATUS_LINE_CHROME_WIDTH;
+      const medium = fixture.top(mediumWidth);
+      expect(medium).not.toContain("main");
+      expect(medium).toContain("6.9%/272K");
+      expect(medium).toContain(fixture.harness.context.cwd);
+      expect(Bun.stringWidth(medium)).toBe(mediumWidth);
+
+      const narrowWidth = Bun.stringWidth(left) + STATUS_LINE_CHROME_WIDTH;
+      const narrow = fixture.top(narrowWidth);
+      expect(narrow).not.toContain("6.9%/272K");
+      expect(narrow).not.toContain("◀");
+      expect(narrow).toContain(fixture.harness.context.cwd);
+      expect(Bun.stringWidth(narrow)).toBe(narrowWidth);
+      expect(fixture.top()).toBe(full);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("should shorten a wide-character path without dropping context or mutating its full rendering when cells overflow", async () => {
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["model", "path", "context_pct"] },
+      { cwd: "/project/界界界界界界/é.ts" },
+    );
+    try {
+      const full = fixture.top();
+      const width =
+        Bun.stringWidth(statusText(full)) + NARROW_STATUS_WIDTH_PADDING;
+      const narrow = fixture.top(width);
+      expect(narrow).toContain("Test");
+      expect(narrow).toContain("6.9%/272K");
+      expect(narrow).toContain("…");
+      expect(narrow).toContain("é.ts");
+      expect(narrow).not.toContain(fixture.harness.context.cwd);
+      expect(Bun.stringWidth(narrow)).toBe(width);
+      expect(fixture.top()).toBe(full);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("should retain a short trailing path and drop the model when the path cannot shrink", async () => {
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["model", "path"] },
+      { cwd: "/tiny" },
+    );
+    try {
+      expect(fixture.top()).toContain("Test");
+      const narrow = fixture.top(SHORT_PATH_RENDER_WIDTH);
+      expect(narrow).toContain("📁 /tiny");
+      expect(narrow).not.toContain("Test");
+      expect(narrow).not.toContain("…");
+      expect(Bun.stringWidth(narrow)).toBe(SHORT_PATH_RENDER_WIDTH);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test.each(["/tiny", "/project/界界界界/é.ts"])(
+    "should omit the final path segment when %s cannot fit the editor cell budget",
+    async (cwd) => {
+      const fixture = await createRenderedFixture(
+        { leftSegments: ["path"] },
+        { cwd },
+      );
+      try {
+        expect(fixture.top()).toContain("📁");
+        const narrow = fixture.top(MIN_EDITOR_CHROME_RENDER_WIDTH);
+        expect(narrow).toMatch(EMPTY_EDITOR_BORDER);
+        expect(Bun.stringWidth(narrow)).toBe(MIN_EDITOR_CHROME_RENDER_WIDTH);
+        expect(fixture.top()).toContain(cwd);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test.each([
+    ["empty or one-character lines", "\nX\n", []],
+    [
+      "index-only changes",
+      "M  modified\nA  added\nD  deleted\nR  old -> new\nC  copied\n",
+      ["+5"],
+    ],
+    ["working-tree-only changes", " M modified\n D deleted\n", ["*2"]],
+    ["untracked files", "?? first\n?? second\n", ["?2"]],
+    [
+      "changes in both columns and conflicts",
+      "MM modified\nUU conflict\nAA added\nDD deleted\n",
+      ["*4", "+4"],
+    ],
+    [
+      "spaces and question marks outside untracked pairs",
+      " ? one\n?  two\n   clean\n",
+      [],
+    ],
+    [
+      "mixed status entries",
+      "M  staged\n M unstaged\nMM both\nUU conflict\n?? first\n?? second\nX\n\n",
+      ["*3", "+3", "?2"],
+    ],
+  ])(
+    "should render independent git counters when porcelain contains %s",
+    async (_condition, stdout, counters) => {
+      const fixture = await createRenderedFixture(
+        { leftSegments: ["git"] },
+        {
+          exec: async (command) => ({
+            stdout: command === "git" ? String(stdout) : "",
+            stderr: "",
+            code: command === "git" ? 0 : 1,
+            killed: false,
+          }),
+        },
+      );
+      try {
+        const rendered = statusText(fixture.top());
+        expect(rendered).toContain("main");
+        const renderedCounters: string[] = rendered.match(/[+*?]\d+/g) ?? [];
+        expect(renderedCounters).toEqual(counters);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test.each([
+    ["write", undefined],
+    ["edit", undefined],
+    ["bash", { command: "git switch feature" }],
+  ])(
+    "should replace previous git counts when a %s tool result forces a refresh within the cache lifetime",
+    async (toolName, input) => {
+      let stdout = "M  staged\n?? new\n";
+      const fixture = await createRenderedFixture(
+        { leftSegments: ["git"] },
+        {
+          exec: async (command) => ({
+            stdout: command === "git" ? stdout : "",
+            stderr: "",
+            code: command === "git" ? 0 : 1,
+            killed: false,
+          }),
+        },
+      );
+      try {
+        expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual([
+          "+1",
+          "?1",
+        ]);
+        stdout = " M changed\n D removed\n";
+        await fixture.harness.handlers.get("tool_result")?.(
+          { toolName, input },
+          fixture.harness.context,
+        );
+        expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual(["*2"]);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test("should clear old counts and show the new branch when the footer reports a branch change", async () => {
+    let stdout = "UU conflict\n?? new\n";
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["git"] },
+      {
+        exec: async (command) => ({
+          stdout: command === "git" ? stdout : "",
+          stderr: "",
+          code: command === "git" ? 0 : 1,
+          killed: false,
+        }),
+      },
+    );
+    try {
+      expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual([
+        "*1",
+        "+1",
+        "?1",
+      ]);
+      stdout = "";
+      await fixture.changeBranch("feature");
+      const rendered = statusText(fixture.top());
+      expect(rendered).toContain("feature");
+      expect(rendered).not.toContain("main");
+      expect(rendered.match(/[+*?]\d+/g) ?? []).toEqual([]);
+      fixture.footer.dispose();
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+      await fixture.cleanup();
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("should sanitize and truncate hook statuses by cells while omitting duplicates of configured segments", async () => {
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["mode", "git"] },
+      {
+        statuses: new Map([
+          ["mode", "duplicate mode status"],
+          ["git", "duplicate git status"],
+          ["z-wide", "界界界界界"],
+          ["a-ready", "\x1b[31mReady\x1b[0m\nnext"],
+        ]),
+      },
+    );
+    try {
+      const full = fixture.footer.render(WIDE_STATUS_RENDER_WIDTH);
+      expect(full).toEqual([
+        "Ready next",
+        "duplicate git status",
+        "界界界界界",
+      ]);
+      const lines = fixture.footer.render(HOOK_STATUS_RENDER_WIDTH);
+      expect(lines).toHaveLength(full.length);
+      for (const [index, line] of lines.entries()) {
+        const source = full[index];
+        if (source === undefined) {
+          throw new Error(
+            "Expected the hook status to retain its sorted position",
+          );
+        }
+        expect(line.startsWith(source.slice(0, 1))).toBe(true);
+        expect(line).not.toBe(source);
+        expect(Bun.stringWidth(line)).toBeLessThanOrEqual(
+          HOOK_STATUS_RENDER_WIDTH,
+        );
+        expect(line).not.toContain("\x1b[31m");
+        expect(line).not.toContain("\n");
+        expect(line).not.toContain("\r");
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 });

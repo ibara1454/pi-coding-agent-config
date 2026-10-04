@@ -116,6 +116,68 @@ describe("loadLspConfig", () => {
     ).toEqual(["available"]);
   });
 
+  test("should apply flat server overrides without treating the idle timeout as a server", async () => {
+    fixture({
+      idleTimeoutMs: 250,
+      available: { args: ["--flat"] },
+    });
+    const config = await loadLspConfig(cwd, agentDir, true);
+    expect(config).toMatchObject({ idleTimeoutMs: 250, warnings: [] });
+    expect(serversForFile(config, join(cwd, "example.ts"))).toMatchObject([
+      { name: "available", args: ["--flat"] },
+    ]);
+  });
+
+  test.each([
+    { condition: "the document is an array", override: [] },
+    { condition: "the server map is an array", override: { servers: [] } },
+  ])(
+    "should retain the earlier server configuration when $condition",
+    async ({ override }) => {
+      const files = fixture(override);
+      files.set(
+        join(agentDir, "lsp.json"),
+        JSON.stringify({
+          idleTimeoutMs: 250,
+          servers: { available: { args: ["--agent"] } },
+        }),
+      );
+      const config = await loadLspConfig(cwd, agentDir, true);
+      expect(config).toMatchObject({ idleTimeoutMs: 250 });
+      expect(config.warnings).toEqual([expect.stringContaining(projectConfig)]);
+      expect(serversForFile(config, join(cwd, "example.ts"))).toMatchObject([
+        { name: "available", args: ["--agent"] },
+      ]);
+    },
+  );
+
+  test("should retain prior definitions and apply valid siblings when server entries are malformed", async () => {
+    const files = fixture({
+      servers: {
+        available: null,
+        " ": {},
+        optional: { disabled: true },
+      },
+    });
+    files.set(
+      join(agentDir, "lsp.json"),
+      JSON.stringify({ servers: { available: { args: ["--agent"] } } }),
+    );
+    const config = await loadLspConfig(cwd, agentDir, true);
+    expect(config.warnings).toEqual([
+      expect.stringContaining(`${projectConfig}: server available:`),
+      expect.stringContaining(`${projectConfig}: server  :`),
+    ]);
+    expect(serversForFile(config, join(cwd, "example.ts"))).toMatchObject([
+      { name: "available", args: ["--agent"] },
+    ]);
+    expect(
+      config.servers.find((server) => server.name === "optional"),
+    ).toMatchObject({
+      disabled: true,
+    });
+  });
+
   test("should merge valid layers and retain earlier values when project settings are invalid", async () => {
     const files = fixture({
       idleTimeoutMs: -1,

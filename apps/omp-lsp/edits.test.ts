@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
@@ -8,6 +9,26 @@ import * as host from "@earendil-works/pi-coding-agent";
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
 import { applyTextEdits, applyWorkspaceEdit, fileToUri } from "./edits.ts";
 
+const filesystem: {
+  opendir: (directory: string) => Promise<
+    AsyncIterable<{
+      name: string;
+      isDirectory: () => boolean;
+      isFile: () => boolean;
+      isSymbolicLink: () => boolean;
+    }>
+  >;
+} = fs;
+
+/**
+ * Replaces filesystem and host-lock effects with test-owned entries for workspace mutations.
+ * @param initial - Regular files and contents to seed; directories and links can be added to the result.
+ * @returns Mutable fixture state and controls for queued host changes or mutation failures.
+ * Missing paths reject with ENOENT; configured write/rename failures leave their source unchanged.
+ * Spies are restored after each test, so no fixture operation touches the real filesystem.
+ * @example memoryFiles({ "/project/a.ts": "old" }).changeWhileQueued("/project/a.ts", "host")
+ * makes a queued workspace edit reject without overwriting "host".
+ */
 function memoryFiles(initial: Record<string, string>) {
   const files = new Map(
     Object.entries(initial).map(([file, content]) => [
@@ -17,13 +38,15 @@ function memoryFiles(initial: Record<string, string>) {
   );
   const writes: string[] = [];
   const directories = new Set(["/", "/project"]);
+  const links = new Map<string, string>();
+  let temporaryDirectoryCount = 0;
   let beforeLock: (() => void) | undefined;
   let failingWrite: string | undefined;
   let failRename = false;
   spyOn(fs, "lstat").mockImplementation(((value: unknown) => {
     const file = String(value);
     const content = files.get(file);
-    if (!(content || directories.has(file))) {
+    if (!(content || directories.has(file) || links.has(file))) {
       return Promise.reject(
         Object.assign(new Error(`Missing ${file}`), { code: "ENOENT" }),
       );
@@ -34,13 +57,38 @@ function memoryFiles(initial: Record<string, string>) {
       size: content?.content.length ?? 0,
       mtimeMs: content?.revision ?? 0,
       ctimeMs: content?.revision ?? 0,
-      isSymbolicLink: () => false,
+      isSymbolicLink: () => links.has(file),
       isDirectory: () => directories.has(file),
       isFile: () => files.has(file),
     } as Stats);
   }) as typeof fs.lstat);
-  spyOn(fs, "realpath").mockImplementation((async (file: unknown) =>
-    String(file)) as typeof fs.realpath);
+  spyOn(fs, "realpath").mockImplementation(((value: unknown) => {
+    const file = String(value);
+    if (!(files.has(file) || directories.has(file) || links.has(file))) {
+      return Promise.reject(
+        Object.assign(new Error(`Missing ${file}`), { code: "ENOENT" }),
+      );
+    }
+    return Promise.resolve(links.get(file) ?? file);
+  }) as typeof fs.realpath);
+  spyOn(fs, "readlink").mockImplementation(((value: unknown) =>
+    Promise.resolve(links.get(String(value)) ?? "")) as typeof fs.readlink);
+  spyOn(filesystem, "opendir").mockImplementation((directory) => {
+    const children = [...files.keys(), ...directories, ...links.keys()]
+      .filter((file) => file !== directory && path.dirname(file) === directory)
+      .map((file) => ({
+        name: path.basename(file),
+        isDirectory: () => directories.has(file),
+        isFile: () => files.has(file),
+        isSymbolicLink: () => links.has(file),
+      }));
+    return Promise.resolve({
+      [Symbol.asyncIterator]: () => {
+        const iterator = children.values();
+        return { next: () => Promise.resolve(iterator.next()) };
+      },
+    });
+  });
   spyOn(fs, "readFile").mockImplementation(((file: unknown) => {
     const value = files.get(String(file));
     if (!value) {
@@ -68,6 +116,15 @@ function memoryFiles(initial: Record<string, string>) {
     directories.add(String(file));
     return Promise.resolve();
   }) as typeof fs.mkdir);
+  spyOn(fs, "mkdtemp").mockImplementation(((prefix: unknown) => {
+    const directory = `${String(prefix)}${++temporaryDirectoryCount}`;
+    directories.add(directory);
+    return Promise.resolve(directory);
+  }) as typeof fs.mkdtemp);
+  spyOn(fs, "rmdir").mockImplementation((file) => {
+    directories.delete(String(file));
+    return Promise.resolve();
+  });
   spyOn(fs, "rename").mockImplementation((source, destination) => {
     if (failRename) {
       return Promise.reject(new Error("Cross-device rename failed"));
@@ -80,8 +137,22 @@ function memoryFiles(initial: Record<string, string>) {
     files.delete(String(source));
     return Promise.resolve();
   });
-  spyOn(fs, "rm").mockImplementation((file) => {
-    files.delete(String(file));
+  spyOn(fs, "rm").mockImplementation((file, options) => {
+    const name = String(file);
+    for (const candidate of [
+      ...files.keys(),
+      ...directories,
+      ...links.keys(),
+    ]) {
+      if (
+        candidate === name ||
+        (options?.recursive && candidate.startsWith(`${name}/`))
+      ) {
+        files.delete(candidate);
+        directories.delete(candidate);
+        links.delete(candidate);
+      }
+    }
     return Promise.resolve();
   });
   spyOn(host, "withFileMutationQueue").mockImplementation(
@@ -95,6 +166,8 @@ function memoryFiles(initial: Record<string, string>) {
   return {
     files,
     writes,
+    directories,
+    links,
     changeWhileQueued: (file: string, content: string) => {
       beforeLock = () => files.set(file, { content, revision: 2 });
     },
@@ -107,6 +180,12 @@ function memoryFiles(initial: Record<string, string>) {
   };
 }
 
+/**
+ * Builds a first-line UTF-16 replacement for snapshot-relative text-edit tests.
+ * @param start - Inclusive UTF-16 offset; end is exclusive.
+ * @returns An LSP edit without mutating fixture contents.
+ * @example replacement(0, 3, "new") replaces "old" with "new".
+ */
 function replacement(start: number, end: number, newText: string): TextEdit {
   return {
     range: {
@@ -368,5 +447,572 @@ describe("applyWorkspaceEdit", () => {
       file: "/project/ref.ts",
       files: ["/project/ref.ts"],
     });
+  });
+
+  test.each(["overwrite", "ignoreIfExists", "recursive", "ignoreIfNotExists"])(
+    "should reject resource edits without writing when %s is not a boolean",
+    async (option) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        {
+          documentChanges: [
+            {
+              kind: "create",
+              uri: fileToUri("/project/a.ts"),
+              options: { [option]: "true" },
+            },
+          ],
+        },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain(
+        `Invalid resource operation option ${option}`,
+      );
+      expect(result.changes).toEqual([]);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test.each([
+    [
+      "the rename source URI is missing",
+      { kind: "rename", newUri: fileToUri("/project/b.ts") },
+      "Rename requires oldUri and newUri",
+    ],
+    [
+      "the rename destination URI is missing",
+      { kind: "rename", oldUri: fileToUri("/project/a.ts") },
+      "Rename requires oldUri and newUri",
+    ],
+    [
+      "the resource kind is unsupported",
+      { kind: "copy", uri: fileToUri("/project/a.ts") },
+      "Unsupported workspace resource operation",
+    ],
+    [
+      "the create URI is missing",
+      { kind: "create" },
+      "Resource operation requires a URI",
+    ],
+    [
+      "the delete URI is missing",
+      { kind: "delete" },
+      "Resource operation requires a URI",
+    ],
+  ] as const)(
+    "should reject malformed resource edits without writing when %s",
+    async (_condition, operation, reason) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        { documentChanges: [operation] },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain(reason);
+      expect(result.changes).toEqual([]);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test.each([
+    [
+      "a create target already exists",
+      { kind: "create", uri: fileToUri("/project/a.ts") },
+      "Create target already exists",
+    ],
+    [
+      "a delete target is missing",
+      { kind: "delete", uri: fileToUri("/project/missing.ts") },
+      "Delete target does not exist",
+    ],
+    [
+      "a rename source is missing",
+      {
+        kind: "rename",
+        oldUri: fileToUri("/project/missing.ts"),
+        newUri: fileToUri("/project/b.ts"),
+      },
+      "Rename source does not exist",
+    ],
+  ] as const)(
+    "should preserve existing files when %s",
+    async (_condition, operation, reason) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        { documentChanges: [operation] },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain(reason);
+      expect(result.changes).toEqual([]);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test.each([
+    {
+      condition: "ignore is enabled without overwrite",
+      options: { overwrite: false, ignoreIfExists: true },
+      content: "old",
+      kinds: [],
+    },
+    {
+      condition: "overwrite is enabled without ignore",
+      options: { overwrite: true, ignoreIfExists: false },
+      content: "",
+      kinds: ["create"],
+    },
+    {
+      condition: "overwrite and ignore are both enabled",
+      options: { overwrite: true, ignoreIfExists: true },
+      content: "",
+      kinds: ["create"],
+    },
+  ] as const)(
+    "should honor create precedence when $condition",
+    async ({ options, content, kinds }) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        {
+          documentChanges: [
+            {
+              kind: "create",
+              uri: fileToUri("/project/a.ts"),
+              options,
+            },
+          ],
+        },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(true);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe(content);
+      expect(result.changes.map((change) => change.kind)).toEqual([...kinds]);
+      expect(fixture.writes).toEqual(kinds.map(() => "/project/a.ts"));
+    },
+  );
+
+  test("should preserve a directory when create requests overwrite", async () => {
+    const fixture = memoryFiles({});
+    fixture.directories.add("/project/folder");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "create",
+            uri: fileToUri("/project/folder"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain(
+      "cannot overwrite directory or symlink",
+    );
+    expect(fixture.directories.has("/project/folder")).toBe(true);
+    expect(fixture.files.has("/project/folder")).toBe(false);
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should preserve a symlink and its target when create requests overwrite", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    fixture.links.set("/project/link.ts", "/project/a.ts");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "create",
+            uri: fileToUri("/project/link.ts"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain(
+      "cannot overwrite directory or symlink",
+    );
+    expect(fixture.links.get("/project/link.ts")).toBe("/project/a.ts");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test.each([
+    ["equal", "/project/a.ts"],
+    ["inside the source", "/project/a.ts/child"],
+    ["an ancestor of the source", "/project"],
+  ])(
+    "should reject a rename without changing files when its destination is %s",
+    async (_condition, destination) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        {
+          documentChanges: [
+            {
+              kind: "rename",
+              oldUri: fileToUri("/project/a.ts"),
+              newUri: fileToUri(destination),
+            },
+          ],
+        },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain("distinct, non-nested paths");
+      expect(result.changes).toEqual([]);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test.each([
+    {
+      condition: "ignore is enabled without overwrite",
+      options: { overwrite: false, ignoreIfExists: true },
+      source: "source",
+      destination: "target",
+      kinds: [],
+      files: ["/project/a.ts", "/project/b.ts"],
+    },
+    {
+      condition: "overwrite is enabled without ignore",
+      options: { overwrite: true, ignoreIfExists: false },
+      source: undefined,
+      destination: "source",
+      kinds: ["rename"],
+      files: ["/project/b.ts"],
+    },
+    {
+      condition: "overwrite and ignore are both enabled",
+      options: { overwrite: true, ignoreIfExists: true },
+      source: undefined,
+      destination: "source",
+      kinds: ["rename"],
+      files: ["/project/b.ts"],
+    },
+  ] as const)(
+    "should honor rename precedence when $condition",
+    async ({ options, source, destination, kinds, files }) => {
+      const fixture = memoryFiles({
+        "/project/a.ts": "source",
+        "/project/b.ts": "target",
+      });
+      const result = await applyWorkspaceEdit(
+        {
+          documentChanges: [
+            {
+              kind: "rename",
+              oldUri: fileToUri("/project/a.ts"),
+              newUri: fileToUri("/project/b.ts"),
+              options,
+            },
+          ],
+        },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(true);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe(source);
+      expect(fixture.files.get("/project/b.ts")?.content).toBe(destination);
+      expect(result.changes.map((change) => change.kind)).toEqual([...kinds]);
+      expect([...fixture.files.keys()].sort()).toEqual([...files]);
+      expect([...fixture.directories].sort()).toEqual(["/", "/project"]);
+    },
+  );
+
+  test("should ignore a missing delete target when ignoreIfNotExists is enabled", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "delete",
+            uri: fileToUri("/project/missing.ts"),
+            options: { ignoreIfNotExists: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should recreate and edit deleted content in declared operation order", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const uri = fileToUri("/project/a.ts");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          { kind: "delete", uri },
+          { kind: "create", uri },
+          {
+            textDocument: { uri, version: null },
+            edits: [replacement(0, 0, "new")],
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
+    expect(result.changes.map((change) => change.kind)).toEqual([
+      "delete",
+      "create",
+      "edit",
+    ]);
+  });
+
+  test("should remove an empty directory when recursive deletion is disabled", async () => {
+    const fixture = memoryFiles({});
+    fixture.directories.add("/project/empty");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [{ kind: "delete", uri: fileToUri("/project/empty") }],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect(fixture.directories.has("/project/empty")).toBe(false);
+    expect(result.changes).toEqual([
+      { kind: "delete", file: "/project/empty", files: [] },
+    ]);
+  });
+
+  test("should preserve a nonempty directory when recursive deletion is disabled", async () => {
+    const fixture = memoryFiles({ "/project/folder/a.ts": "old" });
+    fixture.directories.add("/project/folder");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          { kind: "delete", uri: fileToUri("/project/folder") },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("nonempty directory");
+    expect(result.changes).toEqual([]);
+    expect(fixture.directories.has("/project/folder")).toBe(true);
+    expect(fixture.files.get("/project/folder/a.ts")?.content).toBe("old");
+  });
+
+  test("should report descendant files and preserve siblings when deleting recursively", async () => {
+    const fixture = memoryFiles({
+      "/project/folder/nested/a.ts": "old",
+      "/project/sibling.ts": "keep",
+    });
+    fixture.directories.add("/project/folder");
+    fixture.directories.add("/project/folder/nested");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "delete",
+            uri: fileToUri("/project/folder"),
+            options: { recursive: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect([...fixture.files.keys()]).toEqual(["/project/sibling.ts"]);
+    expect(fixture.files.get("/project/sibling.ts")?.content).toBe("keep");
+    expect([...fixture.directories].sort()).toEqual(["/", "/project"]);
+    expect(result.changes).toEqual([
+      {
+        kind: "delete",
+        file: "/project/folder",
+        files: ["/project/folder/nested/a.ts"],
+      },
+    ]);
+  });
+
+  test("should report only removed descendants when recursive deletion partially fails", async () => {
+    const fixture = memoryFiles({
+      "/project/folder/a.ts": "first",
+      "/project/folder/b.ts": "second",
+    });
+    fixture.directories.add("/project/folder");
+    spyOn(fs, "rm").mockImplementation(() => {
+      fixture.files.delete("/project/folder/a.ts");
+      return Promise.reject(new Error("Delete interrupted"));
+    });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "delete",
+            uri: fileToUri("/project/folder"),
+            options: { recursive: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Delete interrupted");
+    expect(fixture.files.has("/project/folder/a.ts")).toBe(false);
+    expect(fixture.files.get("/project/folder/b.ts")?.content).toBe("second");
+    expect(result.changes).toEqual([
+      {
+        kind: "delete",
+        file: "/project/folder",
+        files: ["/project/folder/a.ts"],
+      },
+    ]);
+  });
+
+  test("should reject conflicting text aliases before committing either edit", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    fixture.links.set("/project/link.ts", "/project/a.ts");
+    const result = await applyWorkspaceEdit(
+      {
+        changes: {
+          [fileToUri("/project/link.ts")]: [replacement(0, 1, "x")],
+          [fileToUri("/project/a.ts")]: [replacement(1, 2, "y")],
+        },
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("conflicting aliases");
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should edit a canonical target using the aliased document snapshot", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    fixture.links.set("/project/link.ts", "/project/a.ts");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            textDocument: { uri: fileToUri("/project/link.ts"), version: 1 },
+            edits: [replacement(0, "old".length, "new")],
+          },
+        ],
+      },
+      {
+        cwd: "/project",
+        documents: new Map([
+          ["/project/link.ts", { version: 1, content: "old" }],
+        ]),
+        document: (file) =>
+          file === "/project/link.ts"
+            ? { version: 1, content: "old" }
+            : undefined,
+      },
+    );
+    expect(result.applied).toBe(true);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
+    expect(fixture.links.get("/project/link.ts")).toBe("/project/a.ts");
+    expect(result.changes).toEqual([
+      {
+        kind: "edit",
+        file: "/project/a.ts",
+        files: ["/project/a.ts", "/project/link.ts"],
+      },
+    ]);
+  });
+
+  test("should reject a missing text target without creating a file", async () => {
+    const fixture = memoryFiles({});
+    const result = await applyWorkspaceEdit(
+      {
+        changes: {
+          [fileToUri("/project/missing.ts")]: [replacement(0, 0, "new")],
+        },
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Missing /project/missing.ts");
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.size).toBe(0);
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should preserve a text target when canonical resolution fails with a nonmissing error", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    spyOn(fs, "realpath").mockRejectedValue(
+      Object.assign(new Error("Canonical access denied"), { code: "EACCES" }),
+    );
+    const result = await applyWorkspaceEdit(
+      { changes: { [fileToUri("/project/a.ts")]: [replacement(0, 1, "x")] } },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Canonical access denied");
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should preserve a newly appeared create target when another writer wins the lock", async () => {
+    const fixture = memoryFiles({});
+    fixture.changeWhileQueued("/project/a.ts", "host");
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [{ kind: "create", uri: fileToUri("/project/a.ts") }],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("File changed while waiting");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("host");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should reject queued edits when file metadata changes without changing content", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    fixture.changeWhileQueued("/project/a.ts", "old");
+    const result = await applyWorkspaceEdit(
+      { changes: { [fileToUri("/project/a.ts")]: [replacement(0, 1, "x")] } },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("File changed while waiting");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should reject a text mutation when the live document version advances after planning", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const document = mock(() => ({
+      version: 2,
+      content: "old",
+    })).mockReturnValueOnce({ version: 1, content: "old" });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            textDocument: { uri: fileToUri("/project/a.ts"), version: 1 },
+            edits: [replacement(0, 1, "x")],
+          },
+        ],
+      },
+      {
+        cwd: "/project",
+        documents: new Map([["/project/a.ts", { version: 1, content: "old" }]]),
+        document,
+      },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain(
+      "Document version changed before mutation",
+    );
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
   });
 });
