@@ -20,8 +20,8 @@ spellings when resolving naming violations; do not rename public contracts solel
 to satisfy a naming convention.
 
 Gradual adoption keeps metric rules at **Error** while lowering their limits:
-cognitive complexity is capped at **80** (Biome default: 15), reduced from 120,
-with **50** as the next target. Function length remains capped at **750** counted
+cognitive complexity is capped at **40** (Biome default: 15), reduced from 50.
+Function length remains capped at **750** counted
 lines (Biome default: 50). These ceilings include production code and test-suite
 callbacks; lower them as owning operations are simplified rather than splitting
 cohesive code solely to meet a metric. `noMagicNumbers` is enforced in both production and test code,
@@ -80,7 +80,7 @@ All rules in this section use the `lint/style/` prefix.
 | Rule | Meaning | Severity |
 |---|---|---|
 | `lint/complexity/noExcessiveLinesPerFunction` | Flags functions exceeding the configured limit of 750 counted lines. | Error |
-| `lint/complexity/noExcessiveCognitiveComplexity` | Flags branching/nesting complexity above the configured limit of 80. | Error |
+| `lint/complexity/noExcessiveCognitiveComplexity` | Flags branching/nesting complexity above the configured limit of 40. | Error |
 | `lint/complexity/useSimplifiedLogicExpression` | Flags redundant terms in logical expressions. | Error |
 | `lint/complexity/noImplicitCoercions` | Prefers explicit conversions, such as `Boolean(value)` instead of `!!value`. | Error |
 | `lint/style/useNumberNamespace` | Prefers equivalent `Number` properties, such as `Number.NaN` instead of global `NaN`. | Error |

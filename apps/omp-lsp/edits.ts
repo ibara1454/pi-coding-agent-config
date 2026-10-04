@@ -273,6 +273,75 @@ export function applyTextEdits(
 }
 
 /**
+ * Parses one resource operation after its change annotation has been accepted.
+ * @param change - Recorded workspace change; options are checked before kind and URIs.
+ * @returns A create, rename, or delete operation without changing caller-owned plans.
+ * @throws For invalid options, missing/unsupported URIs, or unsupported operation kinds.
+ * @example resourceOperation({ kind: "create", uri: "file:///a.ts" }) returns
+ * a create operation for /a.ts with overwrite and ignore disabled.
+ */
+function resourceOperation(
+  change: Record<string, unknown>,
+): Exclude<Operation, { kind: "text" }> {
+  const { options: resourceOptions } = change;
+  const options =
+    resourceOptions === undefined
+      ? {}
+      : record(resourceOptions, "resource operation options");
+  for (const key of [
+    "overwrite",
+    "ignoreIfExists",
+    "recursive",
+    "ignoreIfNotExists",
+  ]) {
+    if (options[key] !== undefined && typeof options[key] !== "boolean") {
+      throw new Error(`Invalid resource operation option ${key}`);
+    }
+  }
+  const { kind } = change;
+  if (kind === "rename") {
+    const { oldUri, newUri } = change;
+    if (typeof oldUri !== "string" || typeof newUri !== "string") {
+      throw new Error("Rename requires oldUri and newUri");
+    }
+    const { overwrite, ignoreIfExists } = options;
+    return {
+      kind: "rename",
+      file: uriToFile(oldUri),
+      newFile: uriToFile(newUri),
+      overwrite: overwrite === true,
+      ignore: ignoreIfExists === true,
+    };
+  }
+  if (kind !== "create" && kind !== "delete") {
+    throw new Error(
+      `Unsupported workspace resource operation: ${String(kind)}`,
+    );
+  }
+  const { uri } = change;
+  if (typeof uri !== "string") {
+    throw new Error("Resource operation requires a URI");
+  }
+  const file = uriToFile(uri);
+  if (kind === "create") {
+    const { overwrite, ignoreIfExists } = options;
+    return {
+      kind: "create",
+      file,
+      overwrite: overwrite === true,
+      ignore: ignoreIfExists === true,
+    };
+  }
+  const { recursive, ignoreIfNotExists } = options;
+  return {
+    kind: "delete",
+    file,
+    recursive: recursive === true,
+    ignore: ignoreIfNotExists === true,
+  };
+}
+
+/**
  * Validates raw workspace edits and coalesces text edits between resource operations.
  * @param value - Untrusted WorkspaceEdit; documentChanges takes precedence over changes.
  * @returns Ordered text/create/rename/delete operations, limited to 2000.
@@ -357,63 +426,7 @@ function operations(value: unknown): Operation[] {
       flush();
       const { annotationId } = change;
       annotation(annotationId);
-      const { options: resourceOptions } = change;
-      const options =
-        resourceOptions === undefined
-          ? {}
-          : record(resourceOptions, "resource operation options");
-      for (const key of [
-        "overwrite",
-        "ignoreIfExists",
-        "recursive",
-        "ignoreIfNotExists",
-      ]) {
-        if (options[key] !== undefined && typeof options[key] !== "boolean") {
-          throw new Error(`Invalid resource operation option ${key}`);
-        }
-      }
-      const { kind } = change;
-      if (kind === "rename") {
-        const { oldUri, newUri } = change;
-        if (typeof oldUri !== "string" || typeof newUri !== "string") {
-          throw new Error("Rename requires oldUri and newUri");
-        }
-        const { overwrite, ignoreIfExists } = options;
-        result.push({
-          kind: "rename",
-          file: uriToFile(oldUri),
-          newFile: uriToFile(newUri),
-          overwrite: overwrite === true,
-          ignore: ignoreIfExists === true,
-        });
-      } else if (kind === "create" || kind === "delete") {
-        const { uri } = change;
-        if (typeof uri !== "string") {
-          throw new Error("Resource operation requires a URI");
-        }
-        const file = uriToFile(uri);
-        if (kind === "create") {
-          const { overwrite, ignoreIfExists } = options;
-          result.push({
-            kind: "create",
-            file,
-            overwrite: overwrite === true,
-            ignore: ignoreIfExists === true,
-          });
-        } else {
-          const { recursive, ignoreIfNotExists } = options;
-          result.push({
-            kind: "delete",
-            file,
-            recursive: recursive === true,
-            ignore: ignoreIfNotExists === true,
-          });
-        }
-      } else {
-        throw new Error(
-          `Unsupported workspace resource operation: ${String(kind)}`,
-        );
-      }
+      result.push(resourceOperation(change));
     }
   } else {
     const { changes } = edit;
@@ -529,6 +542,81 @@ export async function directoryFiles(
     }
     return 0;
   });
+}
+
+/**
+ * Resolves a text target without changing its operation or the planner's alias map.
+ * @param existing - Virtual entry, permitting newly created paths without a disk realpath.
+ * @returns Canonical operation retaining the requested document alias.
+ * @throws On filesystem errors or conflicting aliases for one canonical file.
+ * @example A request for a symlink returns its target as file and the link as documentFile.
+ */
+async function canonicalTextOperation(
+  op: Extract<Operation, { kind: "text" }>,
+  existing: Entry | null,
+  canonicalNames: ReadonlyMap<string, string>,
+): Promise<Extract<Operation, { kind: "text" }>> {
+  const documentFile = op.file;
+  let file = documentFile;
+  try {
+    file = await fs.realpath(documentFile);
+  } catch (error) {
+    if (!(missing(error) && existing)) {
+      throw error;
+    }
+  }
+  const priorName = canonicalNames.get(file);
+  if (priorName && priorName !== documentFile) {
+    throw new Error(
+      `Workspace edit addresses one file through conflicting aliases: ${priorName}, ${documentFile}`,
+    );
+  }
+  return file === documentFile ? op : { ...op, file, documentFile };
+}
+
+/**
+ * Checks resource-operation source policy before descendants or destinations are loaded.
+ * @returns False for explicitly ignored create/delete operations; otherwise true.
+ * @throws For invalid existing entry kinds, missing sources, or nested rename paths.
+ * @example Creating an existing file with ignore enabled and overwrite disabled returns false.
+ */
+function validateResourceSource(
+  op: Exclude<Operation, { kind: "text" }>,
+  before: Entry | null,
+  label: string,
+): boolean {
+  if (op.kind === "create") {
+    if (before && !op.overwrite) {
+      if (op.ignore) {
+        return false;
+      }
+      throw new Error(`Create target already exists: ${label}`);
+    }
+    if (before && before.kind !== "file") {
+      throw new Error(`Create cannot overwrite directory or symlink: ${label}`);
+    }
+  } else if (op.kind === "delete") {
+    if (!before) {
+      if (op.ignore) {
+        return false;
+      }
+      throw new Error(`Delete target does not exist: ${label}`);
+    }
+  } else {
+    if (!before) {
+      throw new Error(`Rename source does not exist: ${label}`);
+    }
+    if (
+      op.file === op.newFile ||
+      within(op.newFile, op.file) ||
+      within(op.file, op.newFile)
+    ) {
+      throw new Error(
+        "Rename source and destination must be distinct, non-nested paths",
+      );
+    }
+  }
+  return true;
 }
 
 /**
@@ -681,31 +769,22 @@ async function plan(
     };
   };
   const canonicalNames = new Map<string, string>();
-  for (const op of operations(edit)) {
+  for (let op of operations(edit)) {
     options.signal?.throwIfAborted();
     if (op.kind === "text") {
       const documentFile = op.file;
-      await load(documentFile);
-      try {
-        op.file = await fs.realpath(documentFile);
-      } catch (error) {
-        if (!(missing(error) && virtual.get(documentFile))) {
-          throw error;
-        }
-      }
-      const priorName = canonicalNames.get(op.file);
-      if (priorName && priorName !== documentFile) {
-        throw new Error(
-          `Workspace edit addresses one file through conflicting aliases: ${priorName}, ${documentFile}`,
-        );
-      }
+      op = await canonicalTextOperation(
+        op,
+        await load(documentFile),
+        canonicalNames,
+      );
       canonicalNames.set(op.file, documentFile);
-      if (op.file !== documentFile) {
-        op.documentFile = documentFile;
-      }
     }
     const before = await load(op.file);
     const label = path.relative(options.cwd, op.file) || op.file;
+    if (op.kind !== "text" && !validateResourceSource(op, before, label)) {
+      continue;
+    }
     if (op.kind === "text") {
       const planned = planTextEdit(op, before, label);
       if (planned) {
@@ -713,29 +792,12 @@ async function plan(
         changes.push(planned.change);
       }
     } else if (op.kind === "create") {
-      if (before && !op.overwrite) {
-        if (op.ignore) {
-          continue;
-        }
-        throw new Error(`Create target already exists: ${label}`);
-      }
-      if (before && before.kind !== "file") {
-        throw new Error(
-          `Create cannot overwrite a directory or symlink: ${label}`,
-        );
-      }
       await parents(op.file);
       virtual.set(op.file, { kind: "file", signature: "created", content: "" });
       changes.push({ op, files: [op.file], summary: `Created ${label}` });
     } else if (op.kind === "delete") {
-      if (!before) {
-        if (op.ignore) {
-          continue;
-        }
-        throw new Error(`Delete target does not exist: ${label}`);
-      }
       const subtree = await tree(op.file);
-      if (before.kind === "directory" && !op.recursive && subtree.length > 1) {
+      if (before?.kind === "directory" && !op.recursive && subtree.length > 1) {
         throw new Error(`Delete target is a nonempty directory: ${label}`);
       }
       const files = subtree.filter(
@@ -746,18 +808,6 @@ async function plan(
       }
       changes.push({ op, files, summary: `Deleted ${label}` });
     } else {
-      if (!before) {
-        throw new Error(`Rename source does not exist: ${label}`);
-      }
-      if (
-        op.file === op.newFile ||
-        within(op.newFile, op.file) ||
-        within(op.file, op.newFile)
-      ) {
-        throw new Error(
-          "Rename source and destination must be distinct, non-nested paths",
-        );
-      }
       const target = await load(op.newFile);
       if (target && !op.overwrite) {
         if (op.ignore) {
@@ -969,6 +1019,59 @@ async function inspectFailedMutationEffects(
 }
 
 /**
+ * Commits a non-rename operation while the caller owns locks and execution reporting.
+ * @param after - Planned text contents; unused for resource operations.
+ * @throws On a changed document version or filesystem failure, including partial writes.
+ * @example A create operation makes missing parents and writes an empty file.
+ */
+async function commitFileChange(
+  op: Exclude<Operation, { kind: "rename" }>,
+  after: string | undefined,
+  options: EditOptions,
+): Promise<void> {
+  if (op.kind === "text") {
+    const live = options.document?.(op.documentFile ?? op.file);
+    if (op.version !== null && live?.version !== op.version) {
+      throw new Error(`Document version changed before mutation: ${op.file}`);
+    }
+    await fs.writeFile(op.file, after ?? "", "utf8");
+  } else if (op.kind === "create") {
+    await fs.mkdir(path.dirname(op.file), { recursive: true });
+    await fs.writeFile(op.file, "", { flag: op.overwrite ? "w" : "wx" });
+  } else {
+    const stat = await fs.lstat(op.file);
+    if (stat.isDirectory() && !op.recursive) {
+      await fs.rmdir(op.file);
+    } else {
+      await fs.rm(op.file, { recursive: op.recursive });
+    }
+  }
+}
+
+/**
+ * Rechecks planning snapshots before any commit while the caller holds file locks.
+ * @param originals - Original entries in planning order, including absent paths.
+ * @throws On the first changed signature/content or filesystem read failure.
+ * Does not mutate snapshots or acquire/release the caller's locks.
+ * @example An originally absent /a.ts that now exists rejects before any edit is written.
+ */
+async function assertOriginalsUnchanged(
+  originals: ReadonlyMap<string, Entry | null>,
+): Promise<void> {
+  for (const [file, original] of originals) {
+    const current = await entry(file);
+    if (
+      original?.signature !== current?.signature ||
+      original?.content !== current?.content
+    ) {
+      throw new Error(
+        `File changed while waiting to apply workspace edit: ${file}`,
+      );
+    }
+  }
+}
+
+/**
  * Validates a raw workspace edit before mutation, then rechecks under Pi's shared file locks.
  * Preview and validation failures never write. A later failure can include committed changes;
  * callers must reconcile those changes even when applied is false.
@@ -1001,41 +1104,13 @@ export async function applyWorkspaceEdit(
     }
     await lockPaths([...planned.originals.keys()], async () => {
       options.signal?.throwIfAborted();
-      for (const [file, original] of planned.originals) {
-        const current = await entry(file);
-        if (
-          original?.signature !== current?.signature ||
-          original?.content !== current?.content
-        ) {
-          throw new Error(
-            `File changed while waiting to apply workspace edit: ${file}`,
-          );
-        }
-      }
+      await assertOriginalsUnchanged(planned.originals);
       for (const change of planned.changes) {
         const { op } = change;
         options.signal?.throwIfAborted();
         try {
-          if (op.kind === "text") {
-            const live = options.document?.(op.documentFile ?? op.file);
-            if (op.version !== null && live?.version !== op.version) {
-              throw new Error(
-                `Document version changed before mutation: ${op.file}`,
-              );
-            }
-            await fs.writeFile(op.file, change.after ?? "", "utf8");
-          } else if (op.kind === "create") {
-            await fs.mkdir(path.dirname(op.file), { recursive: true });
-            await fs.writeFile(op.file, "", {
-              flag: op.overwrite ? "w" : "wx",
-            });
-          } else if (op.kind === "delete") {
-            const stat = await fs.lstat(op.file);
-            if (stat.isDirectory() && !op.recursive) {
-              await fs.rmdir(op.file);
-            } else {
-              await fs.rm(op.file, { recursive: op.recursive });
-            }
+          if (op.kind !== "rename") {
+            await commitFileChange(op, change.after, options);
           } else {
             await fs.mkdir(path.dirname(op.newFile), { recursive: true });
             try {

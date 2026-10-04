@@ -7,6 +7,7 @@ import {
 import {
   diagnosticsText,
   diagnosticTargets,
+  formattingOptions,
   hoverText,
   locations,
   normalizeDiagnostics,
@@ -53,6 +54,37 @@ function directoryEntries(
       return { next: () => Promise.resolve(iterator.next()) };
     },
   };
+}
+
+/**
+ * Installs in-memory EditorConfig reads; the test preload restores both spies after each test.
+ * @param files - Read-only path-to-text fixtures; absent paths reject with ENOENT.
+ * @returns Filesystem spies for injecting failures and checking search boundaries.
+ * @example mockEditorConfigFiles({ "/project/.editorconfig": "[*]\nindent_size=4" }) supplies four-space indentation.
+ */
+function mockEditorConfigFiles(files: Readonly<Record<string, string>>) {
+  const configFilesystem: {
+    stat: (file: string) => Promise<{ size: number }>;
+    readFile: (file: string, encoding: "utf8") => Promise<string>;
+  } = fs;
+  const missing = Object.assign(new Error("Missing configuration"), {
+    code: "ENOENT",
+  });
+  const stat = spyOn(configFilesystem, "stat").mockImplementation((file) => {
+    const content = files[file];
+    return content === undefined
+      ? Promise.reject(missing)
+      : Promise.resolve({ size: Buffer.byteLength(content) });
+  });
+  const readFile = spyOn(configFilesystem, "readFile").mockImplementation(
+    (file) => {
+      const content = files[file];
+      return content === undefined
+        ? Promise.reject(missing)
+        : Promise.resolve(content);
+    },
+  );
+  return { stat, readFile };
 }
 
 describe("resolvePosition", () => {
@@ -507,5 +539,209 @@ describe("diagnosticTargets", () => {
       diagnosticTargets("*.ts", "/project", AbortSignal.abort(reason)),
     ).rejects.toBe(reason);
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe("formattingOptions", () => {
+  test.each([
+    {
+      condition: "space-indented lines have different nesting depths",
+      content: "top\n\n  one\n      three\n    two\n  \n",
+      expected: { tabSize: 2, insertSpaces: true },
+    },
+    {
+      condition: "tab-indented lines precede space-indented lines",
+      content: "\tfirst\n    second\n",
+      expected: { tabSize: 4, insertSpaces: false },
+    },
+  ])(
+    "should infer indentation from the document when $condition",
+    async ({ content, expected }) => {
+      mockEditorConfigFiles({});
+      expect(
+        await formattingOptions("/project/main.ts", content, "/project"),
+      ).toMatchObject(expected);
+    },
+  );
+
+  test("should apply nearer files and later matching sections over inherited indentation", async () => {
+    mockEditorConfigFiles({
+      "/project/.editorconfig": "[*]\nindent_style=tab\nindent_size=8",
+      "/project/src/.editorconfig": [
+        "# child settings",
+        "; another comment",
+        "",
+        "indent_size=99",
+        "[*]",
+        "Indent_Style = SPACE",
+        "indent_size=6",
+        "malformed setting",
+        "[*.ts]",
+        "INDENT_SIZE = 4",
+        "[*.md]",
+        "indent_size=9",
+      ].join("\r\n"),
+    });
+    expect(
+      await formattingOptions("/project/src/main.ts", "\tvalue\n", "/project"),
+    ).toMatchObject({ tabSize: 4, insertSpaces: true });
+  });
+
+  test.each([
+    {
+      condition: "the nearest config declares root=true",
+      preamble: "root = true\n",
+      cwd: "/project",
+    },
+    {
+      condition: "the nearest config is at the workspace boundary",
+      preamble: "",
+      cwd: "/project/src",
+    },
+  ])(
+    "should ignore settings above the search boundary when $condition",
+    async ({ preamble, cwd }) => {
+      const { stat } = mockEditorConfigFiles({
+        "/project/.editorconfig": "[*]\nindent_style=tab\nindent_size=8",
+        "/project/src/.editorconfig": `${preamble}[*]\nindent_size=4`,
+      });
+      expect(
+        await formattingOptions("/project/src/main.ts", "  value\n", cwd),
+      ).toMatchObject({ tabSize: 4, insertSpaces: true });
+      expect(stat).not.toHaveBeenCalledWith("/project/.editorconfig");
+    },
+  );
+
+  test("should infer indentation again when a child unsets inherited width and style", async () => {
+    mockEditorConfigFiles({
+      "/project/.editorconfig": "[*]\nindent_style=tab\nindent_size=8",
+      "/project/src/.editorconfig":
+        "[*.ts]\nindent_size=unset\nindent_style=unset",
+    });
+    expect(
+      await formattingOptions("/project/src/main.ts", "   value\n", "/project"),
+    ).toMatchObject({ tabSize: 3, insertSpaces: true });
+  });
+
+  test.each([
+    {
+      condition: "a basename pattern matches a file in a subdirectory",
+      pattern: "*.ts",
+      tabSize: 4,
+    },
+    {
+      condition: "a rooted pattern matches the relative path",
+      pattern: "/src/*.ts",
+      tabSize: 4,
+    },
+    {
+      condition: "a section targets a different file type",
+      pattern: "*.md",
+      tabSize: 8,
+    },
+  ])(
+    "should apply only matching section settings when $condition",
+    async ({ pattern, tabSize }) => {
+      mockEditorConfigFiles({
+        "/project/.editorconfig": `[*]\nindent_size=8\n[${pattern}]\nindent_size=4`,
+      });
+      expect(
+        await formattingOptions(
+          "/project/src/main.ts",
+          "  value\n",
+          "/project",
+        ),
+      ).toMatchObject({ tabSize, insertSpaces: true });
+    },
+  );
+
+  test.each([
+    {
+      condition: "indent_size=tab selects the configured tab width",
+      settings: "indent_style=tab\nindent_size=tab\ntab_width=6",
+      expected: { tabSize: 6, insertSpaces: false },
+    },
+    {
+      condition: "tab_width is set without indent_size",
+      settings: "indent_style=space\ntab_width=3",
+      expected: { tabSize: 3, insertSpaces: true },
+    },
+    {
+      condition: "a numeric indent_size overrides tab_width",
+      settings: "indent_size=4\ntab_width=8",
+      expected: { tabSize: 4, insertSpaces: true },
+    },
+  ])(
+    "should choose the effective indentation width when $condition",
+    async ({ settings, expected }) => {
+      mockEditorConfigFiles({ "/project/.editorconfig": `[*]\n${settings}` });
+      expect(
+        await formattingOptions("/project/main.ts", "  value\n", "/project"),
+      ).toMatchObject(expected);
+    },
+  );
+
+  test.each(["0", "2.5", "invalid", "9007199254740992"])(
+    "should retain inferred indentation when the configured width is %s",
+    async (width) => {
+      mockEditorConfigFiles({
+        "/project/.editorconfig": `[*]\nindent_size=${width}`,
+      });
+      expect(
+        await formattingOptions("/project/main.ts", "   value\n", "/project"),
+      ).toMatchObject({ tabSize: 3, insertSpaces: true });
+    },
+  );
+
+  test.each(["stat", "readFile"] as const)(
+    "should preserve filesystem errors when %s cannot access a config",
+    async (operation) => {
+      const filesystemSpies = mockEditorConfigFiles({
+        "/project/.editorconfig": "[*]\nindent_size=4",
+      });
+      const error = Object.assign(new Error("Permission denied"), {
+        code: "EACCES",
+      });
+      filesystemSpies[operation].mockRejectedValue(error);
+      await expect(
+        formattingOptions("/project/main.ts", "  value\n", "/project"),
+      ).rejects.toBe(error);
+    },
+  );
+
+  test("should retain ancestor settings when a child config disappears before reading", async () => {
+    const { readFile } = mockEditorConfigFiles({
+      "/project/.editorconfig": "[*]\nindent_size=4",
+      "/project/src/.editorconfig": "[*]\nindent_size=8",
+    });
+    readFile.mockRejectedValueOnce(
+      Object.assign(new Error("Config disappeared"), { code: "ENOENT" }),
+    );
+    expect(
+      await formattingOptions("/project/src/main.ts", "  value\n", "/project"),
+    ).toMatchObject({ tabSize: 4, insertSpaces: true });
+  });
+
+  test("should accept a config exactly at the one-MiB size limit", async () => {
+    const limits = { bytes: 1_048_576 };
+    const { stat } = mockEditorConfigFiles({
+      "/project/.editorconfig": "[*]\nindent_size=4",
+    });
+    stat.mockResolvedValue({ size: limits.bytes });
+    expect(
+      await formattingOptions("/project/main.ts", "  value\n", "/project"),
+    ).toMatchObject({ tabSize: 4, insertSpaces: true });
+  });
+
+  test("should reject an oversized config before reading its contents", async () => {
+    const limits = { bytes: 1_048_576 };
+    const { stat, readFile } = mockEditorConfigFiles({
+      "/project/.editorconfig": "[*]\nindent_size=4",
+    });
+    stat.mockResolvedValue({ size: limits.bytes + 1 });
+    await expect(
+      formattingOptions("/project/main.ts", "  value\n", "/project"),
+    ).rejects.toThrow("EditorConfig exceeds 1 MiB");
+    expect(readFile).not.toHaveBeenCalled();
   });
 });

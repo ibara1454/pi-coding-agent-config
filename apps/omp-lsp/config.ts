@@ -235,6 +235,14 @@ function duration(value: unknown, name: string): number {
   return value;
 }
 
+/**
+ * Validates a merged server definition and normalizes file matching and launch options.
+ * @param value - Untrusted fields from bundled defaults or one configuration layer.
+ * @param cwd - Project root retained on the validated server; no paths are accessed.
+ * @returns A new server definition without modifying the supplied fields.
+ * @throws For invalid commands, matchers, timing values, environment, or JSON payloads.
+ * @example Omitting args produces an empty argument list; args: null is rejected.
+ */
 function normalizeServer(
   name: string,
   value: Record<string, unknown>,
@@ -245,7 +253,7 @@ function normalizeServer(
     extensionToLanguage: rawExtensionToLanguage,
     fileTypes: rawFileTypes,
     rootMarkers: rawRootMarkers,
-    args,
+    args = [],
     languageId,
     initializationOptions,
     env,
@@ -287,7 +295,7 @@ function normalizeServer(
   const result: ServerConfig = {
     name,
     command,
-    args: strings(args === undefined ? [] : args, "args", true),
+    args: strings(args, "args", true),
     fileTypes,
     rootMarkers,
     root: cwd,
@@ -541,6 +549,110 @@ async function readLspSettingsFile(
 }
 
 /**
+ * Reads one permitted server-config layer, returning validated overrides and warnings.
+ * Earlier definitions are read-only; invalid values leave them unchanged.
+ * @param file - Configuration path already allowed by the caller's trust policy.
+ * @param previous - Effective definitions from earlier layers.
+ * @param cwd - Project directory used to normalize server paths.
+ * @returns Valid server overrides, explicit launcher names, optional timeout, and ordered warnings.
+ * Missing files return an empty layer; read/validation failures become warnings.
+ * @example An invalid command for an existing server returns a warning and no override.
+ */
+async function readServerConfigLayer(
+  file: string,
+  previous: ReadonlyMap<string, ServerConfig>,
+  cwd: string,
+): Promise<{
+  servers: Map<string, ServerConfig>;
+  customizedLaunchers: Set<string>;
+  idleTimeoutMs?: number;
+  warnings: string[];
+}> {
+  const result: {
+    servers: Map<string, ServerConfig>;
+    customizedLaunchers: Set<string>;
+    idleTimeoutMs?: number;
+    warnings: string[];
+  } = {
+    servers: new Map(),
+    customizedLaunchers: new Set(),
+    warnings: [],
+  };
+  try {
+    const document = await readConfig(file);
+    if (document === undefined) {
+      return result;
+    }
+    if (!record(document)) {
+      throw new Error("configuration must contain a server map or { servers }");
+    }
+    const { servers, idleTimeoutMs } = document;
+    const rawServers = Object.hasOwn(document, "servers")
+      ? servers
+      : Object.fromEntries(
+          Object.entries(document).filter(([key]) => key !== "idleTimeoutMs"),
+        );
+    if (!record(rawServers)) {
+      throw new Error("servers must be an object");
+    }
+    if (idleTimeoutMs !== undefined) {
+      try {
+        result.idleTimeoutMs = duration(idleTimeoutMs, "idleTimeoutMs");
+      } catch (error) {
+        result.warnings.push(
+          `${file}: ${message(error)}; keeping previous idle timeout`,
+        );
+      }
+    }
+    for (const [name, override] of Object.entries(rawServers)) {
+      try {
+        if (!(name.trim() && record(override))) {
+          throw new Error(
+            "server definition must be an object with a non-empty name",
+          );
+        }
+        const { initializationOptions } = override;
+        const candidate: Record<string, unknown> & {
+          initOptions?: unknown;
+          fileTypes?: unknown;
+        } = {
+          ...previous.get(name),
+          ...override,
+        };
+        if (
+          Object.hasOwn(override, "initializationOptions") &&
+          !Object.hasOwn(override, "initOptions")
+        ) {
+          candidate.initOptions = initializationOptions;
+        }
+        if (
+          Object.hasOwn(override, "extensionToLanguage") &&
+          !Object.hasOwn(override, "fileTypes")
+        ) {
+          candidate.fileTypes = undefined;
+        }
+        result.servers.set(name, normalizeServer(name, candidate, cwd));
+        if (
+          Object.hasOwn(override, "command") ||
+          Object.hasOwn(override, "args")
+        ) {
+          result.customizedLaunchers.add(name);
+        }
+      } catch (error) {
+        result.warnings.push(
+          `${file}: server ${name}: ${message(error)}; keeping previous definition if present`,
+        );
+      }
+    }
+  } catch (error) {
+    result.warnings.push(
+      `${file}: ${message(error)}; keeping previous configuration`,
+    );
+  }
+  return result;
+}
+
+/**
  * Loads bundled and agent configuration, plus project configuration only when trusted.
  * Later valid layers override earlier values; invalid user configuration adds warnings.
  * @param projectDirectory - Project path, resolved without changing the caller's input.
@@ -587,81 +699,20 @@ export async function loadLspConfig(
     result.warnings.push(...warnings);
     // OMP's same-directory priority: visible JSON wins over hidden JSON, YAML, YML.
     for (const filename of [...CONFIG_FILES].reverse()) {
-      const file = path.join(directory, filename);
-      try {
-        const document = await readConfig(file);
-        if (document === undefined) {
-          continue;
-        }
-        if (!record(document)) {
-          throw new Error(
-            "configuration must contain a server map or { servers }",
-          );
-        }
-        const { servers, idleTimeoutMs } = document;
-        const rawServers = Object.hasOwn(document, "servers")
-          ? servers
-          : Object.fromEntries(
-              Object.entries(document).filter(
-                ([key]) => key !== "idleTimeoutMs",
-              ),
-            );
-        if (!record(rawServers)) {
-          throw new Error("servers must be an object");
-        }
-        if (idleTimeoutMs !== undefined) {
-          try {
-            result.idleTimeoutMs = duration(idleTimeoutMs, "idleTimeoutMs");
-          } catch (error) {
-            result.warnings.push(
-              `${file}: ${message(error)}; keeping previous idle timeout`,
-            );
-          }
-        }
-        for (const [name, override] of Object.entries(rawServers)) {
-          try {
-            if (!(name.trim() && record(override))) {
-              throw new Error(
-                "server definition must be an object with a non-empty name",
-              );
-            }
-            const { initializationOptions } = override;
-            const candidate: Record<string, unknown> & {
-              initOptions?: unknown;
-              fileTypes?: unknown;
-            } = {
-              ...merged.get(name),
-              ...override,
-            };
-            if (
-              Object.hasOwn(override, "initializationOptions") &&
-              !Object.hasOwn(override, "initOptions")
-            ) {
-              candidate.initOptions = initializationOptions;
-            }
-            if (
-              Object.hasOwn(override, "extensionToLanguage") &&
-              !Object.hasOwn(override, "fileTypes")
-            ) {
-              candidate.fileTypes = undefined;
-            }
-            merged.set(name, normalizeServer(name, candidate, cwd));
-            if (
-              Object.hasOwn(override, "command") ||
-              Object.hasOwn(override, "args")
-            ) {
-              customizedLaunchers.add(name);
-            }
-          } catch (error) {
-            result.warnings.push(
-              `${file}: server ${name}: ${message(error)}; keeping previous definition if present`,
-            );
-          }
-        }
-      } catch (error) {
-        result.warnings.push(
-          `${file}: ${message(error)}; keeping previous configuration`,
-        );
+      const layer = await readServerConfigLayer(
+        path.join(directory, filename),
+        merged,
+        cwd,
+      );
+      result.warnings.push(...layer.warnings);
+      if (layer.idleTimeoutMs !== undefined) {
+        result.idleTimeoutMs = layer.idleTimeoutMs;
+      }
+      for (const [name, server] of layer.servers) {
+        merged.set(name, server);
+      }
+      for (const name of layer.customizedLaunchers) {
+        customizedLaunchers.add(name);
       }
     }
   }
