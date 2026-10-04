@@ -171,8 +171,10 @@ bun test apps/extension-manager/panel.test.ts
 bun run test:coverage
 ```
 
-Coverage minimums are **0%** for lines and functions (reporting only), configured
-in `bunfig.toml`. Each workspace writes `coverage/lcov.info`.
+Minimum coverage: **60% lines and functions per instrumented file**, configured in
+`bunfig.toml`. `apps/sandbox/**` is excluded.
+
+Each workspace writes `coverage/lcov.info`.
 
 CI uploads LCOV to Codecov, which updates one PR comment with coverage and
 base-to-head changes for each package.
