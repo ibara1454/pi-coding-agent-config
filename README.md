@@ -176,8 +176,8 @@ Minimum coverage: **60% lines and functions per instrumented file**, configured 
 
 Each workspace writes `coverage/lcov.info`.
 
-CI uploads LCOV to Codecov, which updates one PR comment with coverage and
-base-to-head changes for each package.
+CI uploads LCOV to Codecov for per-package PR reports. The required
+`codecov/patch` check enforces **90% coverage of changed, instrumented lines**.
 
 ### Stress mode
 
