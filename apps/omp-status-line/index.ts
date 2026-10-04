@@ -21,6 +21,7 @@ import {
   EMPTY_END_CAPS,
   getSeparator,
   RESET,
+  type SeparatorDef,
   STATUS_BG_AS_FG,
   STATUS_SEPARATOR_FG,
   sessionAccentAnsi,
@@ -306,6 +307,208 @@ function aggregateUsage(
 }
 
 /**
+ * Shrinks rendered path text by up to the overflow in terminal cells without changing options.
+ * @param content Current ANSI path, including its icon.
+ * @param overflow Positive cell reduction requested by the layout.
+ * @returns Last visible rendering, or the original when shrinking is unavailable.
+ * Renderer errors propagate; at most eight corrections account for icon width.
+ * @example shrinkStatusPath("short", 2, ctx); // "short" (below the eight-cell floor)
+ */
+function shrinkStatusPath(
+  content: string,
+  overflow: number,
+  segmentCtx: SegmentContext,
+): string {
+  const currentWidth = visibleWidth(content);
+  const minPathWidth = 8;
+  const shrinkable = currentWidth - minPathWidth;
+  if (shrinkable <= 0) {
+    return content;
+  }
+  const shrinkBy = Math.min(shrinkable, overflow);
+  const currentMaxLength =
+    segmentCtx.options.path?.maxLength ?? DEFAULT_PATH_MAX_LENGTH;
+  let nextMaxLength = Math.max(
+    MIN_PATH_MAX_LENGTH,
+    Math.min(currentMaxLength, currentWidth) - shrinkBy,
+  );
+  /**
+   * Copies context options with a path-text cell budget, leaving the shared snapshot unchanged.
+   * @example pathCtx(4).options.path?.maxLength; // 4
+   */
+  const pathCtx = (maxLength: number): SegmentContext => ({
+    ...segmentCtx,
+    options: {
+      ...segmentCtx.options,
+      path: { ...segmentCtx.options.path, maxLength },
+    },
+  });
+  let adjusted = renderSegment("path", pathCtx(nextMaxLength));
+  if (!(adjusted.visible && adjusted.content)) {
+    return content;
+  }
+  // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
+  for (
+    let attempt = 0;
+    attempt < MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS;
+    attempt++
+  ) {
+    const saved = currentWidth - visibleWidth(adjusted.content);
+    if (saved >= shrinkBy) {
+      break;
+    }
+    const correctedMaxLength = Math.max(
+      MIN_PATH_MAX_LENGTH,
+      nextMaxLength - (shrinkBy - saved),
+    );
+    if (correctedMaxLength >= nextMaxLength) {
+      break;
+    }
+    nextMaxLength = correctedMaxLength;
+    const rerendered = renderSegment("path", pathCtx(nextMaxLength));
+    if (!(rerendered.visible && rerendered.content)) {
+      break;
+    }
+    adjusted = rerendered;
+  }
+  return adjusted.content;
+}
+
+/**
+ * Renders visible segments and fits them in terminal cells, including padding and caps.
+ * Drops right segments first, shrinks the path, then drops non-path left segments first.
+ * @param width Available terminal cells.
+ * @returns Owned segment arrays, fitted cell widths, and caps; inputs remain unchanged.
+ * Segment rendering errors propagate; this operation owns no session resources.
+ * @example An empty preset produces empty left/right arrays with zero widths.
+ */
+function fitStatusSegments(
+  width: number,
+  preset: PresetDef,
+  segmentCtx: SegmentContext,
+  separator: SeparatorDef,
+): {
+  left: string[];
+  right: string[];
+  leftWidth: number;
+  rightWidth: number;
+  endCaps: SeparatorDef["endCaps"];
+} {
+  const endCaps = segmentCtx.settings.transparent
+    ? EMPTY_END_CAPS
+    : separator.endCaps;
+  const left: string[] = [];
+  const leftIds: StatusLineSegmentId[] = [];
+  for (const id of preset.leftSegments) {
+    const rendered = renderSegment(id, segmentCtx);
+    if (rendered.visible && rendered.content) {
+      left.push(rendered.content);
+      leftIds.push(id);
+    }
+  }
+  const right: string[] = [];
+  for (const id of preset.rightSegments) {
+    const rendered = renderSegment(id, segmentCtx);
+    if (rendered.visible && rendered.content) {
+      right.push(rendered.content);
+    }
+  }
+
+  const leftSeparatorWidth = visibleWidth(separator.left);
+  const rightSeparatorWidth = visibleWidth(separator.right);
+  const leftCapWidth = visibleWidth(endCaps.right);
+  const rightCapWidth = visibleWidth(endCaps.left);
+  /**
+   * Counts ANSI content, inter-segment spaces, outer padding and a nonempty group's cap.
+   * @returns Terminal cells without changing parts.
+   * @example groupWidth([], 1, 1); // 0
+   */
+  const groupWidth = (
+    parts: string[],
+    capWidth: number,
+    separatorWidth: number,
+  ): number => {
+    if (parts.length === 0) {
+      return 0;
+    }
+    return (
+      parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
+      Math.max(0, parts.length - 1) * (separatorWidth + 2) +
+      2 +
+      capWidth
+    );
+  };
+
+  let leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  let rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
+  /** Returns occupied cells, reserving one gap cell only when both groups remain.
+   * @example Empty left/right arrays produce zero cells.
+   */
+  const totalWidth = (): number =>
+    leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
+
+  while (totalWidth() > width && right.length > 0) {
+    right.pop();
+    rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
+  }
+
+  const pathIndex = leftIds.indexOf("path");
+  if (pathIndex >= 0 && totalWidth() > width) {
+    left[pathIndex] = shrinkStatusPath(
+      left[pathIndex] ?? "",
+      totalWidth() - width,
+      segmentCtx,
+    );
+    leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  }
+
+  while (totalWidth() > width && left.length > 0) {
+    let dropIndex = leftIds.length - 1;
+    while (dropIndex >= 0 && leftIds[dropIndex] === "path") {
+      dropIndex--;
+    }
+    if (dropIndex < 0) {
+      dropIndex = left.length - 1;
+    }
+    left.splice(dropIndex, 1);
+    leftIds.splice(dropIndex, 1);
+    leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  }
+  return { left, right, leftWidth, rightWidth, endCaps };
+}
+
+/**
+ * Counts porcelain-v1 index, working-tree, and untracked entries independently.
+ * @param output Git status stdout; short/empty lines are ignored.
+ * @returns Counts only; branch and refresh lifecycle remain owned by the caller.
+ * @example parseGitChanges("M  staged\n M unstaged\n?? new\n"); // { staged: 1, unstaged: 1, untracked: 1 }
+ */
+function parseGitChanges(
+  output: string,
+): Pick<GitState, "staged" | "unstaged" | "untracked"> {
+  let staged = 0;
+  let unstaged = 0;
+  let untracked = 0;
+  for (const line of output.split("\n")) {
+    if (line.length < 2) {
+      continue;
+    }
+    const [x, y] = line;
+    if (x === "?" && y === "?") {
+      untracked++;
+      continue;
+    }
+    if (x !== " " && x !== "?") {
+      staged++;
+    }
+    if (y !== " " && y !== "?") {
+      unstaged++;
+    }
+  }
+  return { staged, unstaged, untracked };
+}
+
+/**
  * Registers the status-line renderer and session-owned refresh resources.
  * Event effects run synchronously; handlers return promises and reject on failure.
  * Shutdown cancels timers and commands and releases only UI slots still owned here.
@@ -430,6 +633,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
   };
 
+  /**
+   * Refreshes Git counts at most once per TTL, rejecting stale session results.
+   * @param force Bypasses the TTL, but never starts a second in-flight request.
+   * Command failures are absorbed; this operation owns cancellation and rendering,
+   * while PR lookup stays nonblocking and retains its separate branch cache.
+   * @example await refreshGit(true); // Refresh counts even within the TTL.
+   */
   const refreshGit = async (force = false): Promise<void> => {
     const ctx = currentCtx;
     if (
@@ -461,33 +671,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         };
         prBranchKey = null;
       } else {
-        let staged = 0;
-        let unstaged = 0;
-        let untracked = 0;
-        for (const line of result.stdout.split("\n")) {
-          if (line.length < 2) {
-            continue;
-          }
-          const [x, y] = line;
-          if (x === "?" && y === "?") {
-            untracked++;
-            continue;
-          }
-          if (x !== " " && x !== "?") {
-            staged++;
-          }
-          if (y !== " " && y !== "?") {
-            unstaged++;
-          }
-        }
+        const changes = parseGitChanges(result.stdout);
         const branch = footerData?.getGitBranch() ?? gitState.branch;
         const branchChanged = branch !== gitState.branch;
         gitState = {
           ...gitState,
           branch,
-          staged,
-          unstaged,
-          untracked,
+          ...changes,
           pr: branchChanged ? null : gitState.pr,
         };
         if (branchChanged) {
@@ -671,119 +861,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const bg = transparent ? TRANSPARENT_BG : DEFAULT_STATUS_BG;
     const foreground = theme.getFgAnsi("text");
 
-    const left: string[] = [];
-    const leftIds: StatusLineSegmentId[] = [];
-    for (const id of preset.leftSegments) {
-      const rendered = renderSegment(id, segmentCtx);
-      if (rendered.visible && rendered.content) {
-        left.push(rendered.content);
-        leftIds.push(id);
-      }
-    }
-    const right: string[] = [];
-    for (const id of preset.rightSegments) {
-      const rendered = renderSegment(id, segmentCtx);
-      if (rendered.visible && rendered.content) {
-        right.push(rendered.content);
-      }
-    }
-
-    const leftSeparatorWidth = visibleWidth(separator.left);
-    const rightSeparatorWidth = visibleWidth(separator.right);
-    const endCaps = transparent ? EMPTY_END_CAPS : separator.endCaps;
-    const leftCapWidth = visibleWidth(endCaps.right);
-    const rightCapWidth = visibleWidth(endCaps.left);
-    const groupWidth = (
-      parts: string[],
-      capWidth: number,
-      separatorWidth: number,
-    ): number => {
-      if (parts.length === 0) {
-        return 0;
-      }
-      return (
-        parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
-        Math.max(0, parts.length - 1) * (separatorWidth + 2) +
-        2 +
-        capWidth
-      );
-    };
-
-    let leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-    let rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
-    const totalWidth = (): number =>
-      leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
-
-    while (totalWidth() > width && right.length > 0) {
-      right.pop();
-      rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
-    }
-
-    const pathIndex = leftIds.indexOf("path");
-    if (pathIndex >= 0 && totalWidth() > width) {
-      const overflow = totalWidth() - width;
-      const currentWidth = visibleWidth(left[pathIndex] ?? "");
-      const minPathWidth = 8;
-      const shrinkable = currentWidth - minPathWidth;
-      if (shrinkable > 0) {
-        const shrinkBy = Math.min(shrinkable, overflow);
-        const currentMaxLength =
-          preset.segmentOptions.path?.maxLength ?? DEFAULT_PATH_MAX_LENGTH;
-        let nextMaxLength = Math.max(
-          MIN_PATH_MAX_LENGTH,
-          Math.min(currentMaxLength, currentWidth) - shrinkBy,
-        );
-        const pathCtx = (maxLength: number): SegmentContext => ({
-          ...segmentCtx,
-          options: {
-            ...segmentCtx.options,
-            path: { ...segmentCtx.options.path, maxLength },
-          },
-        });
-        let adjusted = renderSegment("path", pathCtx(nextMaxLength));
-        if (adjusted.visible && adjusted.content) {
-          // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
-          for (
-            let attempt = 0;
-            attempt < MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS;
-            attempt++
-          ) {
-            const saved = currentWidth - visibleWidth(adjusted.content);
-            if (saved >= shrinkBy) {
-              break;
-            }
-            const correctedMaxLength = Math.max(
-              MIN_PATH_MAX_LENGTH,
-              nextMaxLength - (shrinkBy - saved),
-            );
-            if (correctedMaxLength >= nextMaxLength) {
-              break;
-            }
-            nextMaxLength = correctedMaxLength;
-            const rerendered = renderSegment("path", pathCtx(nextMaxLength));
-            if (!(rerendered.visible && rerendered.content)) {
-              break;
-            }
-            adjusted = rerendered;
-          }
-          left[pathIndex] = adjusted.content;
-          leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-        }
-      }
-    }
-
-    while (totalWidth() > width && left.length > 0) {
-      let dropIndex = leftIds.length - 1;
-      while (dropIndex >= 0 && leftIds[dropIndex] === "path") {
-        dropIndex--;
-      }
-      if (dropIndex < 0) {
-        dropIndex = left.length - 1;
-      }
-      left.splice(dropIndex, 1);
-      leftIds.splice(dropIndex, 1);
-      leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-    }
+    const { left, right, leftWidth, rightWidth, endCaps } = fitStatusSegments(
+      width,
+      preset,
+      segmentCtx,
+      separator,
+    );
 
     /**
      * Styles a segment group with its outward-facing cap, omitted when transparent.

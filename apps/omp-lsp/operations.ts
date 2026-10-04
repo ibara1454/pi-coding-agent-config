@@ -495,37 +495,17 @@ export async function diagnosticTargets(
 }
 
 /**
- * Infers indentation from a snapshot, then applies matching ancestor EditorConfig overrides.
- * @param file - Target path used for ancestor lookup and section matching.
- * @param content - Document text supplying fallback indentation.
- * @param cwd - Workspace boundary; lookup also stops at root=true or after 64 directories.
- * @returns LSP formatting options with a positive tab width and whitespace/newline cleanup enabled.
- * @throws For non-missing I/O failures, configs over 1 MiB, or invalid/oversized globs.
- * @example With no EditorConfig, formattingOptions("/project/a.ts", "  x\n", "/project") uses tabSize: 2 and insertSpaces: true.
+ * Loads bounded ancestor EditorConfig files in farthest-to-nearest precedence order.
+ * @param file - Target path whose directory starts the search.
+ * @param cwd - Inclusive search boundary; root=true and 64 directories also stop lookup.
+ * @returns File text and containing directories without parsing section settings.
+ * @throws For non-missing I/O errors or configuration files larger than 1 MiB.
+ * @example A root config and a child config are returned in that order.
  */
-export async function formattingOptions(
+async function readEditorConfigAncestors(
   file: string,
-  content: string,
   cwd: string,
-): Promise<FormattingOptions> {
-  let insertSpaces: boolean | undefined;
-  let width = 0;
-  for (const line of content.split("\n")) {
-    if (!line.trim() || (line[0] !== " " && line[0] !== "\t")) {
-      continue;
-    }
-    insertSpaces ??= line[0] === " ";
-    const spaces = line.match(LEADING_SPACES)?.[0].length ?? 0;
-    if (spaces === 0) {
-      continue;
-    }
-    let next = spaces;
-    while (next > 0) {
-      const remainder = width % next;
-      width = next;
-      next = remainder;
-    }
-  }
+): Promise<Array<{ directory: string; content: string }>> {
   const configs: Array<{ directory: string; content: string }> = [];
   let directory = path.dirname(file);
   for (let depth = 0; depth < MAX_EDITORCONFIG_DEPTH; depth++) {
@@ -549,6 +529,22 @@ export async function formattingOptions(
     }
     directory = path.dirname(directory);
   }
+  return configs;
+}
+
+/**
+ * Reads matching EditorConfig settings from ancestors, applying nearer files last.
+ * @param file - Target path for section matching and ancestor lookup.
+ * @param cwd - Lookup boundary, also bounded by root=true and 64 directories.
+ * @returns Merged lowercase settings; unset removes values from earlier sections/files.
+ * @throws For non-missing I/O failures, configs over 1 MiB, or invalid/oversized globs.
+ * @example A child indent_size=unset removes a parent's indent_size=4.
+ */
+async function readEditorConfigSettings(
+  file: string,
+  cwd: string,
+): Promise<Partial<Record<string, string>>> {
+  const configs = await readEditorConfigAncestors(file, cwd);
   const settings: Partial<Record<string, string>> = {};
   for (const config of configs) {
     let applies = false;
@@ -585,6 +581,42 @@ export async function formattingOptions(
       }
     }
   }
+  return settings;
+}
+
+/**
+ * Infers indentation from a snapshot, then applies matching ancestor EditorConfig overrides.
+ * @param file - Target path used for ancestor lookup and section matching.
+ * @param content - Document text supplying fallback indentation.
+ * @param cwd - Workspace boundary; lookup also stops at root=true or after 64 directories.
+ * @returns LSP formatting options with a positive tab width and whitespace/newline cleanup enabled.
+ * @throws For non-missing I/O failures, configs over 1 MiB, or invalid/oversized globs.
+ * @example With no EditorConfig, formattingOptions("/project/a.ts", "  x\n", "/project") uses tabSize: 2 and insertSpaces: true.
+ */
+export async function formattingOptions(
+  file: string,
+  content: string,
+  cwd: string,
+): Promise<FormattingOptions> {
+  let insertSpaces: boolean | undefined;
+  let width = 0;
+  for (const line of content.split("\n")) {
+    if (!line.trim() || (line[0] !== " " && line[0] !== "\t")) {
+      continue;
+    }
+    insertSpaces ??= line[0] === " ";
+    const spaces = line.match(LEADING_SPACES)?.[0].length ?? 0;
+    if (spaces === 0) {
+      continue;
+    }
+    let next = spaces;
+    while (next > 0) {
+      const remainder = width % next;
+      width = next;
+      next = remainder;
+    }
+  }
+  const settings = await readEditorConfigSettings(file, cwd);
   const {
     indent_size: indentSize,
     tab_width: tabWidth,

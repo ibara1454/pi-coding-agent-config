@@ -960,43 +960,43 @@ class StdioLanguageServer implements LanguageServer {
             },
           });
         }
-      } else {
-        let change: {
-          text: string;
-          range?: {
-            start: { line: number; character: number };
-            end: { line: number; character: number };
-          };
-        } = { text };
-        if (sync.change === 2) {
-          let line = 0;
-          let lineStart = 0;
-          for (let index = 0; index < prior.content.length; index++) {
-            const char = prior.content.charCodeAt(index);
-            if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
-              if (
-                char === CARRIAGE_RETURN_CODE &&
-                prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
-              ) {
-                index++;
-              }
-              line++;
-              lineStart = index + 1;
-            }
-          }
-          change = {
-            text,
-            range: {
-              start: { line: 0, character: 0 },
-              end: { line, character: prior.content.length - lineStart },
-            },
-          };
-        }
-        await this.notify("textDocument/didChange", {
-          textDocument: { uri, version: snapshot.version },
-          contentChanges: [change],
-        });
+        return;
       }
+      let change: {
+        text: string;
+        range?: {
+          start: { line: number; character: number };
+          end: { line: number; character: number };
+        };
+      } = { text };
+      if (sync.change === 2) {
+        let line = 0;
+        let lineStart = 0;
+        for (let index = 0; index < prior.content.length; index++) {
+          const char = prior.content.charCodeAt(index);
+          if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
+            if (
+              char === CARRIAGE_RETURN_CODE &&
+              prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
+            ) {
+              index++;
+            }
+            line++;
+            lineStart = index + 1;
+          }
+        }
+        change = {
+          text,
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line, character: prior.content.length - lineStart },
+          },
+        };
+      }
+      await this.notify("textDocument/didChange", {
+        textDocument: { uri, version: snapshot.version },
+        contentChanges: [change],
+      });
     });
   }
 

@@ -26,6 +26,7 @@ import {
   formattingOptions,
   hoverText,
   locations,
+  type NavigationLocation,
   normalizeDiagnostics,
   object,
   resolvePosition,
@@ -416,17 +417,15 @@ async function languageServerFor(
 }
 
 /**
- * Reads a bounded regular file, synchronizes it, and remembers the opened path.
- * @param knownFiles - Workspace-owned set updated only after synchronization succeeds.
+ * Reads a bounded regular file and synchronizes it without changing workspace tracking.
  * @param server - Server that owns the synchronized document.
  * @param file - Absolute file path to read.
  * @param signal - Cancellation for file synchronization.
- * @returns The UTF-8 file content sent to the server.
+ * @returns UTF-8 content after successful synchronization; the caller records the opened path.
  * @throws If canceled, filesystem access fails, the target is not a file, it exceeds 16 MiB, or synchronization fails.
- * @example Opening "/project/a.ts" containing "let x = 1;" returns that text and records its path.
+ * @example Opening "/project/a.ts" containing "let x = 1;" returns that text without retaining the path.
  */
 async function openDocument(
-  knownFiles: Set<string>,
   server: LanguageServer,
   file: string,
   signal: AbortSignal,
@@ -441,7 +440,6 @@ async function openDocument(
   }
   const content = await fs.readFile(file, "utf8");
   await server.syncFile(file, content, signal);
-  knownFiles.add(file);
   return content;
 }
 
@@ -626,7 +624,8 @@ async function dispatchAction(
     | "code_actions" = params.action;
   const file = path.resolve(state.options.cwd, params.file);
   const server = await languageServerFor(state, file, signal);
-  const content = await openDocument(state.knownFiles, server, file, signal);
+  const content = await openDocument(server, file, signal);
+  state.knownFiles.add(file);
   const uri = fileToUri(file);
   if (
     !server.config.isLinter &&
@@ -662,21 +661,12 @@ async function dispatchAction(
           ? { context: { includeDeclaration: true } }
           : {}),
       };
-      let found = locations(await server.request(method, request, signal));
-      if (action === "references" && !server.config.isLinter) {
-        for (
-          let attempt = 0;
-          attempt < 2 &&
-          (found.length === 0 ||
-            (found.length === 1 &&
-              found[0]?.file === file &&
-              found[0].range.start.line === position.line));
-          attempt++
-        ) {
-          await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
-          found = locations(await server.request(method, request, signal));
-        }
-      }
+      const found = await navigationLocations(
+        server,
+        method,
+        { file, request },
+        signal,
+      );
       const label = action === "type_definition" ? "type definition" : action;
       if (found.length === 0) {
         return workspaceResult(
@@ -690,29 +680,11 @@ async function dispatchAction(
         action === "references"
           ? MAX_REFERENCE_RESULTS
           : MAX_NAVIGATION_RESULTS;
-      const contexts = new Map<string, string[]>();
-      const lines: string[] = [];
-      for (const location of found.slice(0, limit)) {
-        signal.throwIfAborted();
-        let context = contexts.get(location.file);
-        if (!context) {
-          try {
-            if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
-              throw new Error("file exceeds context limit");
-            }
-            context = (await fs.readFile(location.file, "utf8")).split(
-              LINE_BREAK,
-            );
-          } catch (error) {
-            context = [`Context unavailable: ${errorText(error)}`];
-          }
-          contexts.set(location.file, context);
-        }
-        const text = context[location.range.start.line]?.trim();
-        lines.push(
-          `${path.relative(state.options.cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
-        );
-      }
+      const lines = await navigationContextLines(
+        state.options.cwd,
+        found.slice(0, limit),
+        signal,
+      );
       return workspaceResult(
         params,
         `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
@@ -787,6 +759,75 @@ async function dispatchAction(
 }
 
 /**
+ * Requests navigation locations, retrying semantic references that only find the declaration.
+ * Request and cancellation failures propagate; the caller owns result limits and context reads.
+ * @example References containing only the requested declaration are retried at most twice.
+ */
+async function navigationLocations(
+  server: LanguageServer,
+  method: string,
+  target: {
+    file: string;
+    request: { textDocument: { uri: string }; position: Position };
+  },
+  signal: AbortSignal,
+): Promise<NavigationLocation[]> {
+  const { file, request } = target;
+  const { position } = request;
+  let found = locations(await server.request(method, request, signal));
+  if (method !== "textDocument/references" || server.config.isLinter) {
+    return found;
+  }
+  for (
+    let attempt = 0;
+    attempt < 2 &&
+    (found.length === 0 ||
+      (found.length === 1 &&
+        found[0]?.file === file &&
+        found[0].range.start.line === position.line));
+    attempt++
+  ) {
+    await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
+    found = locations(await server.request(method, request, signal));
+  }
+  return found;
+}
+
+/**
+ * Reads bounded source context for selected navigation locations in result order.
+ * Unreadable files retain an unavailable-context note; cancellation still throws.
+ * @example A location at line 0 in a.ts yields "a.ts:1:1  source text".
+ */
+async function navigationContextLines(
+  cwd: string,
+  found: readonly NavigationLocation[],
+  signal: AbortSignal,
+): Promise<string[]> {
+  const contexts = new Map<string, string[]>();
+  const lines: string[] = [];
+  for (const location of found) {
+    signal.throwIfAborted();
+    let context = contexts.get(location.file);
+    if (!context) {
+      try {
+        if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
+          throw new Error("file exceeds context limit");
+        }
+        context = (await fs.readFile(location.file, "utf8")).split(LINE_BREAK);
+      } catch (error) {
+        context = [`Context unavailable: ${errorText(error)}`];
+      }
+      contexts.set(location.file, context);
+    }
+    const text = context[location.range.start.line]?.trim();
+    lines.push(
+      `${path.relative(cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
+    );
+  }
+  return lines;
+}
+
+/**
  * Sends a raw protocol request with parsed JSON or a derived document target.
  * @param state - Session root, server pool, and known documents.
  * @param params - Request whose query names the method and payload optionally supplies JSON.
@@ -822,9 +863,11 @@ async function rawRequest(
     }
   }
   const server = await languageServerFor(state, file, signal);
-  const content = file
-    ? await openDocument(state.knownFiles, server, file, signal)
-    : undefined;
+  let content: string | undefined;
+  if (file) {
+    content = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+  }
   if (params.payload === undefined) {
     payload = file
       ? {
@@ -906,7 +949,8 @@ async function collectDiagnostics(
         );
       } else {
         const server = await state.pool.get(config, signal);
-        await openDocument(state.knownFiles, server, file, signal);
+        await openDocument(server, file, signal);
+        state.knownFiles.add(file);
         const report = await server.diagnostics(
           file,
           signal,
@@ -1521,19 +1565,15 @@ async function reconcileChanges(
 }
 
 /**
- * Coordinates server rename edits before committing a file or directory move.
- * @param state - Session root, available servers, observed documents, and edit lifetime.
- * @param params - Source file, new_name destination, and optional apply: false preview.
- * @param signal - Cancellation for discovery, server requests, and application.
- * @returns Rename summary, preserving server notes, validation failures, and partial-application errors.
- * @throws If paths are invalid, the destination exists, documents disagree, directory contents change, or required work fails or is canceled.
- * @example With file "a.ts", new_name "b.ts", and apply: false, the move is previewed without changing either path.
+ * Validates rename paths and discovers the files and servers participating in the move.
+ * Filesystem and cancellation failures propagate before requesting any server edits.
+ * @example Moving "src" to "lib" pairs each source file with its matching destination.
  */
-async function renameFile(
+async function prepareFileRename(
   state: WorkspaceState,
   params: LspParams,
   signal: AbortSignal,
-): Promise<LspResult> {
+) {
   if (!(params.file && params.new_name?.trim())) {
     throw new Error(
       "rename_file requires file (source) and new_name (destination)",
@@ -1571,6 +1611,44 @@ async function renameFile(
       }
     }
   }
+  return { source, destination, sourceStat, files, pairs, configs };
+}
+
+/**
+ * Rejects conflicting server content before the caller records a snapshot.
+ * @param file - Absolute document path used in the failure diagnostic.
+ * @param snapshot - Incoming server snapshot, left unchanged.
+ * @param previous - Earlier server snapshot, if any; versions are server-specific.
+ * @throws If two servers report different content for the same path.
+ * @example Snapshots with equal text and different versions agree; different text throws.
+ */
+function assertSnapshotContentMatches(
+  file: string,
+  snapshot: Readonly<DocumentSnapshot>,
+  previous: Readonly<DocumentSnapshot> | undefined,
+): void {
+  if (previous && previous.content !== snapshot.content) {
+    throw new Error(`Servers disagree about current content of ${file}`);
+  }
+}
+
+/**
+ * Coordinates server rename edits before committing a file or directory move.
+ * Records each successful open immediately, retaining tracking when a later open fails.
+ * @param state - Session root, available servers, observed documents, and edit lifetime.
+ * @param params - Source file, new_name destination, and optional apply: false preview.
+ * @param signal - Cancellation for discovery, server requests, and application.
+ * @returns Rename summary, preserving server notes, validation failures, and partial-application errors.
+ * @throws If paths are invalid, the destination exists, documents disagree, directory contents change, or required work fails or is canceled.
+ * @example With file "a.ts", new_name "b.ts", and apply: false, the move is previewed without changing either path.
+ */
+async function renameFile(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const { source, destination, sourceStat, files, pairs, configs } =
+    await prepareFileRename(state, params, signal);
   const buckets = new Map<string, Array<{ edit: TextEdit; server: string }>>();
   const documentChanges: NonNullable<WorkspaceEdit["documentChanges"]> = [];
   const annotations: NonNullable<WorkspaceEdit["changeAnnotations"]> = {};
@@ -1604,18 +1682,16 @@ async function renameFile(
       for (const file of files) {
         if (
           selectedServers(state.config, file).some(
-            (candidate) => candidate.name === config.name,
+            (candidate) => candidate.name === server.config.name,
           )
         ) {
-          await openDocument(state.knownFiles, server, file, signal);
+          await openDocument(server, file, signal);
+          state.knownFiles.add(file);
         }
       }
       const serverSnapshots = documentSnapshots(state.knownFiles, server);
       for (const [file, document] of serverSnapshots) {
-        const prior = snapshots.get(file);
-        if (prior && prior.content !== document.content) {
-          throw new Error(`Servers disagree about current content of ${file}`);
-        }
+        assertSnapshotContentMatches(file, document, snapshots.get(file));
         snapshots.set(file, document);
       }
       const response = await server.request<WorkspaceEdit | null>(
@@ -1685,27 +1761,27 @@ async function renameFile(
         }
         buckets.set(uri, previous);
       };
-      if (response.documentChanges !== undefined) {
-        for (const change of response.documentChanges) {
-          if ("textDocument" in change) {
-            add(change.textDocument.uri, change.edits as TextEdit[]);
-          } else {
-            flush();
-            documentChanges.push(annotate(change));
-          }
-        }
-      } else {
+      if (response.documentChanges === undefined) {
         for (const [uri, edits] of Object.entries(response.changes ?? {})) {
           add(uri, edits);
+        }
+        continue;
+      }
+      for (const change of response.documentChanges) {
+        if ("textDocument" in change) {
+          add(change.textDocument.uri, change.edits as TextEdit[]);
+        } else {
+          flush();
+          documentChanges.push(annotate(change));
         }
       }
     } catch (error) {
       signal.throwIfAborted();
       if (methodNotFound(error)) {
         notes.push(`${config.name}: willRenameFiles is not supported`);
-      } else {
-        failures.push(`${config.name}: ${errorText(error)}`);
+        continue;
       }
+      failures.push(`${config.name}: ${errorText(error)}`);
     }
   }
   signal.throwIfAborted();
@@ -1716,13 +1792,14 @@ async function renameFile(
       false,
     );
   }
-  if (sourceStat.isDirectory()) {
-    const current = await directoryFiles(source, signal);
-    if (JSON.stringify(current) !== JSON.stringify(files)) {
-      throw new Error(
-        "Directory contents changed while computing rename references; no files moved",
-      );
-    }
+  if (
+    sourceStat.isDirectory() &&
+    JSON.stringify(await directoryFiles(source, signal)) !==
+      JSON.stringify(files)
+  ) {
+    throw new Error(
+      "Directory contents changed while computing rename references; no files moved",
+    );
   }
   flush();
   documentChanges.push({
@@ -1937,24 +2014,7 @@ async function mutationFeedback(
       }
       state.knownFiles.add(file);
       const relevant = serversForFile(state.config, file).length > 0;
-      for (const server of state.pool.clients()) {
-        if (
-          server.isAlive &&
-          (server.document(file) ||
-            selectedServers(state.config, file).some(
-              (config) => config.name === server.config.name,
-            ))
-        ) {
-          try {
-            await server.syncFile(file, undefined, signal);
-            await server.saved(file);
-          } catch (error) {
-            notes.push(
-              `${server.config.name}: synchronization failed: ${errorText(error)}`,
-            );
-          }
-        }
-      }
+      notes.push(...(await synchronizeMutationDocuments(state, file, signal)));
       if (
         relevant &&
         source === "write" &&
@@ -1977,45 +2037,16 @@ async function mutationFeedback(
           return "";
         }
         signal.throwIfAborted();
-        const unverified = report.unverifiedSources.length > 0;
-        const fingerprint = JSON.stringify([
-          report.unverifiedSources,
-          report.diagnostics.map((item) => [
-            item.range,
-            item.severity,
-            item.message,
-          ]),
-        ]);
-        const previous = state.diagnosticFingerprints.get(file);
+        const diagnosticFeedback = mutationDiagnosticFeedback(
+          state,
+          file,
+          report,
+        );
+        notes.push(...diagnosticFeedback.notes);
         if (report.responders > 0) {
-          const hasFeedback =
-            report.diagnostics.length > 0 ||
-            unverified ||
-            previous?.hadFindings ||
-            previous?.unverified;
-          if (
-            (!state.config.settings.diagnosticsDeduplicate ||
-              previous?.fingerprint !== fingerprint) &&
-            hasFeedback
-          ) {
-            notes.push(
-              diagnosticsText(
-                file,
-                report.diagnostics,
-                state.options.cwd,
-                report.unverifiedSources,
-              ),
-            );
-          }
-          state.diagnosticFingerprints.set(file, {
-            fingerprint,
-            hadFindings: report.diagnostics.length > 0,
-            unverified,
-          });
-        }
-        if (report.failures.length > 0) {
-          notes.push(
-            `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
+          state.diagnosticFingerprints.set(
+            file,
+            diagnosticFeedback.fingerprint,
           );
         }
       }
@@ -2053,6 +2084,41 @@ async function mutationFeedback(
         details: { action: "afterMutation", source },
       }
     : undefined;
+}
+
+/**
+ * Synchronizes a host-mutated file with live servers already observing or selected for it.
+ * Saves follow successful syncs; per-server failures become notes without stopping later servers.
+ * @example A failed sync adds a synchronization note and skips that server's saved notification.
+ */
+async function synchronizeMutationDocuments(
+  state: WorkspaceState,
+  file: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const notes: string[] = [];
+  for (const server of state.pool.clients()) {
+    if (
+      !(
+        server.isAlive &&
+        (server.document(file) ||
+          selectedServers(state.config, file).some(
+            (config) => config.name === server.config.name,
+          ))
+      )
+    ) {
+      continue;
+    }
+    try {
+      await server.syncFile(file, undefined, signal);
+      await server.saved(file);
+    } catch (error) {
+      notes.push(
+        `${server.config.name}: synchronization failed: ${errorText(error)}`,
+      );
+    }
+  }
+  return notes;
 }
 
 /**
@@ -2111,9 +2177,9 @@ async function formatDocument(
     if (!server.capabilities.documentFormattingProvider) {
       continue;
     }
-    if (
-      (await openDocument(state.knownFiles, server, file, signal)) !== content
-    ) {
+    const openedContent = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+    if (openedContent !== content) {
       throw new Error(
         "File changed before formatting; stale formatter result discarded",
       );
@@ -2324,4 +2390,57 @@ export class LspWorkspace {
     }
     return state.disposePromise;
   }
+}
+
+/**
+ * Computes diagnostic feedback and its next deduplication fingerprint without updating history.
+ * The caller records the fingerprint only when a source responded and the hook is current.
+ * @example A clean response after earlier findings emits a clearing diagnostic message.
+ */
+function mutationDiagnosticFeedback(
+  state: WorkspaceState,
+  file: string,
+  report: DiagnosticReport,
+) {
+  const notes: string[] = [];
+  const unverified = report.unverifiedSources.length > 0;
+  const fingerprint = JSON.stringify([
+    report.unverifiedSources,
+    report.diagnostics.map((item) => [item.range, item.severity, item.message]),
+  ]);
+  const previous = state.diagnosticFingerprints.get(file);
+  if (report.responders > 0) {
+    const hasFeedback =
+      report.diagnostics.length > 0 ||
+      unverified ||
+      previous?.hadFindings ||
+      previous?.unverified;
+    if (
+      (!state.config.settings.diagnosticsDeduplicate ||
+        previous?.fingerprint !== fingerprint) &&
+      hasFeedback
+    ) {
+      notes.push(
+        diagnosticsText(
+          file,
+          report.diagnostics,
+          state.options.cwd,
+          report.unverifiedSources,
+        ),
+      );
+    }
+  }
+  if (report.failures.length > 0) {
+    notes.push(
+      `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
+    );
+  }
+  return {
+    notes,
+    fingerprint: {
+      fingerprint,
+      hadFindings: report.diagnostics.length > 0,
+      unverified,
+    },
+  };
 }

@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as config from "./config.ts";
+import { fileToUri } from "./edits.ts";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as linters from "./linters.ts";
 
@@ -178,5 +181,118 @@ describe("LspWorkspace.execute", () => {
     expect(result.isError).toBe(true);
     expect(result.text).toContain("sample.ts");
     expect(result.text).toContain("server rejected command");
+  });
+
+  test("should reject stale edits to files opened before a later rename synchronization fails", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "lsp-rename-tracking-"));
+    const source = join(root, "source");
+    const destination = join(root, "renamed");
+    const firstFile = join(source, "a.ts");
+    const secondFile = join(source, "b.ts");
+    const queryFile = join(root, "query.ts");
+    let workspace: LspWorkspace | undefined;
+    try {
+      await fs.mkdir(source);
+      await fs.writeFile(firstFile, original);
+      await fs.writeFile(secondFile, original);
+      await fs.writeFile(queryFile, "const query = 1;\n");
+      const serverConfig: ServerConfig = {
+        name: "test-server",
+        command: "test-server",
+        resolvedCommand: "/installed/test-server",
+        args: [],
+        root,
+        rootMarkers: [],
+        fileTypes: [".ts"],
+      };
+      spyOn(config, "loadLspConfig").mockResolvedValue({
+        servers: [serverConfig],
+        warnings: [],
+        settings: {
+          enabled: true,
+          lazy: true,
+          formatOnWrite: false,
+          diagnosticsOnWrite: false,
+          diagnosticsOnEdit: false,
+          diagnosticsDeduplicate: true,
+        },
+      });
+      const documents = new Map<string, { version: number; content: string }>();
+      const request = mock<LanguageServer["request"]>().mockResolvedValue({
+        changes: {
+          [fileToUri(firstFile)]: [
+            {
+              range: {
+                start: { line: 0, character: 0 },
+                end: { line: 0, character: 0 },
+              },
+              newText: "const stale = 0;\n",
+            },
+          ],
+        },
+      });
+      const server: LanguageServer = {
+        config: serverConfig,
+        capabilities: {},
+        isAlive: true,
+        request: request as LanguageServer["request"],
+        notify: () => Promise.resolve(),
+        syncFile: (target, content) => {
+          if (target === secondFile) {
+            return Promise.reject(
+              new Error("Second document synchronization failed"),
+            );
+          }
+          documents.set(target, { version: 1, content: content ?? "" });
+          return Promise.resolve();
+        },
+        saved: () => Promise.resolve(),
+        closeFile: () => Promise.resolve(),
+        diagnostics: async () => ({ items: [], freshness: "pull" }),
+        document: (target) => documents.get(target),
+        shutdown: () => Promise.resolve(),
+      };
+      spyOn(LanguageServerPool.prototype, "get").mockResolvedValue(server);
+      spyOn(LanguageServerPool.prototype, "clients").mockReturnValue([server]);
+      workspace = await LspWorkspace.create({
+        cwd: root,
+        agentDir: join(root, "agent"),
+        trusted: true,
+      });
+      const failedRename = await workspace.execute({
+        action: "rename_file",
+        file: source,
+        // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
+        new_name: destination,
+      });
+      expect(failedRename.isError).toBe(true);
+      expect(failedRename.text).toContain(
+        "Second document synchronization failed",
+      );
+      expect(await fs.readFile(firstFile, "utf8")).toBe(original);
+      expect(await fs.readFile(secondFile, "utf8")).toBe(original);
+      await expect(fs.stat(destination)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
+      const interveningContent = "const edited = 2;\n";
+      await fs.writeFile(firstFile, interveningContent);
+      const staleRename = await workspace.execute({
+        action: "rename",
+        file: queryFile,
+        line: 1,
+        symbol: "query",
+        // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
+        new_name: "renamedQuery",
+      });
+      expect(staleRename.isError).toBe(true);
+      expect(await fs.readFile(firstFile, "utf8")).toBe(interveningContent);
+    } finally {
+      try {
+        await workspace?.dispose();
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    }
   });
 });

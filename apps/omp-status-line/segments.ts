@@ -383,6 +383,38 @@ function renderTime(ctx: SegmentContext): RenderedSegment {
 }
 
 /**
+ * Renders monetary cost, rounded premium requests, and subscription status.
+ * @param ctx Usage and model registry; the registry determines OAuth billing.
+ * @returns A styled segment, hidden when no charges or subscription apply.
+ * @example With cost 1.5 and no premium/subscription, content contains "$1.50".
+ */
+function renderCost(ctx: SegmentContext): RenderedSegment {
+  const subscription = ctx.extensionContext.model
+    ? ctx.extensionContext.modelRegistry.isUsingOAuth(
+        ctx.extensionContext.model,
+      )
+    : false;
+  const premium =
+    Math.round(
+      (ctx.usage.premiumRequests + Number.EPSILON) *
+        PREMIUM_REQUEST_DECIMAL_FACTOR,
+    ) / PREMIUM_REQUEST_DECIMAL_FACTOR;
+  const parts: string[] = [];
+  if (ctx.usage.cost > 0) {
+    parts.push(`$${ctx.usage.cost.toFixed(2)}`);
+  }
+  if (premium > 0) {
+    parts.push(`★ ${formatNumber(premium)}`);
+  }
+  if (subscription) {
+    parts.push("(sub)");
+  }
+  return parts.length > 0
+    ? { content: color(statusColor.cost, parts.join(" ")), visible: true }
+    : { content: "", visible: false };
+}
+
+/**
  * Renders one configured segment with its visibility and terminal styling.
  * @param id Segment selected by the active preset.
  * @param ctx Current settings, usage, and host state; nothing is mutated.
@@ -486,31 +518,8 @@ export function renderSegment(
             visible: true,
           }
         : { content: "", visible: false };
-    case "cost": {
-      const subscription = ctx.extensionContext.model
-        ? ctx.extensionContext.modelRegistry.isUsingOAuth(
-            ctx.extensionContext.model,
-          )
-        : false;
-      const premium =
-        Math.round(
-          (ctx.usage.premiumRequests + Number.EPSILON) *
-            PREMIUM_REQUEST_DECIMAL_FACTOR,
-        ) / PREMIUM_REQUEST_DECIMAL_FACTOR;
-      const parts: string[] = [];
-      if (ctx.usage.cost > 0) {
-        parts.push(`$${ctx.usage.cost.toFixed(2)}`);
-      }
-      if (premium > 0) {
-        parts.push(`★ ${formatNumber(premium)}`);
-      }
-      if (subscription) {
-        parts.push("(sub)");
-      }
-      return parts.length > 0
-        ? { content: color(statusColor.cost, parts.join(" ")), visible: true }
-        : { content: "", visible: false };
-    }
+    case "cost":
+      return renderCost(ctx);
     case "context_pct":
       return renderContext(ctx);
     case "context_total":
