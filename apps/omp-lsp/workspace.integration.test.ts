@@ -34,7 +34,14 @@ const file = "/project/sample.ts";
 const original = "const   value={foo:1}\n";
 const MAX_REFERENCE_ATTEMPTS = 3;
 
-/** Builds a protocol location at a zero-based position for navigation responses. */
+/**
+ * Builds a navigation response location without filesystem access.
+ * @param target - Absolute fixture path; defaults to /project/sample.ts.
+ * @param line - Zero-based line number.
+ * @param character - Zero-based UTF-16 code-unit column.
+ * @returns A file URI and a range spanning one code unit on the requested line.
+ * @example location("/project/a.ts", 1, 2) has URI file:///project/a.ts and range (1, 2)–(1, 3).
+ */
 const location = (target = file, line = 0, character = 0) => ({
   uri: fileToUri(target),
   range: {
@@ -49,6 +56,16 @@ const finding: Diagnostic = {
   message: "Unknown identifier",
 };
 
+/**
+ * Creates an in-memory workspace and installs filesystem, host-queue, configuration, and server-pool spies.
+ * @param linter - Selects the Biome fixture with no live pool clients when true; otherwise uses a semantic test server.
+ * @returns The workspace, mutable server/config controls, request mock, stat factory, and current-content reader.
+ * Registered workspaces are disposed by this file's afterEach; the shared test preload restores spies and clears mock calls.
+ * @throws Propagates workspace creation failures.
+ * @example
+ * const { workspace, content } = await fixture();
+ * // content() is "const   value={foo:1}\n"; afterEach disposes workspace.
+ */
 async function fixture(linter = false) {
   let content = original;
   const stat = () =>
