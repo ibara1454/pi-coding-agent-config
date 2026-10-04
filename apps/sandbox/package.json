@@ -20,7 +20,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.1"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.71",
+    "@anthropic-ai/sandbox-runtime": "0.0.78",
     "deepmerge": "4.3.1"
   }
 }
