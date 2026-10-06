@@ -50,6 +50,7 @@ bun test packages/biome-rules
 
 ## Code Conventions & Common Patterns
 
+- Use code to express **how** it works, tests to specify **what** it should do, commit messages to explain **why** it changed, and code comments to explain **why not**—why an otherwise reasonable alternative was rejected.
 - Follow `.editorconfig`: TypeScript uses 2 spaces; keep LF, UTF-8, trimmed trailing whitespace, and a final newline.
 - Use ESM imports and Node built-ins with `node:` specifiers. Use `import type` for type-only host contracts.
 - Pi-host-loaded package entries default-export only the declared extension factory and do not re-export implementation helpers. Keep mutable session state closure-local, and release timers, subscriptions, panels, terminal modes, and retained host references on shutdown and every earlier exit path.
