@@ -243,13 +243,6 @@ Run the focused suite from the repository root:
 bun test apps/extension-manager
 ```
 
-`persistence.test.ts` covers commit coordination with in-memory I/O, while
-`settings.test.ts` covers pure conflict and mutation policy.
-`persistence.integration.test.ts` retains checks requiring real locks, atomic
-replacement, permissions, and filesystem identity.
-Concurrent-commit tests accept exhausted lock retries but verify stale-snapshot
-rejection after writes settle.
-
 Run repository lint and type checking:
 
 ```sh
