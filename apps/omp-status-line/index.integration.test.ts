@@ -23,6 +23,8 @@ const STATUS_LINE_CHROME_WIDTH = Bun.stringWidth(
 );
 const STATUS_GROUP_GAP_WIDTH = 1;
 const FIXED_STATUS_CLOCK_MS = 10_000;
+const STREAM_UPDATE_ELAPSED_MS = 2000;
+const POST_RUN_IDLE_ELAPSED_MS = 20_000;
 const IDLE_REFRESH_INTERVAL_MS = 2_000_000_000;
 const SHORT_PATH_RENDER_WIDTH = 17;
 const MIN_EDITOR_CHROME_RENDER_WIDTH = 10;
@@ -334,7 +336,7 @@ test("should release owned resources without replacing newer UI", async () => {
  * Installs the exported extension against in-memory settings, commands, and host UI.
  * @param settings Segment layout to render; no existing config or repository is read.
  * @param options Deterministic host path, command responses, and hook statuses.
- * @returns Rendered public components and cleanup owning session shutdown and environment restoration.
+ * @returns Rendered public components, deterministic clock/refresh controls, and cleanup owning session shutdown and environment restoration.
  * @example const fixture = await createRenderedFixture({ leftSegments: ["path"] }); // fixture.top(40)
  */
 async function createRenderedFixture(
@@ -432,12 +434,16 @@ async function createRenderedFixture(
     }) as {
       render: (width: number) => string[];
       dispose: () => void;
+      invalidate: () => void;
     };
     return {
       harness,
       footer,
       unsubscribe,
       cleanup,
+      clock,
+      interval,
+      requestRender,
       top: (width = WIDE_STATUS_RENDER_WIDTH): string =>
         Bun.stripANSI(editor.render(width)[0] ?? ""),
       async changeBranch(nextBranch: string): Promise<void> {
@@ -454,6 +460,111 @@ async function createRenderedFixture(
 }
 
 describe("ompStatusLine", () => {
+  test.each([
+    "session_info_changed",
+    "model_select",
+    "thinking_level_select",
+    "session_tree",
+    "session_compact",
+  ])(
+    "should render the replacement context and invalidate the UI when %s fires",
+    async (event) => {
+      const fixture = await createRenderedFixture({
+        leftSegments: ["model"],
+      });
+      try {
+        expect(fixture.top()).toContain("Test");
+        const nextContext = {
+          ...fixture.harness.context,
+          model: {
+            ...fixture.harness.context.model,
+            name: "Replacement",
+          },
+        };
+        fixture.requestRender.mockClear();
+
+        await fixture.harness.handlers.get(event)?.({}, nextContext);
+
+        expect(fixture.requestRender).toHaveBeenCalledTimes(1);
+        expect(fixture.top()).toContain("Replacement");
+        expect(fixture.top()).not.toContain("Test");
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test.each(["message_update", "message_end"])(
+    "should render run metrics and invalidate the UI when %s supplies assistant output",
+    async (event) => {
+      const fixture = await createRenderedFixture({
+        leftSegments: ["token_rate", "time_spent"],
+      });
+      const { handlers, context } = fixture.harness;
+      try {
+        await handlers.get("agent_start")?.({}, context);
+        fixture.clock.mockReturnValue(
+          FIXED_STATUS_CLOCK_MS + STREAM_UPDATE_ELAPSED_MS,
+        );
+        fixture.requestRender.mockClear();
+
+        await handlers.get(event)?.(
+          { message: { role: "assistant", usage: { output: 20 } } },
+          context,
+        );
+
+        expect(fixture.requestRender).toHaveBeenCalled();
+        expect(fixture.top()).toContain("10.0 tok/s");
+        expect(fixture.top()).toContain("⏱ 2s");
+
+        fixture.requestRender.mockClear();
+        await handlers.get("agent_end")?.({}, context);
+        expect(fixture.requestRender).toHaveBeenCalled();
+        fixture.clock.mockReturnValue(
+          FIXED_STATUS_CLOCK_MS + POST_RUN_IDLE_ELAPSED_MS,
+        );
+        expect(fixture.top()).toContain("⏱ 2s");
+
+        await handlers.get("session_start")?.({}, { ...context, mode: "rpc" });
+        expect(fixture.top()).not.toContain("tok/s");
+        expect(fixture.top()).not.toContain("⏱");
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test("should keep hook statuses hidden but request renders on invalidation and refresh ticks when hook display is disabled", async () => {
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["model"], showHookStatus: false },
+      { statuses: new Map([["ready", "Ready"]]) },
+    );
+    try {
+      expect(fixture.footer.render(WIDE_STATUS_RENDER_WIDTH)).toEqual([]);
+      fixture.requestRender.mockClear();
+      fixture.footer.invalidate();
+      expect(fixture.requestRender).toHaveBeenCalledTimes(1);
+      const tick = fixture.interval.mock.calls[0]?.[0];
+      if (typeof tick !== "function") {
+        throw new Error("Expected the session refresh callback");
+      }
+      tick();
+      expect(fixture.requestRender).toHaveBeenCalledTimes(2);
+      expect(fixture.top()).toContain("Test");
+      expect(fixture.top(MIN_EDITOR_CHROME_RENDER_WIDTH - 1)).toBe("header");
+
+      await fixture.cleanup();
+      expect(fixture.top()).toBe("header");
+      expect(fixture.harness.getEditorFactory()).toBe(
+        fixture.harness.baseEditorFactory,
+      );
+      expect(fixture.harness.getFooterFactory()).toBeUndefined();
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("should drop right segments from the end before shortening the left path when both groups overflow", async () => {
     const fixture = await createRenderedFixture({
       leftSegments: ["model", "path"],

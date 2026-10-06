@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applySettingsMutations,
-  captureMutationOwners,
-  captureOwner,
-  currentOwner,
+  hasSettingsConflict,
   parseSettingsDocument,
 } from "./settings.ts";
 import type {
@@ -345,71 +343,168 @@ describe("applySettingsMutations", () => {
 
     expect(current).toEqual({ extensions: ["./extensions"] });
   });
-});
 
-describe("captureMutationOwners", () => {
-  test("should capture one owner per distinct mutation target", () => {
-    const owners = captureMutationOwners(
-      { extensions: ["./extensions"], packages: ["npm:kit"] },
-      [
-        mutation(topTarget(), false),
-        mutation(topTarget(), true),
-        mutation(packageTarget(), false),
-      ],
-    );
-
-    expect(owners).toEqual([
-      { type: "field", field: "extensions", value: ["./extensions"] },
-      {
-        type: "package",
-        locator: { source: "npm:kit", occurrence: 0 },
-        value: ["npm:kit"],
-      },
-    ]);
-  });
-});
-
-describe("captureOwner", () => {
-  test("should detach the snapshot value from later in-place edits", () => {
-    const extensions = ["./extensions"];
-    const settings: JsonObject = { extensions };
-
-    const snapshot = captureOwner(settings, topTarget());
-    extensions.push("-extensions/alpha.ts");
-
-    expect(snapshot.value).toEqual(["./extensions"]);
-  });
-});
-
-describe("currentOwner", () => {
-  test("should track all same-source occurrences for a package owner", () => {
-    const snapshot = captureOwner(
-      { packages: ["npm:kit", "npm:kit"] },
-      packageTarget(1),
-    );
-
+  test("should preserve unrelated package settings when disabling a selected package child", () => {
     expect(
-      currentOwner({ packages: ["npm:other", "npm:kit", "npm:kit"] }, snapshot),
-    ).toEqual(["npm:kit", "npm:kit"]);
+      applySettingsMutations(
+        {
+          packages: ["npm:kit", { source: "npm:other", skills: [] }],
+          theme: "light",
+        },
+        [mutation(packageTarget(), false)],
+      ),
+    ).toEqual({
+      packages: [
+        { source: "npm:kit", extensions: ["-extensions/alpha.ts"] },
+        { source: "npm:other", skills: [] },
+      ],
+      theme: "light",
+    });
+  });
+});
+
+const changedOwners: [
+  string,
+  JsonObject,
+  JsonObject,
+  TopLevelToggleTarget | PackageToggleTarget,
+][] = [
+  [
+    "the touched top-level field changes",
+    { extensions: ["./extensions"] },
+    { extensions: ["changed"] },
+    topTarget(),
+  ],
+  [
+    "an absent field becomes an empty list",
+    {},
+    { extensions: [] },
+    topTarget(),
+  ],
+  ["an empty field is removed", { extensions: [] }, {}, topTarget()],
+  [
+    "a filter field appears on the touched package",
+    { packages: ["npm:kit"] },
+    { packages: [{ source: "npm:kit", extensions: [] }] },
+    packageTarget(),
+  ],
+  [
+    "an identical same-source occurrence is inserted first",
+    { packages: ["npm:kit"] },
+    { packages: ["npm:kit", "npm:kit"] },
+    packageTarget(),
+  ],
+  [
+    "the touched package is removed",
+    { packages: ["npm:kit"] },
+    { packages: ["npm:other"] },
+    packageTarget(),
+  ],
+  [
+    "another occurrence of the touched package source changes",
+    { packages: ["npm:kit", "npm:kit"] },
+    { packages: [{ source: "npm:kit", skills: [] }, "npm:kit"] },
+    packageTarget(1),
+  ],
+  [
+    "a missing package source appears",
+    { packages: ["npm:other"] },
+    { packages: ["npm:other", "npm:kit"] },
+    packageTarget(),
+  ],
+];
+
+const unchangedOwners: [
+  string,
+  JsonObject,
+  JsonObject,
+  TopLevelToggleTarget | PackageToggleTarget,
+][] = [
+  [
+    "only an unrelated top-level setting changes",
+    { extensions: ["./extensions"], theme: "dark" },
+    { extensions: ["./extensions"], theme: "light" },
+    topTarget(),
+  ],
+  [
+    "only an unrelated package occurrence changes",
+    { packages: ["npm:kit", "npm:other"] },
+    { packages: ["npm:kit", { source: "npm:other", skills: [] }] },
+    packageTarget(),
+  ],
+  [
+    "another package source is inserted before the touched occurrences",
+    { packages: ["npm:kit", "npm:kit"] },
+    { packages: ["npm:other", "npm:kit", "npm:kit"] },
+    packageTarget(1),
+  ],
+  ["the selected field remains absent", {}, {}, topTarget()],
+  [
+    "the selected package source remains absent",
+    {},
+    { packages: ["npm:other"] },
+    packageTarget(),
+  ],
+];
+
+describe("hasSettingsConflict", () => {
+  test.each(changedOwners)(
+    "should report a conflict when %s",
+    (_label, snapshot, current, target) => {
+      expect(
+        hasSettingsConflict(snapshot, current, [mutation(target, false)]),
+      ).toBe(true);
+    },
+  );
+
+  test.each(unchangedOwners)(
+    "should report no conflict when %s",
+    (_label, snapshot, current, target) => {
+      expect(
+        hasSettingsConflict(snapshot, current, [mutation(target, false)]),
+      ).toBe(false);
+    },
+  );
+
+  test("should ignore all settings changes when no mutations select owners", () => {
+    expect(
+      hasSettingsConflict(
+        { extensions: ["before"], packages: ["npm:kit"] },
+        { extensions: ["after"], packages: [] },
+        [],
+      ),
+    ).toBe(false);
   });
 
-  test("should distinguish a missing field owner from an empty list", () => {
-    const snapshot = captureOwner({}, topTarget());
+  test("should leave caller inputs untouched when multiple mutations share unchanged owners", () => {
+    const snapshot: JsonObject = {
+      extensions: ["./extensions"],
+      packages: [{ source: "npm:kit", extensions: ["./extensions"] }],
+    };
+    const current = structuredClone(snapshot);
+    const mutations = [
+      mutation(topTarget(), false),
+      mutation(topTarget(), true),
+      mutation(packageTarget(), false),
+      mutation(packageTarget(), true),
+    ];
+    const before = structuredClone({ snapshot, current, mutations });
 
-    expect(currentOwner({}, snapshot)).toBe(snapshot.value);
-    expect(currentOwner({ extensions: [] }, snapshot)).toEqual([]);
+    expect(hasSettingsConflict(snapshot, current, mutations)).toBe(false);
+    expect({ snapshot, current, mutations }).toEqual(before);
   });
 
-  test("should return later in-place edits instead of the detached snapshot value", () => {
-    const extensions = ["./extensions"];
-    const settings: JsonObject = { extensions };
-
-    const snapshot = captureOwner(settings, topTarget());
-    extensions.push("-extensions/alpha.ts");
-
-    expect(currentOwner(settings, snapshot)).toEqual([
-      "./extensions",
-      "-extensions/alpha.ts",
-    ]);
+  test("should report a conflict when one of several selected owners changes", () => {
+    expect(
+      hasSettingsConflict(
+        { extensions: ["./extensions"], packages: ["npm:kit"] },
+        { extensions: ["./extensions"], packages: [] },
+        [
+          mutation(topTarget(), false),
+          mutation(topTarget(), true),
+          mutation(packageTarget(), false),
+        ],
+      ),
+    ).toBe(true);
   });
 });
