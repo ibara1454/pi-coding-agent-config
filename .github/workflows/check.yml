@@ -45,7 +45,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p coverage
-          bun run test:coverage --log-order=grouped --continue=always 2>&1 | tee coverage/report.txt
+          bun run test --log-order=grouped --continue=always 2>&1 | tee coverage/report.txt
 
       - name: Publish coverage summary
         if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
