@@ -14,7 +14,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.1"
   },
   "dependencies": {
-    "semver": "7.8.0"
+    "semver": "7.8.5"
   },
   "devDependencies": {
     "@types/semver": "7.8.0"
