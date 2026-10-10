@@ -1,4 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies need the live named-import binding.
+import * as os from "node:os";
 import { renderSegment } from "./segments.ts";
 import type {
   SegmentContext,
@@ -126,6 +128,41 @@ test("should clamp paths by terminal cells", () => {
 });
 
 describe("renderSegment", () => {
+  test.each([
+    { cwd: "/work/project/src", options: {}, expected: "project/src" },
+    {
+      cwd: "/home/test/Projects/project",
+      options: {},
+      expected: "project",
+    },
+    { cwd: "/home/test", options: {}, expected: "~" },
+    { cwd: "/home/test/src", options: {}, expected: "~/src" },
+    { cwd: "/home/tester/src", options: {}, expected: "/home/tester/src" },
+    { cwd: "/workshop/src", options: {}, expected: "/workshop/src" },
+    {
+      cwd: "/work/project",
+      options: { stripWorkPrefix: false },
+      expected: "/work/project",
+    },
+    {
+      cwd: "/home/test/src",
+      options: { abbreviate: false },
+      expected: "/home/test/src",
+    },
+  ])(
+    "should display path '$expected' when cwd is '$cwd' with options $options",
+    ({ cwd, options, expected }) => {
+      spyOn(os, "homedir").mockReturnValue("/home/test");
+      const context = createContext({ cwd });
+      context.options.path = options;
+
+      const rendered = renderSegment("path", context);
+
+      expect(rendered.visible).toBe(true);
+      expect(Bun.stripANSI(rendered.content)).toBe(`dir: ${expected}`);
+    },
+  );
+
   test.each([
     {
       name: "Claude Sonnet",

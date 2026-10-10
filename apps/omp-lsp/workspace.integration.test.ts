@@ -16,8 +16,8 @@ import * as linters from "./linters.ts";
 
 import {
   type LanguageServer,
-  LanguageServerPool,
   type DiagnosticReport as ServerDiagnosticReport,
+  StdioLanguageServerPool,
 } from "./runtime.ts";
 import type { LspConfig, ServerConfig } from "./types.ts";
 import { LspWorkspace } from "./workspace.ts";
@@ -127,8 +127,8 @@ async function fixture(linter = false) {
     document: () => ({ version: 1, content }),
     shutdown: () => Promise.resolve(),
   };
-  spyOn(LanguageServerPool.prototype, "get").mockResolvedValue(server);
-  spyOn(LanguageServerPool.prototype, "clients").mockReturnValue(
+  spyOn(StdioLanguageServerPool.prototype, "get").mockResolvedValue(server);
+  spyOn(StdioLanguageServerPool.prototype, "clients").mockReturnValue(
     linter ? [] : [server],
   );
   const workspace = await LspWorkspace.create({
@@ -270,7 +270,7 @@ describe("LspWorkspace.afterMutation", () => {
       ),
     };
     loaded.servers.push(failingConfig);
-    spyOn(LanguageServerPool.prototype, "get").mockImplementation(
+    spyOn(StdioLanguageServerPool.prototype, "get").mockImplementation(
       async (selected) =>
         selected.name === failingConfig.name ? failingServer : server,
     );
@@ -312,7 +312,7 @@ describe("LspWorkspace.afterMutation", () => {
       isAlive: false,
       syncFile: mock<LanguageServer["syncFile"]>().mockResolvedValue(undefined),
     };
-    spyOn(LanguageServerPool.prototype, "clients").mockReturnValue([
+    spyOn(StdioLanguageServerPool.prototype, "clients").mockReturnValue([
       server,
       unrelated,
       dead,
@@ -339,7 +339,7 @@ describe("LspWorkspace.afterMutation", () => {
       saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
       document: () => undefined,
     };
-    spyOn(LanguageServerPool.prototype, "clients").mockReturnValue([
+    spyOn(StdioLanguageServerPool.prototype, "clients").mockReturnValue([
       server,
       next,
     ]);
@@ -755,7 +755,7 @@ describe("LspWorkspace.execute", () => {
       document: () => ({ version: 1, content: "const divergent = true;\n" }),
     };
     loaded.servers.push(second.config);
-    spyOn(LanguageServerPool.prototype, "get").mockImplementation(
+    spyOn(StdioLanguageServerPool.prototype, "get").mockImplementation(
       async (selected) =>
         selected.name === second.config.name ? second : server,
     );
@@ -820,7 +820,7 @@ describe("LspWorkspace.execute", () => {
       document: () => ({ version: 99, content: original }),
     };
     loaded.servers.push(second.config);
-    spyOn(LanguageServerPool.prototype, "get").mockImplementation(
+    spyOn(StdioLanguageServerPool.prototype, "get").mockImplementation(
       async (selected) =>
         selected.name === second.config.name ? second : server,
     );
@@ -983,8 +983,10 @@ describe("LspWorkspace.execute", () => {
         document: (target) => documents.get(target),
         shutdown: () => Promise.resolve(),
       };
-      spyOn(LanguageServerPool.prototype, "get").mockResolvedValue(server);
-      spyOn(LanguageServerPool.prototype, "clients").mockReturnValue([server]);
+      spyOn(StdioLanguageServerPool.prototype, "get").mockResolvedValue(server);
+      spyOn(StdioLanguageServerPool.prototype, "clients").mockReturnValue([
+        server,
+      ]);
       workspace = await LspWorkspace.create({
         cwd: root,
         agentDir: join(root, "agent"),

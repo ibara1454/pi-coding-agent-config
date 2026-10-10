@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { IntroAnimation, introFrame, RESTING_FRAMES } from "./gradient.ts";
 import { sanitizeInline } from "./terminal.ts";
 
@@ -144,5 +144,38 @@ describe("IntroAnimation.start", () => {
       animation.dispose();
     }
     expect(clearInterval).toHaveBeenCalledTimes(2);
+  });
+
+  test("should use the platform clock and release its interval when a default-clock intro is disposed", () => {
+    const startedAt = 100;
+    const elapsed = 750;
+    const tickMilliseconds = 33;
+    const now = spyOn(performance, "now").mockReturnValue(startedAt);
+    const timerHandle: NodeJS.Timeout = Object.create(null);
+    const interval = spyOn(globalThis, "setInterval").mockImplementation(
+      () => timerHandle,
+    );
+    const clear = spyOn(globalThis, "clearInterval").mockImplementation(
+      () => undefined,
+    );
+    const render = mock();
+    const animation = new IntroAnimation(render);
+
+    try {
+      animation.start();
+      expect(render).toHaveBeenCalledTimes(1);
+      expect(interval).toHaveBeenCalledWith(
+        expect.any(Function),
+        tickMilliseconds,
+      );
+      now.mockReturnValue(startedAt + elapsed);
+      expect(animation.progress()).toBe(elapsed / INTRO_DURATION_MS);
+      expect(animation.isActive()).toBe(true);
+    } finally {
+      animation.dispose();
+    }
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(clear).toHaveBeenCalledWith(timerHandle);
+    expect(animation.progress()).toBeUndefined();
   });
 });

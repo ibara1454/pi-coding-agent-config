@@ -9,6 +9,8 @@ import * as host from "@earendil-works/pi-coding-agent";
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
 import { applyTextEdits, applyWorkspaceEdit, fileToUri } from "./edits.ts";
 
+const ORIGINAL_TEXT_LENGTH = "old".length;
+
 const filesystem: {
   opendir: (directory: string) => Promise<
     AsyncIterable<{
@@ -233,8 +235,52 @@ describe("applyTextEdits", () => {
       ]),
     ).toThrow("Overlapping");
   });
+  test.each([
+    [
+      "the line is beyond the document",
+      { line: 1, character: 0 },
+      { line: 1, character: 0 },
+      "line 2 is outside",
+    ],
+    [
+      "the character is beyond the line",
+      { line: 0, character: 4 },
+      { line: 0, character: 4 },
+      "character 4 is outside",
+    ],
+    [
+      "the range is reversed",
+      { line: 0, character: 2 },
+      { line: 0, character: 1 },
+      "ends before it starts",
+    ],
+    [
+      "a character is fractional",
+      { line: 0, character: 0.5 },
+      { line: 0, character: 1 },
+      "nonnegative UTF-16 integers",
+    ],
+  ] as const)(
+    "should reject invalid ranges when %s",
+    (_condition, start, end, reason) => {
+      expect(() =>
+        applyTextEdits("abc", [
+          {
+            range: { start, end },
+            newText: "x",
+          },
+        ]),
+      ).toThrow(reason);
+    },
+  );
+
+  test("should coalesce duplicate replacements when their ranges and text are identical", () => {
+    const edit = replacement(0, ORIGINAL_TEXT_LENGTH, "new");
+    expect(applyTextEdits("old", [edit, edit])).toBe("new");
+  });
 });
 
+// Snapshot consistency, ordered text mutations, and reference rollback.
 describe("applyWorkspaceEdit", () => {
   test("should reject stale server versions before changing disk", async () => {
     const documentTextEndOffset = 3;
@@ -448,7 +494,10 @@ describe("applyWorkspaceEdit", () => {
       files: ["/project/ref.ts"],
     });
   });
+});
 
+// Resource operation validation, conflict handling, and directory effects.
+describe("applyWorkspaceEdit", () => {
   test.each(["overwrite", "ignoreIfExists", "recursive", "ignoreIfNotExists"])(
     "should reject resource edits without writing when %s is not a boolean",
     async (option) => {
@@ -870,7 +919,10 @@ describe("applyWorkspaceEdit", () => {
       },
     ]);
   });
+});
 
+// Canonical document aliases and mutation-time snapshot checks.
+describe("applyWorkspaceEdit", () => {
   test("should reject conflicting text aliases before committing either edit", async () => {
     const fixture = memoryFiles({ "/project/a.ts": "old" });
     fixture.links.set("/project/link.ts", "/project/a.ts");
@@ -1014,5 +1066,375 @@ describe("applyWorkspaceEdit", () => {
     expect(result.changes).toEqual([]);
     expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
     expect(fixture.writes).toEqual([]);
+  });
+});
+
+// Untrusted edit metadata, annotations, and document bucket validation.
+describe("applyWorkspaceEdit", () => {
+  test.each([
+    ["the workspace edit is null", null, "Invalid WorkspaceEdit"],
+    [
+      "documentChanges is not an array",
+      { documentChanges: {} },
+      "documentChanges must be an array",
+    ],
+    [
+      "text edits are not an array",
+      { changes: { [fileToUri("/project/a.ts")]: {} } },
+      "text edits must be an array",
+    ],
+    [
+      "a document URI is missing",
+      { documentChanges: [{ textDocument: {}, edits: [] }] },
+      "missing its document URI",
+    ],
+    [
+      "a document version is fractional",
+      {
+        documentChanges: [
+          {
+            textDocument: { uri: fileToUri("/project/a.ts"), version: 1.5 },
+            edits: [],
+          },
+        ],
+      },
+      "Invalid workspace edit document version",
+    ],
+    [
+      "a replacement is not text",
+      {
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            { ...replacement(0, 1, "x"), newText: 3 },
+          ],
+        },
+      },
+      "newText must be a string",
+    ],
+    [
+      "an edit uses snippets",
+      {
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            { ...replacement(0, 1, "x"), insertTextFormat: 2 },
+          ],
+        },
+      },
+      "Snippet-formatted",
+    ],
+    [
+      "a position is negative",
+      {
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            {
+              range: {
+                start: { line: -1, character: 0 },
+                end: { line: 0, character: 1 },
+              },
+              newText: "x",
+            },
+          ],
+        },
+      },
+      "nonnegative UTF-16 integers",
+    ],
+  ] as const)(
+    "should reject invalid edits without mutation when %s",
+    async (_condition, edit, reason) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(edit, { cwd: "/project" });
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain(reason);
+      expect(result.changes).toEqual([]);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["the annotation is unknown", {}, "missing", "unknown change annotation"],
+    [
+      "the annotation identifier is not text",
+      { known: {} },
+      1,
+      "unknown change annotation",
+    ],
+    [
+      "the annotation data is malformed",
+      { known: null },
+      "known",
+      "Invalid change annotation",
+    ],
+    [
+      "confirmation has a label",
+      { known: { needsConfirmation: true, label: "approve rename" } },
+      "known",
+      "requires confirmation: approve rename",
+    ],
+    [
+      "confirmation has no label",
+      { known: { needsConfirmation: true } },
+      "known",
+      "requires confirmation: known",
+    ],
+  ] as const)(
+    "should reject unapproved edits without mutation when %s",
+    async (_condition, changeAnnotations, annotationId, reason) => {
+      const fixture = memoryFiles({ "/project/a.ts": "old" });
+      const result = await applyWorkspaceEdit(
+        {
+          changeAnnotations,
+          changes: {
+            [fileToUri("/project/a.ts")]: [
+              { ...replacement(0, ORIGINAL_TEXT_LENGTH, "new"), annotationId },
+            ],
+          },
+        },
+        { cwd: "/project" },
+      );
+      expect(result.applied).toBe(false);
+      expect(result.failureReason).toContain(reason);
+      expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+      expect(fixture.writes).toEqual([]);
+    },
+  );
+
+  test("should apply annotated changes when confirmation is not required", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const result = await applyWorkspaceEdit(
+      {
+        changeAnnotations: {
+          accepted: { label: "replace", needsConfirmation: false },
+        },
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            {
+              ...replacement(0, ORIGINAL_TEXT_LENGTH, "new"),
+              annotationId: "accepted",
+            },
+          ],
+        },
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
+  });
+
+  test("should combine edits into one snapshot-relative mutation when document buckets share a version", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const textDocument = { uri: fileToUri("/project/a.ts"), version: null };
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          { textDocument, edits: [replacement(0, 1, "n")] },
+          { textDocument, edits: [replacement(1, ORIGINAL_TEXT_LENGTH, "ew")] },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(true);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
+    expect(result.changes).toEqual([
+      { kind: "edit", file: "/project/a.ts", files: ["/project/a.ts"] },
+    ]);
+    expect(fixture.writes).toEqual(["/project/a.ts"]);
+  });
+
+  test("should reject all document buckets when their versions conflict", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            textDocument: { uri: fileToUri("/project/a.ts"), version: 1 },
+            edits: [replacement(0, 1, "n")],
+          },
+          {
+            textDocument: { uri: fileToUri("/project/a.ts"), version: 2 },
+            edits: [replacement(1, ORIGINAL_TEXT_LENGTH, "ew")],
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Conflicting document versions");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("old");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should reject a batch without filesystem access when it exceeds 2000 operations", async () => {
+    const fixture = memoryFiles({});
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: Array.from({ length: 2001 }, (_, index) => ({
+          kind: "create",
+          uri: fileToUri(`/project/${index}.ts`),
+        })),
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("exceeds 2000 operations");
+    expect(fixture.files.size).toBe(0);
+    expect(fixture.writes).toEqual([]);
+    expect(fs.lstat).not.toHaveBeenCalled();
+  });
+});
+
+// Reconciliation after partial writes and overwrite-rename failures.
+describe("applyWorkspaceEdit", () => {
+  test("should retain partially written content in the reconciliation report when a write truncates before failing", async () => {
+    const fixture = memoryFiles({ "/project/a.ts": "old" });
+    spyOn(fs, "writeFile").mockImplementation((file) => {
+      fixture.files.set(String(file), { content: "", revision: 2 });
+      return Promise.reject(new Error("Disk full"));
+    });
+    const result = await applyWorkspaceEdit(
+      {
+        changes: {
+          [fileToUri("/project/a.ts")]: [
+            replacement(0, ORIGINAL_TEXT_LENGTH, "new"),
+          ],
+        },
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Disk full");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("");
+    expect(result.changes).toEqual([
+      { kind: "edit", file: "/project/a.ts", files: ["/project/a.ts"] },
+    ]);
+    expect(result.summary).toContain(
+      "Partially changed /project/a.ts before filesystem failure",
+    );
+  });
+
+  test("should restore the displaced destination when an overwrite rename fails", async () => {
+    const fixture = memoryFiles({
+      "/project/a.ts": "source",
+      "/project/b.ts": "destination",
+    });
+    spyOn(fs, "rename").mockImplementation((source, destination) => {
+      if (String(source) === "/project/a.ts") {
+        return Promise.reject(new Error("Source rename failed"));
+      }
+      const file = fixture.files.get(String(source));
+      if (!file) {
+        return Promise.reject(new Error("Missing source"));
+      }
+      fixture.files.set(String(destination), file);
+      fixture.files.delete(String(source));
+      return Promise.resolve();
+    });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "rename",
+            oldUri: fileToUri("/project/a.ts"),
+            newUri: fileToUri("/project/b.ts"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Source rename failed");
+    expect(result.changes).toEqual([]);
+    expect([...fixture.files.keys()].sort()).toEqual([
+      "/project/a.ts",
+      "/project/b.ts",
+    ]);
+    expect(fixture.files.get("/project/b.ts")?.content).toBe("destination");
+    expect([...fixture.directories].sort()).toEqual(["/", "/project"]);
+  });
+
+  test("should retain a recoverable backup and report the lost destination when rename restoration fails", async () => {
+    const fixture = memoryFiles({
+      "/project/a.ts": "source",
+      "/project/b.ts": "destination",
+    });
+    spyOn(fs, "rename").mockImplementation((source, destination) => {
+      if (String(source) !== "/project/b.ts") {
+        return Promise.reject(new Error("Rename unavailable"));
+      }
+      const file = fixture.files.get(String(source));
+      if (!file) {
+        return Promise.reject(new Error("Missing source"));
+      }
+      fixture.files.set(String(destination), file);
+      fixture.files.delete(String(source));
+      return Promise.resolve();
+    });
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "rename",
+            oldUri: fileToUri("/project/a.ts"),
+            newUri: fileToUri("/project/b.ts"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("destination restore failed");
+    expect(result.failureReason).toContain(
+      "Original retained at /project/.pi-lsp-displaced-1/original",
+    );
+    expect(
+      fixture.files.get("/project/.pi-lsp-displaced-1/original")?.content,
+    ).toBe("destination");
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("source");
+    expect(fixture.files.has("/project/b.ts")).toBe(false);
+    expect(result.changes).toEqual([
+      { kind: "delete", file: "/project/b.ts", files: ["/project/b.ts"] },
+    ]);
+  });
+
+  test("should report a committed rename and retained backup when displaced destination cleanup fails", async () => {
+    const fixture = memoryFiles({
+      "/project/a.ts": "source",
+      "/project/b.ts": "destination",
+    });
+    spyOn(fs, "rm").mockRejectedValue(new Error("Cleanup denied"));
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "rename",
+            oldUri: fileToUri("/project/a.ts"),
+            newUri: fileToUri("/project/b.ts"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain(
+      "Rename committed, but displaced destination cleanup failed",
+    );
+    expect(fixture.files.has("/project/a.ts")).toBe(false);
+    expect(fixture.files.get("/project/b.ts")?.content).toBe("source");
+    expect(
+      fixture.files.get("/project/.pi-lsp-displaced-1/original")?.content,
+    ).toBe("destination");
+    expect(result.changes).toEqual([
+      {
+        kind: "rename",
+        file: "/project/a.ts",
+        newFile: "/project/b.ts",
+        files: ["/project/a.ts"],
+        removedFiles: ["/project/b.ts"],
+      },
+    ]);
   });
 });

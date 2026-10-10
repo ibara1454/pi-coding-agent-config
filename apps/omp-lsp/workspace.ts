@@ -32,7 +32,11 @@ import {
   resolvePosition,
   symbols,
 } from "./operations.ts";
-import { type LanguageServer, LanguageServerPool } from "./runtime.ts";
+import {
+  type LanguageServer,
+  type LanguageServerPool,
+  StdioLanguageServerPool,
+} from "./runtime.ts";
 import type {
   LspConfig,
   LspParams,
@@ -190,6 +194,7 @@ async function concurrent<T, U>(
 
 interface WorkspaceState {
   readonly options: WorkspaceOptions;
+  readonly poolFactory: typeof createPool;
   config: LspConfig;
   pool: LanguageServerPool;
   readonly lifetime: AbortController;
@@ -204,9 +209,9 @@ interface WorkspaceState {
 }
 
 /**
- * Creates a session-owned pool with the configured idle policy and edit handler.
+ * Creates a session-owned pool; clients start on demand and an idle timer may start immediately.
  * @param cwd - Absolute workspace root.
- * @param idleTimeoutMs - Optional idle timeout passed through to the pool.
+ * @param idleTimeoutMs - Optional idle timeout in milliseconds passed through to the pool.
  * @param onApplyEdit - Trust-gated handler for server-requested workspace edits.
  * @returns A pool that the workspace must dispose or replace on reload.
  * @example
@@ -224,7 +229,7 @@ function createPool(
     server: LanguageServer,
   ) => Promise<{ applied: boolean; failureReason?: string }>,
 ): LanguageServerPool {
-  return new LanguageServerPool({
+  return new StdioLanguageServerPool({
     cwd,
     ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
     onApplyEdit,
@@ -1834,8 +1839,8 @@ async function renameFile(
  * @param params - Reload request; a concrete file selects its first matching server.
  * @param signal - Cancellation for loading and server reload operations.
  * @returns Reload results and configuration warnings, including unavailable-server failures.
- * @throws If loading configuration, stopping pools, or cancellation prevents completion.
- * @example Changing idleTimeoutMs from 60000 to 120000 disposes the old pool and installs one with the new idle policy.
+ * @throws If configuration loading, pool disposal or creation, or cancellation prevents completion.
+ * @example Changing idleTimeoutMs from 60000 to 120000 disposes the old pool and uses the session factory to acquire its replacement.
  */
 async function reloadWorkspace(
   state: WorkspaceState,
@@ -1856,7 +1861,7 @@ async function reloadWorkspace(
   state.config = next;
   if (previous.idleTimeoutMs !== next.idleTimeoutMs) {
     await state.pool.dispose();
-    state.pool = createPool(
+    state.pool = state.poolFactory(
       state.options.cwd,
       next.idleTimeoutMs,
       (edit, server) => applyServerEdit(state, edit, server),
@@ -2221,15 +2226,22 @@ export class LspWorkspace {
   readonly #state: WorkspaceState;
 
   /**
-   * Initializes one private state record and its session-owned language-server pool.
-   * @param options - Trust decision and configuration roots for this session.
+   * Initializes private session state and acquires its owned pool from the supplied factory.
+   * @param options - Trust decision and configuration roots for the session.
    * @param config - Already-loaded effective LSP configuration.
-   * @example A cwd of "." is resolved before constructing the pool; no server starts here.
+   * @param poolFactory - Acquires a pool owned by this workspace, also retained for reloads.
+   * @throws If the factory cannot create the pool.
+   * @example A cwd of "." is resolved before calling the factory; the default pool starts no servers here.
    */
-  private constructor(options: WorkspaceOptions, config: LspConfig) {
+  private constructor(
+    options: WorkspaceOptions,
+    config: LspConfig,
+    poolFactory: typeof createPool,
+  ) {
     const normalizedOptions = { ...options, cwd: path.resolve(options.cwd) };
     const state: WorkspaceState = {
       options: normalizedOptions,
+      poolFactory,
       config,
       lifetime: new AbortController(),
       jobs: new Set(),
@@ -2237,7 +2249,7 @@ export class LspWorkspace {
       hooks: new Map(),
       diagnosticFingerprints: new Map(),
       disposePromise: undefined,
-      pool: createPool(
+      pool: poolFactory(
         normalizedOptions.cwd,
         config.idleTimeoutMs,
         (edit, server) => applyServerEdit(state, edit, server),
@@ -2247,16 +2259,28 @@ export class LspWorkspace {
   }
 
   /**
-   * Loads configuration and optionally warms servers; the caller owns disposal.
+   * Loads configuration, acquires an owned pool, and optionally warms servers.
+   * The caller must dispose the workspace; it also disposes pools replaced on reload.
    * @param options - Workspace root, agent configuration directory, and trust decision.
-   * @returns One session-owned workspace with eager-startup failures retained as warnings.
-   * @throws If configuration loading or workspace initialization fails.
-   * @example With trusted: false, create({ cwd: "/project", agentDir: "/agent", trusted: false }) starts no servers.
+   * @param poolFactory - Acquires pools for initial creation and idle-timeout changes; defaults to real session-owned language servers.
+   * @returns One workspace with eager-startup failures retained as warnings.
+   * @throws If configuration loading or pool creation fails.
+   * @example
+   * ```ts
+   * const workspace = await LspWorkspace.create({
+   *   cwd: "/project", agentDir: "/agent", trusted: false,
+   * }); // The default pool starts no servers in an untrusted project.
+   * await workspace.dispose(); // Releases the session-owned pool and idle timer.
+   * ```
    */
-  static async create(options: WorkspaceOptions): Promise<LspWorkspace> {
+  static async create(
+    options: WorkspaceOptions,
+    poolFactory: typeof createPool = createPool,
+  ): Promise<LspWorkspace> {
     const workspace = new LspWorkspace(
       options,
       await loadLspConfig(options.cwd, options.agentDir, options.trusted),
+      poolFactory,
     );
     if (
       options.trusted &&

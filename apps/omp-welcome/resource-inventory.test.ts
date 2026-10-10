@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { installResourceInventoryOverride } from "./resource-inventory.ts";
 
 interface HostOptions {
@@ -45,7 +45,7 @@ function host() {
   };
 }
 
-describe("native resource inventory override", () => {
+describe("installResourceInventoryOverride", () => {
   test("should suppress routine startup and reload inventory but preserve diagnostics", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
@@ -175,5 +175,127 @@ describe("native resource inventory override", () => {
       }),
     ).toThrow();
     override.release();
+  });
+
+  test("should retain a replacement method when a patch owner releases after another extension changes the host", () => {
+    const { InteractiveMode } = host();
+    const override = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+    const replacement = mock();
+    InteractiveMode.prototype.showLoadedResources = replacement;
+    const rejected = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+
+    expect(rejected.supported).toBe(false);
+    expect(rejected.reason).toContain("replaced by another extension");
+    rejected.release();
+    override.release();
+    override.release();
+    new InteractiveMode().showLoadedResources();
+    expect(replacement).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    ["missing", {}],
+    ["not callable", { showLoadedResources: true }],
+  ])(
+    "should fail open when the resource method is %s",
+    (_condition, prototype) => {
+      const override = installResourceInventoryOverride("0.85.1", {
+        prototype,
+      });
+      expect(override.supported).toBe(false);
+      expect(override.reason).toBe("showLoadedResources is unavailable");
+      override.release();
+    },
+  );
+
+  test("should keep native listing behavior when the quiet setting cannot be temporarily replaced", () => {
+    const { InteractiveMode, manager, calls } = host();
+    const descriptor = Object.getOwnPropertyDescriptor(
+      manager,
+      "getQuietStartup",
+    );
+    Object.defineProperty(manager, "getQuietStartup", {
+      ...descriptor,
+      configurable: false,
+    });
+    const override = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+    try {
+      new InteractiveMode().showLoadedResources({
+        showDiagnosticsWhenQuiet: true,
+      });
+      expect(calls).toEqual([{ showListing: true, showDiagnostics: true }]);
+      expect(manager.getQuietStartup()).toBe(false);
+    } finally {
+      override.release();
+    }
+  });
+
+  test("should restore the quiet-setting descriptor when the native renderer throws", () => {
+    const { InteractiveMode, manager } = host();
+    const descriptor = Object.getOwnPropertyDescriptor(
+      manager,
+      "getQuietStartup",
+    );
+    const override = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+    const mode = new InteractiveMode();
+    mode.loadedResourcesContainer.clear = () => {
+      throw new Error("render failed");
+    };
+    try {
+      expect(() => mode.showLoadedResources()).toThrow("render failed");
+      expect(
+        Object.getOwnPropertyDescriptor(manager, "getQuietStartup"),
+      ).toEqual(descriptor);
+    } finally {
+      override.release();
+    }
+  });
+
+  test("should leave the original method callable when its descriptor cannot be wrapped", () => {
+    const { InteractiveMode, calls } = host();
+    Object.defineProperty(InteractiveMode.prototype, "showLoadedResources", {
+      configurable: false,
+      writable: false,
+    });
+    const override = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+    expect(override.supported).toBe(false);
+    expect(override.reason).toBe("showLoadedResources cannot be wrapped");
+    new InteractiveMode().showLoadedResources();
+    expect(calls).toEqual([{ showListing: true, showDiagnostics: true }]);
+    override.release();
+  });
+
+  test("should remove the temporary quiet setting when the manager inherits its method", () => {
+    const { InteractiveMode, manager, calls } = host();
+    const inheritedManager = Object.create(manager) as typeof manager;
+    const mode = new InteractiveMode();
+    mode.settingsManager = inheritedManager;
+    const override = installResourceInventoryOverride(
+      "0.85.1",
+      InteractiveMode,
+    );
+    try {
+      mode.showLoadedResources({ showDiagnosticsWhenQuiet: true });
+      expect(calls).toEqual([{ showListing: false, showDiagnostics: true }]);
+      expect(Object.hasOwn(inheritedManager, "getQuietStartup")).toBe(false);
+      expect(inheritedManager.getQuietStartup()).toBe(false);
+    } finally {
+      override.release();
+    }
   });
 });

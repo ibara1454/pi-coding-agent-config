@@ -17,6 +17,10 @@ import * as processes from "./process.ts";
 
 import { runWorkspaceDiagnostics } from "./workspace-diagnostics.ts";
 
+const UNSUPPORTED_TIMEOUT_MS = 2_147_483_648;
+const DISCOVERY_START_MS = 1000;
+const DISCOVERY_END_MS = 1002;
+
 /**
  * Installs project marker probes without accessing the real filesystem.
  * @param names - Root-level marker names present under /project; other paths report ENOENT.
@@ -192,5 +196,118 @@ describe("runWorkspaceDiagnostics", () => {
         timeoutMs: expect.any(Number),
       }),
     );
+  });
+
+  test.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    UNSUPPORTED_TIMEOUT_MS,
+  ])(
+    "should skip marker probes and commands when the duration is invalid (%s milliseconds)",
+    async (timeout) => {
+      const access = spyOn(fs, "access");
+      const run = spyOn(processes, "runCommand");
+      const result = await runWorkspaceDiagnostics(
+        "/project",
+        undefined,
+        timeout,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("positive, finite millisecond duration");
+      expect(access).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  test("should report marker permission failures without launching a checker", async () => {
+    spyOn(fs, "access").mockRejectedValue(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
+    const run = spyOn(processes, "runCommand");
+    const result = await runWorkspaceDiagnostics("/project");
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(
+      "Workspace checker discovery failed: permission denied",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("should report an unverified workspace when no supported project markers exist", async () => {
+    fixtureMarkers([]);
+    const run = spyOn(processes, "runCommand");
+    const result = await runWorkspaceDiagnostics("/project");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Cannot detect project type");
+    expect(result.text).toContain("Workspace was not verified");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["a non-object report", "null", "returned no workspace modules"],
+    [
+      "too many modules",
+      `{"Use":[${Array.from({ length: 257 }, () => '{"DiskPath":"."}').join(",")}]}`,
+      "exceeds 256 modules",
+    ],
+  ])(
+    "should refuse a Go build when module discovery returns %s",
+    async (_condition, stdout, message) => {
+      fixtureMarkers(["go.work"]);
+      const run = spyOn(processes, "runCommand").mockResolvedValue({
+        stdout,
+        stderr: "",
+        exitCode: 0,
+      });
+      const result = await runWorkspaceDiagnostics("/project");
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(message);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run.mock.calls[0]?.[1]).toEqual(["work", "edit", "-json"]);
+    },
+  );
+
+  test("should retain the Go discovery failure and skip the build when discovery exits nonzero", async () => {
+    fixtureMarkers(["go.work"]);
+    const run = spyOn(processes, "runCommand").mockResolvedValue({
+      stdout: "",
+      stderr: "go.work syntax error",
+      exitCode: 1,
+    });
+    const result = await runWorkspaceDiagnostics("/project");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(
+      "go work edit -json exited with code 1: go.work syntax error",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("should stop before resolving commands when marker discovery exhausts the shared deadline", async () => {
+    spyOn(Date, "now")
+      .mockReturnValueOnce(DISCOVERY_START_MS)
+      .mockReturnValue(DISCOVERY_END_MS);
+    const resolve = spyOn(config, "resolveCommand");
+    const run = spyOn(processes, "runCommand");
+    const result = await runWorkspaceDiagnostics("/project", undefined, 1);
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("workspace diagnostics deadline exceeded");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("should propagate caller cancellation instead of reporting completed diagnostics when a command aborts", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller canceled diagnostics");
+    spyOn(processes, "runCommand").mockImplementation(
+      (_command, _args, options) => {
+        expect(options?.signal).toBe(controller.signal);
+        controller.abort(reason);
+        return Promise.reject(reason);
+      },
+    );
+    await expect(
+      runWorkspaceDiagnostics("/project", controller.signal),
+    ).rejects.toBe(reason);
   });
 });
