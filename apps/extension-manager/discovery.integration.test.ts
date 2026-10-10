@@ -10,12 +10,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { discoverCatalog } from "./discovery.ts";
 
 const MODULE = "export default () => {};\n";
 const roots: string[] = [];
+let originalHome: string | undefined;
 
 afterEach(() => {
+  if (roots.length > 0) {
+    if (originalHome === undefined) {
+      delete process.env["HOME"];
+    } else {
+      process.env["HOME"] = originalHome;
+    }
+  }
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -27,14 +36,28 @@ interface Fixture {
   readonly root: string;
 }
 
+/**
+ * Creates test-owned resolver state with an isolated HOME and ancestor boundary.
+ * afterEach restores HOME and removes the roots, including after setup failures.
+ * @returns Paths for declaring resources and running discovery.
+ * @throws If temporary state cannot be created.
+ * @example const { agentDir, cwd } = fixture(); // both paths are test-owned
+ */
 function fixture(): Fixture {
+  if (roots.length === 0) {
+    originalHome = process.env["HOME"];
+  }
   const created = mkdtempSync(join(tmpdir(), "extension-manager-"));
   roots.push(created);
   const root = realpathSync.native(created);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
+  const home = join(root, "home");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(cwd, { recursive: true });
+  mkdirSync(home, { recursive: true });
+  mkdirSync(join(root, ".git"));
+  process.env["HOME"] = home;
   return { agentDir, cwd, root };
 }
 
