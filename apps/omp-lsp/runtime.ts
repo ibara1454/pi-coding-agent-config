@@ -61,6 +61,40 @@ export interface LanguageServer {
   shutdown: () => Promise<void>;
 }
 
+/** Session-owned server access; the workspace owns stopping and disposing the pool. */
+export interface LanguageServerPool {
+  /**
+   * Acquires an initialized client shared by effective configuration.
+   * @param config - Server configuration identifying the shared client.
+   * @param signal - Cancels this caller's wait, not shared startup.
+   * @returns A live client after any previous instance finishes stopping.
+   * @throws On cancellation, disabled configuration, disposal, or startup/cleanup failure.
+   * @example await pool.get(config); // Reuses a live client for the same configuration.
+   */
+  get: (config: ServerConfig, signal?: AbortSignal) => Promise<LanguageServer>;
+  /**
+   * Lists initialized, live clients without starting servers.
+   * @returns A snapshot excluding starting and stopping clients.
+   * @example pool.clients(); // Returns [] before any server finishes initialization.
+   */
+  clients: () => readonly LanguageServer[];
+  /**
+   * Stops selected servers without preventing later acquisitions.
+   * @param names - Server names to stop; omitted means all servers.
+   * @returns Completion after every selected shutdown attempt settles.
+   * @throws An AggregateError if any selected shutdown fails.
+   * @example await pool.stop(["typescript-native"]); // Other servers stay running.
+   */
+  stop: (names?: readonly string[]) => Promise<void>;
+  /**
+   * Prevents acquisitions and releases owned servers and idle timers.
+   * @returns The same shutdown promise on every call, including after settlement.
+   * @throws An AggregateError if any owned server shutdown fails.
+   * @example await pool.dispose(); // Future get calls reject.
+   */
+  dispose: () => Promise<void>;
+}
+
 interface PoolOptions {
   cwd: string;
   onApplyEdit: (
@@ -1863,7 +1897,7 @@ interface PoolEntry {
 }
 
 /** Owns a session's shared server startups, live processes, and optional idle timer. */
-export class LanguageServerPool {
+export class StdioLanguageServerPool implements LanguageServerPool {
   private readonly options: PoolOptions;
   private readonly entries = new Map<string, PoolEntry>();
   private readonly idleTimer: NodeJS.Timeout | undefined;

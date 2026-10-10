@@ -25,16 +25,22 @@ describe("getSeparator", () => {
 
 describe("sessionAccentAnsi", () => {
   test.each([
-    ["empty", ""],
-    ["plain ASCII", "session-name"],
-    ["Unicode", "界é\u{1f680}"],
-    ["terminal control-bearing", "\x1b[0m\r\n\x1b]8;;https://example.com\x07"],
+    ["empty", "", "224;226;101"],
+    ["plain ASCII", "session-name", "226;101;140"],
+    ["Unicode", "界é\u{1f680}", "224;101;226"],
+    [
+      "terminal control-bearing",
+      "\x1b[0m\r\n\x1b]8;;https://example.com\x07",
+      "226;105;101",
+    ],
+    ["green-hued", "theta", "101;226;190"],
+    ["cyan-hued", "beta", "101;203;226"],
   ])(
     "should return a stable safe truecolor foreground when the name is %s",
-    (_label, name) => {
+    (_label, name, channels) => {
       const accent = sessionAccentAnsi(name);
 
-      expect(sessionAccentAnsi(name)).toBe(accent);
+      expect(accent).toBe(`${TRUECOLOR_PREFIX}${channels}m`);
       expect(accent).toStartWith(TRUECOLOR_PREFIX);
       expect(accent.slice(TRUECOLOR_PREFIX.length)).toMatch(TRUECOLOR_CHANNELS);
       for (const channel of accent

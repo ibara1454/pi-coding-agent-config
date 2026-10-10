@@ -4,4 +4,4 @@ coverageReporter = ["text", "lcov"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = ["**/test/setup.ts", "**/*-test-fixtures.ts", "**/apps/sandbox/**"]
 # Per-file floors; keep headroom for incremental tests rather than chasing full coverage.
-coverageThreshold = 0.8
+coverageThreshold = 0.9

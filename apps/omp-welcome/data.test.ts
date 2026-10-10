@@ -1,17 +1,15 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { describe, expect, spyOn, test } from "bun:test";
+import type { Dirent, PathLike, PathOrFileDescriptor, Stats } from "node:fs";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named ESM filesystem imports used by discovery.
+import * as fs from "node:fs";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named ESM home-directory import, not its CommonJS default object.
+import * as os from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   collectWelcomeExtensions,
   effectiveQuietStartup,
-  type WelcomeExtension,
+  getAgentDir,
   welcomeSessions,
 } from "./data.ts";
 
@@ -24,234 +22,558 @@ const HOURS_BEFORE_DAY = 23;
 const DAYS_BEFORE_WEEK = 6;
 const STALE_SESSION_DAYS = 9;
 
-const temporaryRoots: string[] = [];
-
-function temporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "pi-welcome-"));
-  temporaryRoots.push(directory);
-  return directory;
-}
-
-function write(filePath: string, content = "export default () => {};\n"): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content);
-}
-
-function writePackage(root: string, extensions: readonly string[]): void {
-  write(join(root, "package.json"), JSON.stringify({ pi: { extensions } }));
-  for (const extension of extensions) {
-    write(join(root, extension));
+/**
+ * Plans discovery I/O without touching the host filesystem; directories are
+ * inferred from file parents and optional links model their target kinds.
+ * @example mockDiscovery({ "/unit/agent/settings.json": "{}" });
+ */
+function mockDiscovery(
+  files: Record<string, string>,
+  options: {
+    links?: Record<string, string>;
+    directories?: string[];
+    unreadableDirectories?: string[];
+    statFailures?: string[];
+  } = {},
+): void {
+  const links = options.links ?? {};
+  const directories = new Set(options.directories ?? []);
+  for (const path of [...Object.keys(files), ...Object.keys(links)]) {
+    for (
+      let parent = dirname(path);
+      !directories.has(parent);
+      parent = dirname(parent)
+    ) {
+      directories.add(parent);
+      if (parent === dirname(parent)) {
+        break;
+      }
+    }
   }
+  const exists = (path: string) =>
+    path in files || directories.has(path) || path in links;
+  spyOn(os, "homedir").mockReturnValue("/unit/home");
+  spyOn(fs, "existsSync").mockImplementation((path) => exists(String(path)));
+  spyOn(fs, "readFileSync").mockImplementation(((
+    path: PathOrFileDescriptor,
+  ) => {
+    const content = files[String(path)];
+    if (content === undefined) {
+      throw new Error("metadata unavailable");
+    }
+    return content;
+  }) as typeof fs.readFileSync);
+  spyOn(fs, "statSync").mockImplementation(((path: PathLike) => {
+    const source = String(path);
+    const target = links[source] ?? source;
+    if (!exists(target) || options.statFailures?.includes(source)) {
+      throw new Error("stat unavailable");
+    }
+    return {
+      isFile: () => target in files,
+      isDirectory: () => directories.has(target),
+    } as Stats;
+  }) as typeof fs.statSync);
+  const discoveryFs: {
+    readdirSync: (path: PathLike, options: { withFileTypes: true }) => Dirent[];
+  } = fs;
+  spyOn(discoveryFs, "readdirSync").mockImplementation((path) => {
+    const directory = String(path);
+    if (
+      !directories.has(directory) ||
+      options.unreadableDirectories?.includes(directory)
+    ) {
+      throw new Error("directory unavailable");
+    }
+    const children = new Set(
+      [...Object.keys(files), ...directories, ...Object.keys(links)].filter(
+        (candidate) =>
+          candidate !== directory && dirname(candidate) === directory,
+      ),
+    );
+    return [...children].map(
+      (child) =>
+        ({
+          name: child.slice(directory.length + 1),
+          isFile: () => child in files,
+          isDirectory: () => directories.has(child),
+          isSymbolicLink: () => child in links,
+        }) as Dirent,
+    );
+  });
+  spyOn(fs.realpathSync, "native").mockImplementation(((path: PathLike) => {
+    const source = String(path);
+    const target = links[source] ?? source;
+    if (!exists(target)) {
+      throw new Error("canonical path unavailable");
+    }
+    return resolve(target);
+  }) as typeof fs.realpathSync.native);
 }
 
-function rowsByScope(
-  rows: readonly WelcomeExtension[],
-  scope: "project" | "user",
-): string[] {
-  return rows.filter((row) => row.scope === scope).map((row) => row.name);
-}
-afterEach(() => {
-  for (const directory of temporaryRoots.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
+const AGENT_DIR = "/unit/agent";
+const PROJECT_DIR = "/unit/project";
+
+describe("getAgentDir", () => {
+  test.each([
+    ["absent", undefined, "/unit/home/.pi/agent"],
+    ["empty", "", "/unit/home/.pi/agent"],
+    ["home only", "~", "/unit/home"],
+    ["home relative", "~/agent", "/unit/home/agent"],
+    ["file URL", "file:///unit/agent", "/unit/agent"],
+    [
+      "invalid file URL",
+      "file://remote-host/agent",
+      "file://remote-host/agent",
+    ],
+    ["relative", "./agent", "./agent"],
+  ])(
+    "should resolve the agent directory when the configured path is %s",
+    (_condition, configured, expected) => {
+      spyOn(os, "homedir").mockReturnValue("/unit/home");
+      const env = Object.fromEntries([["PI_CODING_AGENT_DIR", configured]]);
+      expect(getAgentDir(env)).toBe(expected);
+    },
+  );
+});
+
+describe("effectiveQuietStartup", () => {
+  test.each([
+    ["malformed JSON", "{"],
+    ["array JSON", "[]"],
+    ["null JSON", "null"],
+    ["a nonboolean quiet setting", '{"quietStartup":"yes"}'],
+  ])(
+    "should retain user quiet startup when trusted project metadata contains %s",
+    (_condition, metadata) => {
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: '{"quietStartup":true}',
+        [join(PROJECT_DIR, ".pi", "settings.json")]: metadata,
+      });
+      expect(effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, true, ["pi"])).toBe(
+        true,
+      );
+    },
+  );
+
+  test("should avoid reading project metadata when the project is untrusted", () => {
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: '{"quietStartup":true}',
+      [join(PROJECT_DIR, ".pi", "settings.json")]: '{"quietStartup":false}',
+    });
+    const read = spyOn(fs, "readFileSync");
+    expect(effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, false, ["pi"])).toBe(
+      true,
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith(join(AGENT_DIR, "settings.json"), "utf8");
+  });
 });
 
 describe("collectWelcomeExtensions", () => {
-  test("should honor root entries, ignored files, and symlink targets exactly once", () => {
-    const root = temporaryDirectory();
-    const extensions = join(root, "extensions");
-    write(join(extensions, "first.ts"));
-    write(join(extensions, ".hidden.ts"));
-    write(join(extensions, "node_modules", "ignored.ts"));
-    write(join(extensions, "ignored-by-rule.ts"));
-    write(join(extensions, ".gitignore"), "ignored-by-rule.ts\n");
-    const linked = join(root, "linked");
-    write(join(linked, "index.js"));
-    symlinkSync(linked, join(extensions, "linked"), "dir");
+  test.each([
+    [
+      "git:github:team/tool@main",
+      "github.com/team/tool",
+      "git:team/tool:feature",
+    ],
+    [
+      "git:gitlab:team/tool.git",
+      "gitlab.com/team/tool",
+      "git:team/tool:feature",
+    ],
+    [
+      "git:bitbucket:team/tool",
+      "bitbucket.org/team/tool",
+      "git:team/tool:feature",
+    ],
+    [
+      "git:git@example.org:team/tool.git@main",
+      "example.org/team/tool",
+      "git:team/tool:feature",
+    ],
+    [
+      "git:https://example.org/team/tool.git@main",
+      "example.org/team/tool",
+      "git:team/tool:feature",
+    ],
+    [
+      "git:example.org/team/tool",
+      "example.org/team/tool",
+      "git:team/tool:feature",
+    ],
+    ["git:localhost/team/tool", "localhost/team/tool", "git:team/tool:feature"],
+    ["git:team/tool", "github.com/team/tool", "git:tool:feature"],
+    ["https://example.org/team/tool", "example.org/team/tool", "feature"],
+  ])(
+    "should discover cached git extensions and compact their labels when the source is %s",
+    (source, cachePath, name) => {
+      const root = join(AGENT_DIR, "git", cachePath);
+      const extension = join(root, "extensions", "feature.ts");
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          packages: [source],
+        }),
+        [join(root, "package.json")]:
+          '{"pi":{"extensions":["extensions/feature.ts"]}}',
+        [extension]: "",
+      });
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir: AGENT_DIR,
+          projectTrusted: false,
+        }),
+      ).toEqual([
+        { name, scope: "user", path: extension, packageSource: source },
+      ]);
+    },
+  );
 
-    const discovered = () =>
-      collectWelcomeExtensions({
-        cwd: join(root, "project"),
-        agentDir: root,
-        projectTrusted: false,
-      })
-        .flatMap((row) => (row.path ? [relative(extensions, row.path)] : []))
-        .sort();
+  test.each([
+    "git:invalid",
+    "git:example.org/",
+    "git:https://example.org/",
+    "git:git@example.org:",
+    "npm:",
+  ])(
+    "should skip unavailable package roots when the source is %s",
+    (source) => {
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          packages: [source],
+        }),
+      });
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir: AGENT_DIR,
+          projectTrusted: false,
+        }),
+      ).toEqual([]);
+    },
+  );
 
-    expect(discovered()).toEqual(["first.ts", "linked/index.js"]);
-
-    write(join(extensions, "index.ts"));
-    expect(discovered()).toEqual(["index.ts"]);
-  });
-});
-
-describe("welcome extension snapshot", () => {
-  test("should use Pi scope precedence, filters, package deltas, and base directories", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    const projectDir = join(cwd, ".pi");
-
-    write(join(agentDir, "extensions", "user.ts"));
-    write(join(agentDir, "extensions", "disabled.ts"));
-    write(join(agentDir, "extensions", "user-dir", "index.ts"));
-    write(join(agentDir, "configured.ts"));
-    write(join(projectDir, "extensions", "project.ts"));
-    write(join(projectDir, "extensions", "project-dir", "index.js"));
-    write(join(projectDir, "configured.ts"));
-
-    writePackage(join(agentDir, "npm", "node_modules", "@scope", "pkg"), [
-      "extensions/one.ts",
-    ]);
-    writePackage(join(projectDir, "npm", "node_modules", "@scope", "pkg"), [
-      "extensions/one.ts",
-    ]);
-    writePackage(join(agentDir, "npm", "node_modules", "@scope", "delta"), [
-      "extensions/one.ts",
-      "extensions/two.ts",
-    ]);
-    writePackage(join(agentDir, "npm", "node_modules", "@scope", "filtered"), [
-      "extensions/hidden.ts",
-    ]);
-
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({
-        extensions: ["configured.ts", "!extensions/disabled.ts"],
-        packages: [
-          "npm:@scope/pkg",
-          "npm:@scope/delta",
-          { source: "npm:@scope/filtered", extensions: [] },
-        ],
-      }),
+  test("should traverse manifest globs once and apply exact forced overrides when paths include nested and cyclic links", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    const keep = join(root, "extensions", "nested", "a.ts");
+    const forced = join(root, "extensions", "forced.ts");
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          packages: [
+            {
+              source: "npm:tool",
+              extensions: [
+                "extensions/***",
+                "!**/*.ts",
+                "+extensions/forced.ts",
+                "+extensions/nested/a.ts",
+                "-extensions/blocked.ts",
+              ],
+            },
+          ],
+        }),
+        [join(root, "package.json")]: JSON.stringify({
+          pi: {
+            extensions: [
+              "extensions/**/?.ts",
+              "extensions/*.ts",
+              "extensions/missing/*.ts",
+              "missing.ts",
+            ],
+          },
+        }),
+        [keep]: "",
+        [forced]: "",
+        [join(root, "extensions", "blocked.ts")]: "",
+        [join(root, "extensions", ".hidden.ts")]: "",
+      },
+      {
+        links: {
+          [join(root, "extensions", "cycle")]: join(root, "extensions"),
+          [join(root, "extensions", "broken")]: join(root, "missing"),
+        },
+      },
     );
-    write(
-      join(projectDir, "settings.json"),
-      JSON.stringify({
-        extensions: ["configured.ts"],
+    const rows = collectWelcomeExtensions({
+      cwd: PROJECT_DIR,
+      agentDir: AGENT_DIR,
+      projectTrusted: false,
+    });
+    expect(rows.map(({ name, path }) => ({ name, path }))).toEqual([
+      { name: "npm:tool:forced", path: forced },
+      { name: "npm:tool:nested/a", path: keep },
+    ]);
+    expect(fs.readdirSync).not.toHaveBeenCalledWith(
+      join(root, "extensions", "cycle"),
+      { withFileTypes: true },
+    );
+  });
+
+  test("should use absolute manifest globs and directory entries while applying manifest-level exclusions", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
+      [join(root, "package.json")]: JSON.stringify({
+        pi: {
+          extensions: [
+            join(root, "entries", "*.js"),
+            "nested",
+            "root/index.ts",
+            "!**/hidden.js",
+          ],
+        },
+      }),
+      [join(root, "entries", "visible.js")]: "",
+      [join(root, "entries", "hidden.js")]: "",
+      [join(root, "nested", "package.json")]:
+        '{"pi":{"extensions":["start.ts",42,"unavailable.ts"]}}',
+      [join(root, "nested", "start.ts")]: "",
+      [join(root, "root", "index.ts")]: "",
+    });
+    const rows = collectWelcomeExtensions({
+      cwd: PROJECT_DIR,
+      agentDir: AGENT_DIR,
+      projectTrusted: false,
+    });
+    expect(rows.map((row) => row.name)).toEqual([
+      "npm:tool:entries/visible",
+      "npm:tool:nested/start",
+      "npm:tool:root",
+    ]);
+  });
+
+  test("should honor ordered exact filters when autoload is disabled", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
         packages: [
-          "npm:@scope/pkg",
           {
-            source: "npm:@scope/delta",
+            source: "npm:tool",
             autoload: false,
-            extensions: ["extensions/one.ts"],
+            extensions: [
+              "**/*.ts",
+              "-extensions/blocked.ts",
+              "!**/excluded.ts",
+              "+extensions/forced.ts",
+            ],
           },
         ],
       }),
-    );
-
-    const rows = collectWelcomeExtensions({
-      cwd,
-      agentDir,
-      projectTrusted: true,
-      welcomePath: join(agentDir, "extensions", "welcome", "index.ts"),
+      [join(root, "package.json")]: '{"pi":{"extensions":["extensions/*.ts"]}}',
+      [join(root, "extensions", "blocked.ts")]: "",
+      [join(root, "extensions", "excluded.ts")]: "",
+      [join(root, "extensions", "forced.ts")]: "",
+      [join(root, "extensions", "normal.ts")]: "",
     });
-    const project = rowsByScope(rows, "project");
-    const user = rowsByScope(rows, "user");
-
-    expect(project).toContain("npm:@scope/delta:one");
-    expect(project).toContain("npm:@scope/pkg:one");
-    expect(project).toContain("project-dir");
-    expect(project).toContain("project");
-    expect(project).toContain("configured");
-    expect(user).toContain("npm:@scope/delta:two");
-    expect(user).toContain("user-dir");
-    expect(user).toContain("user");
-    expect(user).toContain("welcome");
-    expect(user).toContain("configured");
-    expect(rows.some((row) => row.name.includes("filtered"))).toBe(false);
-    expect(rows.some((row) => row.name.includes("disabled"))).toBe(false);
-    expect(rows.filter((row) => row.name === "npm:@scope/pkg:one")).toEqual([
-      {
-        name: "npm:@scope/pkg:one",
-        scope: "project",
-        path: join(
-          projectDir,
-          "npm",
-          "node_modules",
-          "@scope",
-          "pkg",
-          "extensions",
-          "one.ts",
-        ),
-        packageSource: "npm:@scope/pkg",
-      },
-    ]);
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["npm:tool:forced", "npm:tool:normal"]);
   });
 
-  test("should use convention files for a filtered empty manifest and normalize glob entries", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    const packageRoot = join(agentDir, "pkg");
-
-    write(
-      join(packageRoot, "package.json"),
-      JSON.stringify({ pi: { extensions: [] } }),
-    );
-    write(join(packageRoot, "extensions", "enabled.ts"));
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({
-        packages: [{ source: " ./pkg ", extensions: ["./extensions/*.ts"] }],
+  test("should distinguish authoritative package metadata from default convention discovery", () => {
+    const first = join(AGENT_DIR, "npm", "node_modules", "authoritative");
+    const second = join(AGENT_DIR, "npm", "node_modules", "default");
+    const third = join(AGENT_DIR, "npm", "node_modules", "convention");
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+        packages: [
+          "npm:authoritative",
+          { source: "npm:default" },
+          "npm:convention",
+        ],
       }),
-    );
-
+      [join(first, "package.json")]: '{"pi":{"skills":["skills"]}}',
+      [join(first, "extensions", "hidden.ts")]: "",
+      [join(second, "package.json")]: '{"pi":{"skills":["skills"]}}',
+      [join(second, "extensions", "visible.ts")]: "",
+      [join(third, "extensions", "visible.ts")]: "",
+    });
     expect(
-      collectWelcomeExtensions({ cwd, agentDir, projectTrusted: true }),
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["npm:convention:visible", "npm:default:visible"]);
+  });
+
+  test("should retain standalone file and directory packages while discarding malformed settings entries", () => {
+    const standalone = join(AGENT_DIR, "standalone.ts");
+    const directory = join(AGENT_DIR, "empty-package");
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          packages: [
+            null,
+            [],
+            false,
+            {},
+            { source: 42 },
+            standalone,
+            directory,
+          ],
+          extensions: [false, null, { invalid: true }],
+        }),
+        [standalone]: "",
+      },
+      { directories: [directory] },
+    );
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }),
     ).toEqual([
       {
-        name: "enabled",
+        name: "empty-package",
         scope: "user",
-        path: join(packageRoot, "extensions", "enabled.ts"),
-        packageSource: " ./pkg ",
+        path: directory,
+        packageSource: directory,
+      },
+      {
+        name: "standalone",
+        scope: "user",
+        path: standalone,
+        packageSource: standalone,
       },
     ]);
   });
 
-  test("should omit all project-local settings, packages, and files when untrusted", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    write(join(agentDir, "extensions", "user.ts"));
-    write(join(cwd, ".pi", "extensions", "project.ts"));
-    write(join(cwd, ".pi", "configured.ts"));
-    write(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({
-        extensions: ["configured.ts"],
-        packages: ["npm:@scope/project"],
+  test("should use the last project package filter when duplicate package identities have different versions", () => {
+    const root = join(PROJECT_DIR, ".pi", "npm", "node_modules", "tool");
+    mockDiscovery({
+      [join(PROJECT_DIR, ".pi", "settings.json")]: JSON.stringify({
+        packages: [
+          { source: "npm:tool@1", extensions: ["first.ts"] },
+          { source: "npm:tool@2", extensions: ["last.ts"] },
+        ],
       }),
-    );
-
-    const rows = collectWelcomeExtensions({
-      cwd,
-      agentDir,
-      projectTrusted: false,
+      [join(root, "package.json")]:
+        '{"pi":{"extensions":["first.ts","last.ts"]}}',
+      [join(root, "first.ts")]: "",
+      [join(root, "last.ts")]: "",
     });
-    expect(rows.map((row) => `${row.name}:${row.scope}`)).toEqual([
-      "user:user",
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: true,
+      }),
+    ).toEqual([
+      {
+        name: "npm:tool@2:last",
+        scope: "project",
+        path: join(root, "last.ts"),
+        packageSource: "npm:tool@2",
+      },
     ]);
   });
 
-  test("should honor effective quiet startup and its verbose command-line override", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({ quietStartup: true }),
-    );
-    write(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ quietStartup: false }),
-    );
-
-    expect(effectiveQuietStartup(cwd, agentDir, false, ["pi"])).toBe(true);
-    expect(effectiveQuietStartup(cwd, agentDir, true, ["pi"])).toBe(false);
+  test("should configure directory and file-URL entries while restoring exact auto-discovery exceptions", () => {
+    const extensions = join(AGENT_DIR, "extensions");
+    const configured = join(AGENT_DIR, "configured");
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+        extensions: [
+          pathToFileURL(configured).href,
+          "missing.ts",
+          "!extensions/*.ts",
+          "+extensions/kept.ts",
+          "+extensions/blocked.ts",
+          "-extensions/blocked.ts",
+        ],
+      }),
+      [join(configured, "index.js")]: "",
+      [join(extensions, "kept.ts")]: "",
+      [join(extensions, "blocked.ts")]: "",
+      [join(extensions, "excluded.ts")]: "",
+      [join(extensions, "bad.txt")]: "",
+    });
     expect(
-      effectiveQuietStartup(cwd, agentDir, false, ["pi", "--verbose"]),
-    ).toBe(false);
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["configured", "kept"]);
+  });
+
+  test("should honor ignore-rule precedence and tolerate inaccessible discovery paths", () => {
+    const extensions = join(AGENT_DIR, "extensions");
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          extensions: ["unreadable"],
+        }),
+        [join(extensions, ".gitignore")]:
+          "\n# comment\n*.ts\n!kept.ts\n\\#hash.ts\n\\!bang.ts\n",
+        [join(extensions, ".ignore")]: "!also-kept.ts\n",
+        [join(extensions, ".fdignore")]: "/ignored-dir/\n",
+        [join(extensions, "kept.ts")]: "",
+        [join(extensions, "also-kept.ts")]: "",
+        [join(extensions, "#hash.ts")]: "",
+        [join(extensions, "!bang.ts")]: "",
+        [join(extensions, "other.ts")]: "",
+        [join(extensions, "ignored-dir", "index.js")]: "",
+        [join(AGENT_DIR, "target.js")]: "",
+      },
+      {
+        directories: [join(AGENT_DIR, "unreadable")],
+        unreadableDirectories: [join(AGENT_DIR, "unreadable")],
+        links: {
+          [join(extensions, "linked.js")]: join(AGENT_DIR, "target.js"),
+          [join(extensions, "broken.ts")]: join(AGENT_DIR, "missing.ts"),
+        },
+      },
+    );
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["also-kept", "kept", "linked"]);
+  });
+
+  test("should disambiguate equal local basenames within a scope", () => {
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]:
+        '{"extensions":["first/same.ts","second/same.ts"]}',
+      [join(AGENT_DIR, "first", "same.ts")]: "",
+      [join(AGENT_DIR, "second", "same.ts")]: "",
+    });
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["first/same", "second/same"]);
+  });
+
+  test("should skip a package when its previously available root cannot be inspected", () => {
+    const root = join(AGENT_DIR, "package");
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: '{"packages":["./package"]}',
+        [join(root, "package.json")]: "{}",
+      },
+      { statFailures: [root] },
+    );
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }),
+    ).toEqual([]);
   });
 });
 
