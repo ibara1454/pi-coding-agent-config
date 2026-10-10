@@ -176,7 +176,7 @@ bun run test:coverage
 Each workspace writes `coverage/lcov.info`.
 
 CI uploads LCOV to Codecov for per-package PR reports. The required
-`codecov/patch` check enforces **90% coverage of changed, instrumented lines**.
+`codecov/patch` check enforces **95% coverage of changed, instrumented lines**.
 
 ### Stress mode
 
