@@ -6,8 +6,7 @@
   "scripts": {
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write --error-on-warnings .",
-    "test": "bun test --preload ../../test/setup.ts",
-    "test:coverage": "bun test --cwd=../.. ./apps/extension-manager --coverage --coverage-dir=./apps/extension-manager/coverage --only-failures",
+    "test": "bun test --cwd=../.. ./apps/extension-manager --coverage --coverage-dir=./apps/extension-manager/coverage --only-failures",
     "test:stress": "bun test --preload ../../test/setup.ts --isolate --randomize --rerun-each 5",
     "typecheck": "tsc --project tsconfig.json"
   },
