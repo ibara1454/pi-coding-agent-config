@@ -4,6 +4,24 @@
 
 This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained TypeScript extensions; `packages/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
 
+## Rules and Guidance
+
+```text
+.
+|-- CODING_STANDARDS.md        # File-scoped standards for code review agents
+|-- .editorconfig              # Formatting settings
+|-- biome.jsonc                # Authoritative lint configuration
+|-- .agents/skills/
+|   |-- repo-design/SKILL.md   # Implementation and interface review rules
+|   `-- repo-testing/SKILL.md  # Test design and review rules
+`-- docs/
+    |-- lint-policy.md         # Lint decisions and rationale
+    `-- agents/
+        |-- issue-tracker.md   # Issue workflow
+        |-- triage-labels.md   # Triage labels
+        `-- domain.md          # Domain documentation conventions
+```
+
 ## Architecture & Data Flow
 
 - Extension manager: `apps/extension-manager/index.ts` delegates `/extensions` registration to `extension-command.ts`, which discovers settings resources into a catalog, opens the panel, and reports commits; `extension-runtime.ts` binds discovery, persistence, panel creation, and disposal.
@@ -48,18 +66,6 @@ bun test apps/sandbox
 bun test packages/biome-rules
 ```
 
-## Code Conventions & Common Patterns
-
-- Use code to express **how** it works, tests to specify **what** it should do, commit messages to explain **why** it changed, and code comments to explain **why not**—why an otherwise reasonable alternative was rejected.
-- Follow `.editorconfig`: TypeScript uses 2 spaces; keep LF, UTF-8, trimmed trailing whitespace, and a final newline.
-- Use ESM imports and Node built-ins with `node:` specifiers. Use `import type` for type-only host contracts.
-- Pi-host-loaded package entries default-export only the declared extension factory and do not re-export implementation helpers. Keep mutable session state closure-local, and release timers, subscriptions, panels, terminal modes, and retained host references on shutdown and every earlier exit path.
-- UI components with resources expose and call `dispose()`.
-- Wrap `pi.exec`, filesystem parsing, sockets, and other external operations in `try`/`catch`; degrade gracefully, retain usable cached state where appropriate, and never block the host tool flow on optional integration failure.
-- For Pi refresh work triggered by events or renders, reuse matching in-flight work and invalidate cached results when relevant inputs change.
-- Pi terminal UI must use cell-width and ANSI helpers, sanitize external inline text, and close OSC 8 hyperlinks within the rendered surface.
-- Keep declarative UI data separate from rendering where existing modules already do so: e.g. status-line presets/theme/types versus `renderSegment`, and welcome discovery data versus `WelcomeHeader` rendering.
-
 ## Important Files
 
 - `README.md` — repository purpose and root setup entry point.
@@ -73,31 +79,7 @@ bun test packages/biome-rules
 - `apps/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
 - `.gitignore` and `config/pi/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
 
-## Runtime/Tooling Preferences
-
-- Use **Bun** for root workspace dependency installation and tests.
-- Extension packages are private ESM packages with Pi entry points declared in their local `package.json` files.
-- The sandbox dependency declares Node `>=20.11.0`; this is a sandbox dependency constraint, not evidence of a repository-wide engine declaration.
-- Pi-host modules are available in Pi at runtime. Host-facing integration tests should mock Pi runtime modules before dynamically importing the extension, as `apps/omp-status-line/index.integration.test.ts` does.
-- `config/pi/settings.json` is intentionally tracked because it contains the monorepo extension references. Credentials and runtime artifacts (`auth.json`, `models-store.json`, `trust.json`, `sessions/`, and generated binaries) remain ignored.
-- Treat extension-specific READMEs as scoped guidance. In particular, sandbox prerequisites apply to sandbox deployment, not every extension.
-
-## Testing & QA
-
-- Tests use `bun:test`; there is no Jest, Vitest, or root build command.
-- `bun run test` dispatches the workspace `test` tasks through Turborepo. Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
-- Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
-- For changes to `packages/biome-rules/`, read the custom-rule testing notes in `packages/biome-rules/README.md`.
-- Run the affected workspace's test command before delivering a permanent behavior change.
-
 ## Agent skills
-
-### Repository engineering
-
-Repository **MUST** and **SHOULD** rules, including their negative forms, are requirements. Voluntary deviations need another reviewer's `ACCEPT`; unaccepted waivers leave work incomplete. Higher-priority instructions take precedence: record conflicts as authorized overrides, without requesting a waiver.
-
-- **Implementation and interface review:** Before implementing, refactoring, or reviewing functions, methods, module boundaries, parameters/results, exports, validation/failures, effects, or resource lifetimes, MUST use the `repo-design` skill.
-- **Test design and review:** Before designing, adding, modifying, or reviewing tests, selecting test levels or mocks, naming suites/cases, building tables, or changing snapshots, MUST use the `repo-testing` skill.
 
 ### Issue tracker
 
