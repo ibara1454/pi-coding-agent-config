@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createGitStatus } from "./git-status.ts";
 
 const START_MS = 10_000;
@@ -38,9 +38,10 @@ interface CommandCall {
 type Execute = (call: CommandCall) => Promise<CommandResult>;
 
 /**
- * Creates in-memory command/clock effects with separately controlled context and branch.
+ * Creates in-memory command effects with controlled context, branch, and wall clock.
  * @param execute Planned external command outcomes; parsing and policy remain real.
  * @returns Production owner plus mutable test-owned inputs and effect records.
+ * The test preload restores the Date.now spy after each test.
  * @example const { status } = createStatus(); await status.refresh(true);
  */
 function createStatus(
@@ -64,8 +65,8 @@ function createStatus(
     changes: 0,
   };
   const calls: CommandCall[] = [];
+  spyOn(Date, "now").mockImplementation(() => input.now);
   const status = createGitStatus({
-    now: () => input.now,
     readContext: () => input.context,
     readBranch: () => {
       input.branchReads++;

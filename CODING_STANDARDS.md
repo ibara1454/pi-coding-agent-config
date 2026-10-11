@@ -20,6 +20,13 @@ Repository **MUST** and **SHOULD** rules, including their negative forms, are re
 
 - Use 2-space indentation, as configured in `.editorconfig`.
 - Use ESM imports and Node built-ins with `node:` specifiers. Use `import type` for type-only host contracts.
+- Do not inject stable built-ins such as `Date.now` solely for testing when a scoped spy is sufficient. Pass domain inputs and caller-owned operations instead.
+
+```ts
+function hasExpired(expiresAt: number): boolean {
+  return Date.now() >= expiresAt;
+}
+```
 
 ### Pi extension entry points
 
