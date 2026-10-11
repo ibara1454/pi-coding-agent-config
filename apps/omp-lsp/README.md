@@ -251,6 +251,7 @@ New named definitions specify `command`, `args`, `fileTypes`, and `rootMarkers`.
 
 - LSP is available only in trusted Pi projects. Servers and workspace checkers run with normal host permissions, outside the Bash sandbox; this extension does not alter sandbox policy.
 - Servers are session-owned, start lazily by default, and are stopped on session shutdown. Set `lazy: false` to warm configured servers during initialization.
+- Caller cancellation notifies a live server. Session shutdown or transport failure rejects pending requests and cleans up the process without sending new cancellation notifications.
 - Missing servers and failed diagnostics are not evidence that a project is clean. Unversioned server diagnostics are explicitly marked freshness-unverified rather than presented as verified clean results.
 
 ## Focused checks

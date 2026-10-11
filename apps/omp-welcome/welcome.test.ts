@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import type { WelcomeExtension, WelcomeSession } from "./data.ts";
 import { sanitizeInline, truncateToWidth, visibleWidth } from "./terminal.ts";
-import { WelcomeHeader } from "./welcome.ts";
+import { pickStartupTip, WelcomeHeader } from "./welcome.ts";
 
 const WIDE_BOTTOM_BORDER = /^╰─+┴─+╯$/;
 const EXTENSION_NAME = /extension-\d+\.ts/;
@@ -344,5 +344,89 @@ describe("dynamic welcome behavior", () => {
 
     expect(rendered).toContain("\x1b[38;5;");
     component.dispose();
+  });
+});
+
+describe("WelcomeHeader.invalidate", () => {
+  test("should rebuild unchanged resting rows when cached output is invalidated", () => {
+    const component = header();
+    try {
+      const initial = component.render(WIDE_TERMINAL_WIDTH);
+      expect(component.render(WIDE_TERMINAL_WIDTH)).toBe(initial);
+
+      component.invalidate();
+      const refreshed = component.render(WIDE_TERMINAL_WIDTH);
+      expect(refreshed).not.toBe(initial);
+      expect(refreshed).toEqual(initial);
+      expect(component.render(WIDE_TERMINAL_WIDTH)).toBe(refreshed);
+    } finally {
+      component.dispose();
+    }
+  });
+});
+
+describe("WelcomeHeader.render", () => {
+  test("should animate the logo then cache resting rows and stop render requests when disposed", () => {
+    const timing = { start: 100, moving: 850, complete: 3100 };
+    const completedRenderRequests = 3;
+    const now = spyOn(performance, "now").mockReturnValue(timing.start);
+    const timerHandle: NodeJS.Timeout = Object.create(null);
+    let tick: (() => void) | undefined;
+    const interval = spyOn(globalThis, "setInterval").mockImplementation(
+      (...[handler]: Parameters<typeof globalThis.setInterval>) => {
+        tick = handler;
+        return timerHandle;
+      },
+    );
+    const clear = spyOn(globalThis, "clearInterval").mockImplementation(
+      () => undefined,
+    );
+    const requestRender = mock();
+    let component: WelcomeHeader | undefined;
+
+    try {
+      component = header({ playIntro: true, requestRender });
+      expect(requestRender).toHaveBeenCalledTimes(1);
+      expect(interval).toHaveBeenCalledTimes(1);
+      const initial = component.render(WIDE_TERMINAL_WIDTH);
+
+      now.mockReturnValue(timing.moving);
+      tick?.();
+      expect(requestRender).toHaveBeenCalledTimes(2);
+      const moving = component.render(WIDE_TERMINAL_WIDTH);
+      expect(moving).not.toEqual(initial);
+      expect(moving.map(sanitizeInline)).toEqual(initial.map(sanitizeInline));
+      expect(component.render(WIDE_TERMINAL_WIDTH)).not.toBe(moving);
+
+      now.mockReturnValue(timing.complete);
+      tick?.();
+      expect(requestRender).toHaveBeenCalledTimes(completedRenderRequests);
+      expect(clear).toHaveBeenCalledTimes(1);
+      expect(clear).toHaveBeenCalledWith(timerHandle);
+      const resting = component.render(WIDE_TERMINAL_WIDTH);
+      expect(resting).not.toEqual(moving);
+      expect(resting.map(sanitizeInline)).toEqual(initial.map(sanitizeInline));
+      expect(component.render(WIDE_TERMINAL_WIDTH)).toBe(resting);
+
+      component.dispose();
+      component.dispose();
+      tick?.();
+      expect(requestRender).toHaveBeenCalledTimes(completedRenderRequests);
+      expect(clear).toHaveBeenCalledTimes(1);
+    } finally {
+      component?.dispose();
+      now.mockRestore();
+      interval.mockRestore();
+      clear.mockRestore();
+    }
+  });
+});
+
+describe("pickStartupTip", () => {
+  test("should clamp to the final startup tip when randomness reaches its upper bound", () => {
+    const finalTip = pickStartupTip(() => 1 - Number.EPSILON);
+
+    expect(pickStartupTip(() => 1)).toBe(finalTip);
+    expect(finalTip).not.toBe(pickStartupTip(() => 0));
   });
 });

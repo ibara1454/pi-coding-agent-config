@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
+import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace to intercept configuration-loading effects.
 import * as config from "./config.ts";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies intercept the effect-owning edit transaction boundary.
@@ -848,4 +849,227 @@ describe("LspWorkspace.execute", () => {
       await workspace.dispose();
     }
   });
+});
+
+describe("LspWorkspace.execute", () => {
+  test("should sort unverified diagnostic sources without claiming a verified clean file", async () => {
+    const { loaded, server, get, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    const names = ["zeta-server", "alpha-server", "middle-server"];
+    loaded.servers = names.map((name) => ({ ...server.config, name }));
+    const diagnostics = mock<LanguageServer["diagnostics"]>().mockResolvedValue(
+      {
+        items: [],
+        freshness: "unversioned",
+      },
+    );
+    get.mockImplementation((selected) =>
+      Promise.resolve({ ...server, config: selected, diagnostics }),
+    );
+    spyOn(filesystem, "stat").mockResolvedValue({
+      size: 3,
+      isFile: () => true,
+    } as Stats);
+    spyOn(fs, "readFile").mockResolvedValue("old");
+    const workspace = await createWorkspace(poolFactory);
+
+    const result = await workspace.execute({
+      action: "diagnostics",
+      file: "/project/sample.ts",
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toBe(
+      "sample.ts: No diagnostics reported\nDiagnostic freshness-unverified from alpha-server, middle-server, zeta-server: unversioned publications may be stale.",
+    );
+    expect(diagnostics).toHaveBeenCalledTimes(names.length);
+  });
+
+  test("should select one code action by a case-insensitive title fragment without executing other actions", async () => {
+    const { loaded, request, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    spyOn(filesystem, "stat").mockResolvedValue({
+      size: "const value = 1;".length,
+      isFile: () => true,
+    } as Stats);
+    spyOn(fs, "readFile").mockResolvedValue("const value = 1;");
+    request
+      .mockResolvedValueOnce([
+        {
+          title: "Organize imports",
+          command: { title: "Organize", command: "test.organize" },
+        },
+        {
+          title: "Fix unused VALUE",
+          command: { title: "Fix", command: "test.fixUnused" },
+        },
+      ])
+      .mockResolvedValue(null);
+    const workspace = await createWorkspace(poolFactory);
+
+    const result = await workspace.execute({
+      action: "code_actions",
+      file: "/project/sample.ts",
+      line: 1,
+      symbol: "value",
+      query: "uNuSeD value",
+      apply: true,
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toBe(
+      'Applied code action "Fix unused VALUE":\nExecuted command: test.fixUnused',
+    );
+    expect(
+      request.mock.calls.filter(
+        ([method]) => method === "workspace/executeCommand",
+      ),
+    ).toEqual([
+      [
+        "workspace/executeCommand",
+        { command: "test.fixUnused", arguments: [] },
+        expect.any(AbortSignal),
+      ],
+    ]);
+  });
+
+  test.each([
+    {
+      condition: "duplicate edits",
+      conflictStart: 6,
+      conflictText: "renamed",
+      laterText: "const renamed = 2;",
+    },
+    {
+      condition: "overlapping edits",
+      conflictStart: 8,
+      conflictText: "conflict",
+      laterText: "const vaconflict = 2;",
+    },
+  ])(
+    "should discard the later conflicting rename reference and preserve independent edits when servers return $condition",
+    async ({ conflictStart, conflictText, laterText }) => {
+      const { loaded, server, get, request, poolFactory } = fixture();
+      loaded.settings.lazy = true;
+      const file = "/project/sample.ts";
+      const destination = "/project/moved.ts";
+      const uri = edits.fileToUri(file);
+      const original = "const value = 1;";
+      const first = {
+        range: {
+          start: { line: 0, character: 6 },
+          end: { line: 0, character: 11 },
+        },
+        newText: "renamed",
+      };
+      const conflicting = {
+        range: {
+          start: { line: 0, character: conflictStart },
+          end: { line: 0, character: 11 },
+        },
+        newText: conflictText,
+      };
+      const independent = {
+        range: {
+          start: { line: 0, character: 14 },
+          end: { line: 0, character: 15 },
+        },
+        newText: "2",
+      };
+      expect(edits.applyTextEdits(original, [first])).toBe(
+        "const renamed = 1;",
+      );
+      expect(edits.applyTextEdits(original, [conflicting, independent])).toBe(
+        laterText,
+      );
+      const firstResponse = { changes: { [uri]: [first] } };
+      const laterResponse = {
+        changes: { [uri]: [conflicting, independent] },
+      };
+      request.mockResolvedValue(firstResponse);
+      const secondRequest =
+        mock<LanguageServer["request"]>().mockResolvedValue(laterResponse);
+      const second: LanguageServer = {
+        ...server,
+        config: { ...server.config, name: "later-server" },
+        request: secondRequest as LanguageServer["request"],
+      };
+      loaded.servers.push(second.config);
+      get.mockImplementation((selected) =>
+        Promise.resolve(selected.name === second.config.name ? second : server),
+      );
+      spyOn(fs, "lstat").mockImplementation(((target: unknown) =>
+        String(target) === destination
+          ? Promise.reject(
+              Object.assign(new Error("missing destination"), {
+                code: "ENOENT",
+              }),
+            )
+          : Promise.resolve({
+              isFile: () => true,
+              isDirectory: () => false,
+            } as Stats)) as typeof fs.lstat);
+      spyOn(fs, "readFile").mockResolvedValue(original);
+      spyOn(filesystem, "stat").mockResolvedValue({
+        size: original.length,
+        isFile: () => true,
+      } as Stats);
+      const writeFile = spyOn(fs, "writeFile").mockResolvedValue(undefined);
+      const rename = spyOn(fs, "rename").mockResolvedValue(undefined);
+      const transaction = spyOn(edits, "applyWorkspaceEdit").mockImplementation(
+        (edit) => {
+          const response = edit as WorkspaceEdit;
+          for (const textEdits of Object.values(response.changes ?? {})) {
+            edits.applyTextEdits(original, textEdits);
+          }
+          for (const change of response.documentChanges ?? []) {
+            if ("textDocument" in change) {
+              edits.applyTextEdits(original, change.edits as TextEdit[]);
+            }
+          }
+          return Promise.resolve({ applied: true, summary: [], changes: [] });
+        },
+      );
+      const workspace = await createWorkspace(poolFactory);
+
+      const result = await workspace.execute({
+        action: "rename_file",
+        file,
+        // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
+        new_name: destination,
+        apply: false,
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(result.text).toContain("Rename preview");
+      expect(result.text).toContain(
+        "later-server: discarded 1 overlapping/duplicate reference edit(s)",
+      );
+      expect(transaction.mock.calls.at(-1)?.[0]).toEqual({
+        documentChanges: [
+          { textDocument: { uri, version: null }, edits: [first, independent] },
+          {
+            kind: "rename",
+            oldUri: uri,
+            newUri: edits.fileToUri(destination),
+          },
+        ],
+        changeAnnotations: {},
+      });
+      for (const [, options] of transaction.mock.calls) {
+        expect(options.preview).toBe(true);
+      }
+      expect(server.syncFile).toHaveBeenCalledWith(
+        file,
+        original,
+        expect.any(AbortSignal),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(secondRequest).toHaveBeenCalledTimes(1);
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(rename).not.toHaveBeenCalled();
+      expect(server.saved).not.toHaveBeenCalled();
+      expect(server.notify).not.toHaveBeenCalled();
+    },
+  );
 });
