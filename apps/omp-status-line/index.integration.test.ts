@@ -26,6 +26,9 @@ const FIXED_STATUS_CLOCK_MS = 10_000;
 const STREAM_UPDATE_ELAPSED_MS = 2000;
 const POST_RUN_IDLE_ELAPSED_MS = 20_000;
 const IDLE_REFRESH_INTERVAL_MS = 2_000_000_000;
+const SHELL_REFRESH_DELAY_MS = 150;
+const INITIAL_GIT_FETCH_COUNT = 1;
+const COALESCED_GIT_FETCH_COUNT = 2;
 const SHORT_PATH_RENDER_WIDTH = 17;
 const MIN_EDITOR_CHROME_RENDER_WIDTH = 10;
 const HOOK_STATUS_RENDER_WIDTH = 9;
@@ -820,6 +823,146 @@ describe("ompStatusLine", () => {
         expect(line).not.toContain("\r");
       }
     } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("should coalesce git-changing shell events and release the pending refresh when the session shuts down", async () => {
+    const result = { stdout: "", stderr: "", code: 0, killed: false };
+    const pendingPr = Promise.withResolvers<typeof result>();
+    const timerSpies: { mockRestore: () => void }[] = [];
+    let gitFetches = 0;
+    let prSignal: AbortSignal | undefined;
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["git"] },
+      {
+        exec: (command, _args, options) => {
+          if (command === "gh") {
+            prSignal = options.signal;
+            return pendingPr.promise;
+          }
+          gitFetches++;
+          return Promise.resolve(result);
+        },
+      },
+    );
+    try {
+      const firstTimer: NodeJS.Timeout = Object.create(null);
+      const latestTimer: NodeJS.Timeout = Object.create(null);
+      const shutdownTimer: NodeJS.Timeout = Object.create(null);
+      const schedule = spyOn(globalThis, "setTimeout")
+        .mockReturnValueOnce(firstTimer)
+        .mockReturnValueOnce(latestTimer)
+        .mockReturnValue(shutdownTimer);
+      timerSpies.push(schedule);
+      const cancel = spyOn(globalThis, "clearTimeout").mockReturnValue(
+        undefined,
+      );
+      timerSpies.push(cancel);
+      expect(gitFetches).toBe(INITIAL_GIT_FETCH_COUNT);
+      expect(prSignal?.aborted).toBe(false);
+
+      await fixture.harness.handlers.get("user_bash")?.(
+        { command: "git switch feature" },
+        fixture.harness.context,
+      );
+      await fixture.harness.handlers.get("user_bash")?.(
+        { command: "git pull" },
+        fixture.harness.context,
+      );
+
+      expect(schedule.mock.calls.map(([, delay]) => delay)).toEqual([
+        SHELL_REFRESH_DELAY_MS,
+        SHELL_REFRESH_DELAY_MS,
+      ]);
+      expect(cancel).toHaveBeenCalledWith(firstTimer);
+      expect(gitFetches).toBe(INITIAL_GIT_FETCH_COUNT);
+      const refresh = schedule.mock.calls.at(-1)?.[0];
+      if (typeof refresh !== "function") {
+        throw new Error("Expected coalesced shell refresh callback");
+      }
+      refresh();
+      await Promise.resolve();
+      expect(gitFetches).toBe(COALESCED_GIT_FETCH_COUNT);
+      expect(prSignal?.aborted).toBe(true);
+
+      await fixture.harness.handlers.get("user_bash")?.(
+        { command: "git merge main" },
+        fixture.harness.context,
+      );
+      await fixture.harness.handlers.get("session_shutdown")?.({});
+
+      expect(cancel).toHaveBeenCalledWith(shutdownTimer);
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(gitFetches).toBe(COALESCED_GIT_FETCH_COUNT);
+    } finally {
+      pendingPr.resolve(result);
+      try {
+        await fixture.cleanup();
+      } finally {
+        for (const timerSpy of timerSpies) {
+          timerSpy.mockRestore();
+        }
+      }
+    }
+  });
+
+  test("should reject a stale PR response and abort the lookup owned by a replaced branch", async () => {
+    let oldSignal: AbortSignal | undefined;
+    let completeOldLookup: (() => void) | undefined;
+    let lookupCount = 0;
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["git", "pr"] },
+      {
+        exec: (command, _args, options) => {
+          const result = {
+            stdout: '{"number":73,"url":"https://example.com/pr/73"}',
+            stderr: "",
+            code: 0,
+            killed: false,
+          };
+          if (command !== "gh") {
+            return Promise.resolve({ ...result, stdout: "" });
+          }
+          lookupCount++;
+          if (lookupCount === 1) {
+            oldSignal = options.signal;
+            return new Promise<typeof result>((resolve) => {
+              completeOldLookup = () => {
+                resolve({
+                  ...result,
+                  stdout: '{"number":42,"url":"https://example.com/pr/42"}',
+                });
+              };
+            });
+          }
+          return Promise.resolve(result);
+        },
+      },
+    );
+    try {
+      expect(fixture.top()).not.toContain("#");
+      expect(oldSignal?.aborted).toBe(false);
+
+      await fixture.changeBranch("feature");
+      await Promise.resolve();
+      expect(oldSignal?.aborted).toBe(true);
+      expect(fixture.top()).toContain("#73");
+
+      if (!completeOldLookup) {
+        throw new Error("Expected the first branch lookup to remain pending");
+      }
+      completeOldLookup();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const top = fixture.top();
+      expect(top).toContain("feature");
+      expect(top).toContain("#73");
+      expect(top).not.toContain("#42");
+      expect(Bun.stringWidth(top)).toBe(WIDE_STATUS_RENDER_WIDTH);
+    } finally {
+      completeOldLookup?.();
       await fixture.cleanup();
     }
   });
