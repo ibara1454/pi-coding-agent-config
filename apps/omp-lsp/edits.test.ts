@@ -7,7 +7,12 @@ import path from "node:path";
 import * as host from "@earendil-works/pi-coding-agent";
 
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
-import { applyTextEdits, applyWorkspaceEdit, fileToUri } from "./edits.ts";
+import {
+  applyTextEdits,
+  applyWorkspaceEdit,
+  directoryFiles,
+  fileToUri,
+} from "./edits.ts";
 
 const ORIGINAL_TEXT_LENGTH = "old".length;
 
@@ -277,6 +282,17 @@ describe("applyTextEdits", () => {
   test("should coalesce duplicate replacements when their ranges and text are identical", () => {
     const edit = replacement(0, ORIGINAL_TEXT_LENGTH, "new");
     expect(applyTextEdits("old", [edit, edit])).toBe("new");
+  });
+
+  test("should reject snippet syntax instead of inserting unresolved placeholders", () => {
+    const edit = {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: LSP snippets intentionally use literal placeholder syntax.
+      ...replacement(0, ORIGINAL_TEXT_LENGTH, "${1:value}"),
+      insertTextFormat: 2,
+    };
+    expect(() => applyTextEdits("old", [edit])).toThrow(
+      "snippet-formatted text edit",
+    );
   });
 });
 
@@ -1436,5 +1452,108 @@ describe("applyWorkspaceEdit", () => {
         removedFiles: ["/project/b.ts"],
       },
     ]);
+  });
+});
+
+describe("directoryFiles", () => {
+  test("should sort nested files and symlinks without traversing a symlink target", async () => {
+    const fixture = memoryFiles({
+      "/project/tree/z.ts": "last",
+      "/project/tree/nested/a.ts": "first",
+      "/outside/secret.ts": "not selected",
+    });
+    fixture.directories.add("/project/tree");
+    fixture.directories.add("/project/tree/nested");
+    fixture.links.set("/project/tree/link", "/outside");
+
+    expect(await directoryFiles("/project/tree")).toEqual([
+      "/project/tree/link",
+      "/project/tree/nested/a.ts",
+      "/project/tree/z.ts",
+    ]);
+    expect(fixture.files.get("/outside/secret.ts")?.content).toBe(
+      "not selected",
+    );
+  });
+
+  test("should reject traversal when the directory contains more than 1000 files", async () => {
+    const fileCount = 1001;
+    const fixture = memoryFiles(
+      Object.fromEntries(
+        Array.from({ length: fileCount }, (_, index) => [
+          `/project/tree/${index}.ts`,
+          "",
+        ]),
+      ),
+    );
+    fixture.directories.add("/project/tree");
+
+    await expect(directoryFiles("/project/tree")).rejects.toThrow(
+      "more than 1000 files",
+    );
+    expect(fixture.files.size).toBe(fileCount);
+    expect(fixture.writes).toEqual([]);
+  });
+
+  test("should reject unsupported entries instead of returning an incomplete file list", async () => {
+    memoryFiles({});
+    spyOn(filesystem, "opendir").mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield await Promise.resolve({
+          name: "socket",
+          isDirectory: () => false,
+          isFile: () => false,
+          isSymbolicLink: () => false,
+        });
+      },
+    });
+
+    await expect(directoryFiles("/project/tree")).rejects.toThrow(
+      "Unsupported filesystem object: /project/tree/socket",
+    );
+  });
+});
+
+describe("applyWorkspaceEdit", () => {
+  test("should create missing parent directories before creating a nested file", async () => {
+    const fixture = memoryFiles({});
+    const file = "/project/new/nested/a.ts";
+    const result = await applyWorkspaceEdit(
+      { documentChanges: [{ kind: "create", uri: fileToUri(file) }] },
+      { cwd: "/project" },
+    );
+
+    expect(result.applied).toBe(true);
+    expect(result.changes).toEqual([{ kind: "create", file, files: [file] }]);
+    expect(fixture.files.get(file)?.content).toBe("");
+    expect(fixture.directories.has("/project/new/nested")).toBe(true);
+  });
+
+  test("should preserve the destination and remove the empty backup directory when displacement fails", async () => {
+    const fixture = memoryFiles({
+      "/project/a.ts": "source",
+      "/project/b.ts": "destination",
+    });
+    fixture.failMove();
+    const result = await applyWorkspaceEdit(
+      {
+        documentChanges: [
+          {
+            kind: "rename",
+            oldUri: fileToUri("/project/a.ts"),
+            newUri: fileToUri("/project/b.ts"),
+            options: { overwrite: true },
+          },
+        ],
+      },
+      { cwd: "/project" },
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("Cross-device rename failed");
+    expect(result.changes).toEqual([]);
+    expect(fixture.files.get("/project/a.ts")?.content).toBe("source");
+    expect(fixture.files.get("/project/b.ts")?.content).toBe("destination");
+    expect([...fixture.directories]).toEqual(["/", "/project"]);
   });
 });

@@ -6,6 +6,7 @@ import * as fs from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { pathToFileURL } from "node:url";
 import {
+  type CancellationToken,
   createMessageConnection,
   type MessageConnection,
   StreamMessageReader,
@@ -620,5 +621,224 @@ describe("LanguageServer.diagnostics", () => {
     await server.peer.sendRequest("workspace/workspaceFolders");
     resume?.();
     expect(await pending).toEqual({ items: [], freshness: "versioned" });
+  });
+});
+
+describe("LanguageServer.request", () => {
+  test("should stop a peer that ignores request cancellation after the grace period", async () => {
+    const server = fixture();
+    const requested = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<null>();
+    let hoverToken: CancellationToken | undefined;
+    server.peer.onRequest(
+      "textDocument/hover",
+      (_params: unknown, token: CancellationToken) => {
+        hoverToken = token;
+        requested.resolve();
+        return response.promise;
+      },
+    );
+    const client = await server.pool.get(server.config);
+    const controller = new AbortController();
+    const graceMs = 1000;
+    const handle: NodeJS.Timeout = Object.create(null);
+    const { setTimeout: timeout, clearTimeout } = timers;
+    let expire: (() => void) | undefined;
+    spyOn(timers, "setTimeout").mockImplementation((callback, delay) => {
+      if (delay === graceMs) {
+        expire = callback;
+        return handle;
+      }
+      return timeout(callback, delay);
+    });
+    spyOn(timers, "clearTimeout").mockImplementation((timer) => {
+      if (timer !== handle) {
+        clearTimeout(timer);
+      }
+    });
+    const pending = client.request("textDocument/hover", {}, controller.signal);
+    const canceled = pending.catch((error: unknown) => error);
+    try {
+      await requested.promise;
+      const reason = new Error("hover canceled");
+      controller.abort(reason);
+      expect(await canceled).toBe(reason);
+      expect(client.isAlive).toBe(true);
+      // The echo reply follows the preceding cancellation notification on this transport.
+      await client.request("test/echo", null);
+      expect(hoverToken?.isCancellationRequested).toBe(true);
+      expect(server.stop).not.toHaveBeenCalled();
+      if (!expire) {
+        throw new Error("Expected cancellation grace timer");
+      }
+      expire();
+      await expect(client.request("test/echo", {})).rejects.toThrow(
+        "ignored cancellation of textDocument/hover",
+      );
+      await client.shutdown();
+      expect(client.isAlive).toBe(false);
+      expect(server.stop).toHaveBeenCalledTimes(1);
+      expect(server.pool.clients()).toEqual([]);
+    } finally {
+      response.resolve(null);
+      await canceled;
+    }
+  });
+});
+
+describe("StdioLanguageServerPool.get", () => {
+  test.each([
+    ["a partial header", "Content-Len"],
+    ["a partial body", "Content-Length: 20\r\n\r\n{"],
+  ])(
+    "should reject startup with a framing error when stdout ends after %s",
+    async (_condition, bytes) => {
+      const server = fixture({ holdInitialize: true });
+      const pending = server.pool.get(server.config);
+      const rejected = pending.catch((error: unknown) => error);
+      await server.initializing;
+      server.output.end(bytes);
+
+      expect(await rejected).toMatchObject({
+        message: "LSP transport ended with an incomplete message",
+      });
+      expect(server.pool.clients()).toEqual([]);
+      expect(server.stop).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("should reject startup with stderr context when stdout closes at a message boundary", async () => {
+    const server = fixture({ holdInitialize: true });
+    const pending = server.pool.get(server.config);
+    const rejected = pending.catch((error: unknown) => error);
+    await server.initializing;
+    server.stderr.write("protocol pipe closed\n");
+    server.output.end();
+
+    expect(await rejected).toMatchObject({
+      message: "LSP test-server closed its transport: protocol pipe closed",
+    });
+    expect(server.pool.clients()).toEqual([]);
+    expect(server.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("StdioLanguageServerPool.stop", () => {
+  test("should leave a live client available when its name is not selected", async () => {
+    const server = fixture();
+    const client = await server.pool.get(server.config);
+    await server.pool.stop(["another-server"]);
+
+    expect(server.pool.clients()).toEqual([client]);
+    expect(server.stop).not.toHaveBeenCalled();
+    await client.syncFile("/project/example.ts", "let value = 1;");
+    expect(client.document("/project/example.ts")?.content).toBe(
+      "let value = 1;",
+    );
+    await server.pool.stop([server.config.name]);
+    expect(server.pool.clients()).toEqual([]);
+    expect(client.document("/project/example.ts")).toBeUndefined();
+    expect(server.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("LanguageServer.shutdown", () => {
+  test("should retain transport and cleanup failures and release listeners when process termination rejects", async () => {
+    const server = fixture();
+    const client = await server.pool.get(server.config);
+    const cleanupError = new Error("process group termination failed");
+    server.stop.mockRejectedValue(cleanupError);
+    const transportError = new Error("broken protocol pipe");
+    // This test owns the expected failing disposal instead of the ordinary afterEach path.
+    const resource = resources.pop();
+    try {
+      server.child.emit("error", transportError);
+      await expect(client.shutdown()).rejects.toBe(cleanupError);
+      await expect(
+        client.request("textDocument/hover", {}),
+      ).rejects.toMatchObject({
+        message: "LSP test-server cleanup failed",
+        errors: [transportError, cleanupError],
+      });
+      expect(server.child.listenerCount("error")).toBe(0);
+      expect(server.stderr.listenerCount("data")).toBe(0);
+      expect(server.pool.clients()).toEqual([]);
+      expect(server.stop).toHaveBeenCalledTimes(1);
+      await expect(server.pool.stop()).rejects.toMatchObject({
+        message: "Failed to stop language servers",
+        errors: [cleanupError],
+      });
+    } finally {
+      resource?.release();
+      try {
+        await expect(server.pool.dispose()).rejects.toMatchObject({
+          message: "Failed to stop language servers",
+          errors: [cleanupError],
+        });
+      } finally {
+        server.peer.dispose();
+      }
+    }
+  });
+});
+
+describe("StdioLanguageServerPool.get", () => {
+  test("should reject startup and release its process when a framed message contains invalid JSON", async () => {
+    const server = fixture({ holdInitialize: true });
+    const pending = server.pool.get(server.config);
+    const rejected = pending.catch((error: unknown) => error);
+    await server.initializing;
+    const body = '{"jsonrpc":';
+    server.output.write(
+      `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+    );
+
+    expect(await rejected).toBeInstanceOf(SyntaxError);
+    expect(server.pool.clients()).toEqual([]);
+    expect(server.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("LanguageServer.shutdown", () => {
+  test("should reject pending work and clear owned documents without sending cancellation traffic when the owner shuts down", async () => {
+    const server = fixture();
+    const requested = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<null>();
+    let hoverToken: CancellationToken | undefined;
+    server.peer.onRequest(
+      "textDocument/hover",
+      (_params: unknown, token: CancellationToken) => {
+        hoverToken = token;
+        requested.resolve();
+        return response.promise;
+      },
+    );
+    server.peer.onRequest("shutdown", () => {
+      response.resolve(null);
+      return null;
+    });
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await client.syncFile(file, "let value = 1;");
+    const pending = client.request("textDocument/hover", {});
+    const rejected = pending.catch((error: unknown) => error);
+    try {
+      await requested.promise;
+      const shutdown = client.shutdown();
+      expect(await rejected).toMatchObject({
+        message: "LSP test-server stopped",
+      });
+      await shutdown;
+      expect(hoverToken?.isCancellationRequested).toBe(false);
+      expect(client.document(file)).toBeUndefined();
+      expect(client.isAlive).toBe(false);
+      expect(server.pool.clients()).toEqual([]);
+      expect(server.stop).toHaveBeenCalledTimes(1);
+      expect(server.child.listenerCount("error")).toBe(0);
+    } finally {
+      response.resolve(null);
+      await rejected;
+      await client.shutdown();
+    }
   });
 });

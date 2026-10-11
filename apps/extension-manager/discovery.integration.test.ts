@@ -15,16 +15,17 @@ import { discoverCatalog } from "./discovery.ts";
 
 const MODULE = "export default () => {};\n";
 const roots: string[] = [];
-let originalHome: string | undefined;
+const originalEnvironment = new Map<string, string | undefined>();
 
 afterEach(() => {
-  if (roots.length > 0) {
-    if (originalHome === undefined) {
-      delete process.env["HOME"];
+  for (const [key, value] of originalEnvironment) {
+    if (value === undefined) {
+      delete process.env[key];
     } else {
-      process.env["HOME"] = originalHome;
+      process.env[key] = value;
     }
   }
+  originalEnvironment.clear();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -37,16 +38,14 @@ interface Fixture {
 }
 
 /**
- * Creates test-owned resolver state with an isolated HOME and ancestor boundary.
- * afterEach restores HOME and removes the roots, including after setup failures.
+ * Creates test-owned resolver state with isolated HOME, npm configuration,
+ * global package prefix, and ancestor boundary. afterEach restores the
+ * environment and removes all roots, including setup failures.
  * @returns Paths for declaring resources and running discovery.
  * @throws If temporary state cannot be created.
  * @example const { agentDir, cwd } = fixture(); // both paths are test-owned
  */
 function fixture(): Fixture {
-  if (roots.length === 0) {
-    originalHome = process.env["HOME"];
-  }
   const created = mkdtempSync(join(tmpdir(), "extension-manager-"));
   roots.push(created);
   const root = realpathSync.native(created);
@@ -57,7 +56,26 @@ function fixture(): Fixture {
   mkdirSync(cwd, { recursive: true });
   mkdirSync(home, { recursive: true });
   mkdirSync(join(root, ".git"));
-  process.env["HOME"] = home;
+  const npmPrefix = join(root, "npm-global");
+  const npmUserConfig = join(home, ".npmrc");
+  const npmGlobalConfig = join(root, "npm-global.npmrc");
+  mkdirSync(npmPrefix);
+  put(npmUserConfig, "");
+  put(npmGlobalConfig, "");
+  const environment = [
+    ["HOME", home],
+    ["npm_config_prefix", npmPrefix],
+    ["npm_config_userconfig", npmUserConfig],
+    ["npm_config_globalconfig", npmGlobalConfig],
+  ] as const;
+  for (const [key, value] of environment) {
+    for (const name of key === "HOME" ? [key] : [key, key.toUpperCase()]) {
+      if (!originalEnvironment.has(name)) {
+        originalEnvironment.set(name, process.env[name]);
+      }
+      process.env[name] = value;
+    }
+  }
   return { agentDir, cwd, root };
 }
 
@@ -198,6 +216,37 @@ const deltaCases: readonly DeltaCase[] = [
 ];
 
 describe("discoverCatalog", () => {
+  test("should discover installed resources without installing a missing npm package", async () => {
+    const { agentDir, cwd, root } = fixture();
+    const extensionPath = join(agentDir, "extensions", "available.ts");
+    const marker = join(root, "executed");
+    const installRoot = join(agentDir, "npm");
+    put(extensionPath, sideEffect(marker));
+    settings(join(agentDir, "settings.json"), {
+      packages: ["npm:extension-manager-missing-fixture"],
+    });
+
+    const catalog = await discoverCatalog({
+      agentDir,
+      cwd,
+      projectTrusted: false,
+      reloadPending: false,
+    });
+
+    expect(catalog.rows).toHaveLength(1);
+    expect(catalog.rows[0]).toMatchObject({
+      path: extensionPath,
+      configured: true,
+      resolvedAfterReload: true,
+      resolutionParticipant: true,
+    });
+    expect(catalog.settings.get("global")?.value.packages).toEqual([
+      "npm:extension-manager-missing-fixture",
+    ]);
+    expect(existsSync(installRoot)).toBe(false);
+    expect(existsSync(marker)).toBe(false);
+  });
+
   test.each([false, true])(
     "should expose project resources only when trusted (%s)",
     async (projectTrusted) => {

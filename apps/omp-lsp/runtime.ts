@@ -1446,6 +1446,8 @@ async function waitForWorkspace(
 
 /**
  * Sends one bounded RPC, canceling its token on timeout and stopping peers that ignore cancellation.
+ * Caller cancellation sends a token cancellation while the owner is live; owner
+ * teardown rejects pending waits and owns process cleanup without new cancellation traffic.
  * @param server - Owner of the connection, lifetime, failure state, and cleanup timers.
  * @param method - Protocol request method.
  * @param params - Request payload; the caller validates returned peer data.
@@ -1498,7 +1500,9 @@ async function rpc<T>(
       timeoutMs,
       label: `LSP ${server.config.name} ${method}`,
       onCancel: () => {
-        source.cancel();
+        if (!state.lifetime.signal.aborted) {
+          source.cancel();
+        }
         // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
         if (!(settled || state.lifetime.signal.aborted || stopping)) {
           cleanupTimer = setTimeout(() => {

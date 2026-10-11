@@ -62,14 +62,15 @@ function mockSkillDiscovery(preview: string) {
     ],
     diagnostics: [],
   };
-  spyOn(host.DefaultPackageManager.prototype, "resolve").mockResolvedValue(
-    resolved,
-  );
+  const resolve = spyOn(
+    host.DefaultPackageManager.prototype,
+    "resolve",
+  ).mockResolvedValue(resolved);
   const loadSkills = spyOn(host, "loadSkills").mockReturnValue(loaded);
   spyOn(fs, "existsSync").mockImplementation(
     (path) => String(path) === settingsPath,
   );
-  spyOn(fs, "readFileSync").mockImplementation(((
+  const readSettings = spyOn(fs, "readFileSync").mockImplementation(((
     path: PathOrFileDescriptor,
   ) => {
     if (String(path) !== settingsPath) {
@@ -77,9 +78,10 @@ function mockSkillDiscovery(preview: string) {
     }
     return "{}";
   }) as typeof fs.readFileSync);
-  spyOn(fs.realpathSync, "native").mockImplementation(((path: PathLike) => {
-    return String(path) === skillPath ? canonicalSkillPath : String(path);
-  }) as typeof fs.realpathSync.native);
+  spyOn(fs.realpathSync, "native").mockImplementation(((path: PathLike) =>
+    String(path) === skillPath
+      ? canonicalSkillPath
+      : String(path)) as typeof fs.realpathSync.native);
 
   const open = spyOn(fs, "openSync").mockImplementation((path) => {
     if (String(path) !== canonicalSkillPath) {
@@ -101,10 +103,137 @@ function mockSkillDiscovery(preview: string) {
       length,
     )) as typeof fs.readSync);
   const close = spyOn(fs, "closeSync").mockReturnValue(undefined);
-  return { loadSkills, open, read, close };
+  return { resource, resolve, readSettings, loadSkills, open, read, close };
 }
 
 describe("discoverCatalog", () => {
+  test("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
+    const { resource, resolve, readSettings } = mockSkillDiscovery("# Review");
+    resolve.mockResolvedValue({
+      extensions: [],
+      skills: [
+        {
+          ...resource,
+          metadata: { ...resource.metadata, source: "local" },
+        },
+      ],
+      prompts: [],
+      themes: [],
+    });
+    readSettings.mockReturnValue(
+      JSON.stringify({
+        skills: ["./skills/review/SKILL.md", "./skills/review/SKILL.md"],
+      }),
+    );
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows).toHaveLength(1);
+    expect(catalog.rows[0]).toMatchObject({
+      name: "review-code",
+      source: "Settings",
+      origins: [
+        { label: `${settingsPath}#skills[0]`, source: "settings" },
+        { label: `${settingsPath}#skills[1]`, source: "settings" },
+      ],
+    });
+    expect([...catalog.targets.values()]).toMatchObject([
+      {
+        occurrencePaths: [skillPath],
+        allPaths: [skillPath],
+      },
+    ]);
+  });
+
+  test("should mark the global package as shadowed when a regular project entry has the same package identity", async () => {
+    const { resolve, readSettings } = mockSkillDiscovery("");
+    const globalRoot = `${agentDir}/npm/node_modules/kit`;
+    const projectRoot = `${cwd}/.pi/npm/node_modules/kit`;
+    const projectSettingsPath = `${cwd}/.pi/settings.json`;
+    const empty: ResolvedPaths = {
+      extensions: [],
+      skills: [],
+      prompts: [],
+      themes: [],
+    };
+    const globalResource: ResolvedResource = {
+      path: `${globalRoot}/alpha.ts`,
+      enabled: true,
+      metadata: {
+        source: "npm:kit",
+        scope: "user",
+        origin: "package",
+        baseDir: globalRoot,
+      },
+    };
+    const projectResource: ResolvedResource = {
+      ...globalResource,
+      path: `${projectRoot}/alpha.ts`,
+      metadata: {
+        ...globalResource.metadata,
+        scope: "project",
+        baseDir: projectRoot,
+      },
+    };
+    resolve.mockResolvedValue({ ...empty, extensions: [projectResource] });
+    const topLevelResolutionCount = 6;
+    for (let index = 0; index < topLevelResolutionCount; index++) {
+      resolve.mockResolvedValueOnce(empty);
+    }
+    spyOn(host.DefaultPackageManager.prototype, "getInstalledPath")
+      .mockReturnValueOnce(globalRoot)
+      .mockReturnValueOnce(projectRoot);
+    spyOn(host.DefaultPackageManager.prototype, "resolveExtensionSources")
+      .mockResolvedValueOnce({ ...empty, extensions: [globalResource] })
+      .mockResolvedValueOnce({ ...empty, extensions: [projectResource] });
+    spyOn(fs, "existsSync").mockImplementation(
+      (path) =>
+        String(path) === settingsPath || String(path) === projectSettingsPath,
+    );
+    readSettings.mockImplementation(((path: PathOrFileDescriptor) => {
+      const value = String(path);
+      if (value === settingsPath || value === projectSettingsPath) {
+        return JSON.stringify({ packages: ["npm:kit"] });
+      }
+      if (
+        value === `${globalRoot}/package.json` ||
+        value === `${projectRoot}/package.json`
+      ) {
+        return JSON.stringify({
+          pi: { extensions: ["./alpha.ts"], skills: [] },
+        });
+      }
+      throw new Error(`Unexpected read: ${value}`);
+    }) as typeof fs.readFileSync);
+    spyOn(fs, "statSync").mockImplementation(((path: PathLike) => ({
+      isFile: () => String(path).endsWith("/alpha.ts"),
+      isDirectory: () =>
+        String(path) === globalRoot || String(path) === projectRoot,
+    })) as typeof fs.statSync);
+
+    const catalog = await discoverCatalog({
+      ...options,
+      projectTrusted: true,
+    });
+
+    expect(catalog.rows).toHaveLength(2);
+    expect(catalog.rows.find((row) => row.scope === "global")).toMatchObject({
+      source: "npm:kit",
+      configured: true,
+      resolvedAfterReload: false,
+      resolutionParticipant: false,
+      resolutionCandidate: false,
+      shadowedBy: "Project package npm:kit",
+    });
+    expect(catalog.rows.find((row) => row.scope === "project")).toMatchObject({
+      source: "npm:kit",
+      configured: true,
+      resolvedAfterReload: true,
+      resolutionParticipant: true,
+      resolutionCandidate: true,
+    });
+  });
+
   test("should use loaded skill metadata and a safe body preview when the file contains frontmatter and terminal controls", async () => {
     const { close } = mockSkillDiscovery(
       [

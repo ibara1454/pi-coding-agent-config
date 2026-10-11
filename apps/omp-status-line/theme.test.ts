@@ -21,6 +21,21 @@ describe("getSeparator", () => {
       endCaps: { left: "◀", right: "▶" },
     });
   });
+  test.each([
+    ["slash", "/"],
+    ["pipe", "│"],
+    ["block", "▌"],
+    ["none", " "],
+  ] as const)(
+    "should render %s separators without end caps when Unicode is enabled",
+    (style, separator) => {
+      expect(getSeparator(style, false)).toEqual({
+        left: separator,
+        right: separator,
+        endCaps: { left: "", right: "" },
+      });
+    },
+  );
 });
 
 describe("sessionAccentAnsi", () => {

@@ -243,6 +243,8 @@ Run the focused suite from the repository root:
 bun test apps/extension-manager
 ```
 
+Discovery integration fixtures isolate `HOME`, npm configuration, and global package storage. Keep npm lookups within test-owned directories and restore environment overrides during teardown.
+
 Run repository lint and type checking:
 
 ```sh
