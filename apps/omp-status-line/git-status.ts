@@ -14,7 +14,6 @@ interface GitContext {
 }
 
 interface GitEffects {
-  readonly now: () => number;
   readonly exec: (
     command: string,
     args: string[],
@@ -69,7 +68,7 @@ function parseGitChanges(
  * Owns Git/PR snapshots, throttling, commands, and cancellation across sessions.
  * Git requires the original context owner; PR also requires its cwd/branch key.
  * Snapshots are replaced, not mutated. Optional PR lookup never delays Git.
- * @param effects Data-only context, lazy branch reads, clock, commands, and notification.
+ * @param effects Data-only context, lazy branch reads, commands, and notification.
  * Effects stay caller-owned; creating this owner acquires no command resources.
  * @returns Reusable owner; dispose aborts its commands and reset clears its values
  * without aborting in-flight work. The host must replace context ownership at session start.
@@ -182,7 +181,7 @@ export function createGitStatus(effects: GitEffects) {
     if (
       !context ||
       gitController ||
-      (!force && effects.now() - lastFetch < GIT_TTL_MS)
+      (!force && Date.now() - lastFetch < GIT_TTL_MS)
     ) {
       return;
     }
@@ -220,10 +219,10 @@ export function createGitStatus(effects: GitEffects) {
         // biome-ignore lint/complexity/noVoid: PR errors are absorbed and must not delay Git.
         void refreshPr(branch);
       }
-      lastFetch = effects.now();
+      lastFetch = Date.now();
     } catch {
       if (gitController === controller) {
-        lastFetch = effects.now();
+        lastFetch = Date.now();
       }
     } finally {
       if (gitController === controller) {

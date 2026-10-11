@@ -508,7 +508,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   const gitStatus = createGitStatus({
-    now: () => Date.now(),
     exec: (command, args, options) => pi.exec(command, args, options),
     /** Returns host identity separately from cwd so replaced contexts reject stale work. */
     readContext: () =>
@@ -943,10 +942,10 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       gitStatus.invalidate("working-tree");
       // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
       void gitStatus.refresh(true);
-      return Promise.resolve();
+      return;
     }
     if (event.toolName !== "bash" || !isObjectRecord(event.input)) {
-      return Promise.resolve();
+      return;
     }
     const { command } = event.input;
     if (typeof command === "string" && GIT_BRANCH_COMMAND_RE.test(command)) {
@@ -954,7 +953,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
       void gitStatus.refresh(true);
     }
-    return Promise.resolve();
   });
   /**
    * Coalesces Git-changing shell commands into one owned 150 ms refresh timeout.
