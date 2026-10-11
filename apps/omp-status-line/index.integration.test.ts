@@ -716,12 +716,13 @@ describe("ompStatusLine", () => {
   );
 
   test.each([
-    ["write", undefined],
-    ["edit", undefined],
-    ["bash", { command: "git switch feature" }],
+    ["refresh", "write", undefined, ["*2"]],
+    ["refresh", "edit", undefined, ["*2"]],
+    ["refresh", "bash", { command: "git switch feature" }, ["*2"]],
+    ["retain", "read", undefined, ["+1", "?1"]],
   ])(
-    "should replace previous git counts when a %s tool result forces a refresh within the cache lifetime",
-    async (toolName, input) => {
+    "should %s git counts when a %s tool result arrives within the cache lifetime",
+    async (_effect, toolName, input, counters) => {
       let stdout = "M  staged\n?? new\n";
       const fixture = await createRenderedFixture(
         { leftSegments: ["git"] },
@@ -744,7 +745,9 @@ describe("ompStatusLine", () => {
           { toolName, input },
           fixture.harness.context,
         );
-        expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual(["*2"]);
+        const renderedCounters: string[] =
+          statusText(fixture.top()).match(/[+*?]\d+/g) ?? [];
+        expect(renderedCounters).toEqual(counters);
       } finally {
         await fixture.cleanup();
       }
