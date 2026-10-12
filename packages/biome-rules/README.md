@@ -3,19 +3,25 @@
 Custom `.grit` rules and colocated integration tests live in `src/`. The root
 Biome configuration loads these checked-in rules by filesystem path.
 
-The private-method rule rejects class methods written as `private method()` or
-`#method()`, including overload signatures. Private fields remain allowed. Move
-internal helpers to module scope rather than making them public.
+## Rules
+
+| Rule | Required usage |
+| --- | --- |
+| [`no-async-describe-callback`](src/no-async-describe-callback.grit) | Keep `describe` callbacks synchronous; put async work in tests or lifecycle hooks. |
+| [`no-double-type-assertion`](src/no-double-type-assertion.grit) | Replace `value as unknown as T` with type narrowing or a correctly shaped value. |
+| [`no-private-methods`](src/no-private-methods.grit) | Use module-level helpers instead of `private` or `#` methods. Private fields remain allowed. |
+| [`use-should-test-title`](src/use-should-test-title.grit) | Start literal `test`/`it` titles with `should ` and name the expected behavior. |
+| [`use-undefined`](src/use-undefined.grit) | Use `undefined` for absent values and types; see the [exceptions below](#undefined-instead-of-null). |
 
 ## Undefined instead of null
 
-`use-undefined` rejects `null` values and types in source and tests. Equality
-checks (`==`, `!=`, `===`, `!==`) allow null operands, including parentheses.
+Equality checks (`==`, `!=`, `===`, `!==`) allow null operands, including
+parentheses.
 This does not exempt nested values: `null === send(null)` still reports the
 argument.
 
-Use `undefined` for internal absence. The rule has no autofix: JSON
-serialization and external APIs distinguish these values.
+The rule has no autofix: JSON serialization and external APIs distinguish
+`null` from `undefined`.
 
 Keep required protocol/host nulls, null-rejection fixtures, and null-prototype
 objects. Place a narrow suppression immediately above the line containing
