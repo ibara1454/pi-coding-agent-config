@@ -375,11 +375,13 @@ describe("applyWorkspaceEdit", () => {
         documentChanges: [
           { kind: "create", uri: first },
           {
+            // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
             textDocument: { uri: first, version: null },
             edits: [replacement(0, 0, "hello")],
           },
           { kind: "rename", oldUri: first, newUri: second },
           {
+            // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
             textDocument: { uri: second, version: null },
             edits: [replacement(0, renamedTextLength, "world")],
           },
@@ -433,6 +435,7 @@ describe("applyWorkspaceEdit", () => {
       {
         documentChanges: [
           {
+            // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
             textDocument: { uri: fileToUri("/project/ref.ts"), version: null },
             edits: [replacement(0, referenceTextEndOffset, "new")],
           },
@@ -444,6 +447,7 @@ describe("applyWorkspaceEdit", () => {
           {
             textDocument: {
               uri: fileToUri("/project/pending.ts"),
+              // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
               version: null,
             },
             edits: [replacement(0, referenceTextEndOffset, "new")],
@@ -482,11 +486,13 @@ describe("applyWorkspaceEdit", () => {
           {
             textDocument: {
               uri: fileToUri("/project/other.ts"),
+              // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
               version: null,
             },
             edits: [replacement(0, referenceTextEndOffset, "new")],
           },
           {
+            // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
             textDocument: { uri: fileToUri("/project/ref.ts"), version: null },
             edits: [replacement(0, referenceTextEndOffset, "new")],
           },
@@ -819,6 +825,7 @@ describe("applyWorkspaceEdit", () => {
           { kind: "delete", uri },
           { kind: "create", uri },
           {
+            // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
             textDocument: { uri, version: null },
             edits: [replacement(0, 0, "new")],
           },
@@ -1088,6 +1095,7 @@ describe("applyWorkspaceEdit", () => {
 // Untrusted edit metadata, annotations, and document bucket validation.
 describe("applyWorkspaceEdit", () => {
   test.each([
+    // biome-ignore lint/plugin/use-undefined: Deliberately reject an external JSON null WorkspaceEdit.
     ["the workspace edit is null", null, "Invalid WorkspaceEdit"],
     [
       "documentChanges is not an array",
@@ -1178,6 +1186,7 @@ describe("applyWorkspaceEdit", () => {
     ],
     [
       "the annotation data is malformed",
+      // biome-ignore lint/plugin/use-undefined: Deliberately reject external JSON null change annotation metadata.
       { known: null },
       "known",
       "Invalid change annotation",
@@ -1238,14 +1247,18 @@ describe("applyWorkspaceEdit", () => {
     expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
   });
 
-  test("should combine edits into one snapshot-relative mutation when document buckets share a version", async () => {
+  test("should combine edits into one snapshot-relative mutation when document buckets mix null and absent versions", async () => {
     const fixture = memoryFiles({ "/project/a.ts": "old" });
+    // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
     const textDocument = { uri: fileToUri("/project/a.ts"), version: null };
     const result = await applyWorkspaceEdit(
       {
         documentChanges: [
           { textDocument, edits: [replacement(0, 1, "n")] },
-          { textDocument, edits: [replacement(1, ORIGINAL_TEXT_LENGTH, "ew")] },
+          {
+            textDocument: { uri: textDocument.uri },
+            edits: [replacement(1, ORIGINAL_TEXT_LENGTH, "ew")],
+          },
         ],
       },
       { cwd: "/project" },

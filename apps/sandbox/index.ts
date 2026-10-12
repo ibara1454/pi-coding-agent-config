@@ -374,6 +374,7 @@ function createSandboxedBashOps(): BashOperations {
           resolve: resolveExecution,
           reject,
         } = Promise.withResolvers<{
+          // biome-ignore lint/plugin/use-undefined: BashOperations preserves Node's null exit code when a child terminates by signal.
           exitCode: number | null;
         }>();
         const child = spawn("bash", ["-c", wrappedCommand], {
@@ -430,6 +431,7 @@ function createSandboxedBashOps(): BashOperations {
           reject(error);
         }
 
+        // biome-ignore lint/plugin/use-undefined: Node's child-process close event reports null when termination has no numeric exit code.
         function onChildClose(code: number | null): void {
           if (!beginSettlement()) {
             return;

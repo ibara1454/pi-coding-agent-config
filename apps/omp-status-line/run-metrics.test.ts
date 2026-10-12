@@ -32,7 +32,7 @@ describe("updateRunMetrics", () => {
       activeMs: 0,
       activeStartedAt: 0,
       streamStartedAt: 0,
-      tokensPerSecond: null,
+      tokensPerSecond: undefined,
     });
     expect(previous).toEqual(EMPTY_RUN_METRICS);
   });
@@ -73,12 +73,13 @@ describe("updateRunMetrics", () => {
       );
 
       expect(next).toEqual({ ...ACTIVE_METRICS, tokensPerSecond: rate });
-      expect(ACTIVE_METRICS.tokensPerSecond).toBeNull();
+      expect(ACTIVE_METRICS.tokensPerSecond).toBeUndefined();
     },
   );
 
   test.each([
     { label: "missing", output: undefined },
+    // biome-ignore lint/plugin/use-undefined: Preserve rejection coverage for null output from the host.
     { label: "null", output: null },
     { label: "a numeric string", output: "20" },
     { label: "an object", output: {} },
@@ -132,8 +133,8 @@ describe("updateRunMetrics", () => {
 
     expect(ended).toEqual({
       activeMs: END_ELAPSED_MS,
-      activeStartedAt: null,
-      streamStartedAt: null,
+      activeStartedAt: undefined,
+      streamStartedAt: undefined,
       tokensPerSecond: RATED_METRICS.tokensPerSecond,
     });
     expect(
@@ -183,8 +184,8 @@ describe("updateRunMetrics", () => {
     );
 
     expect(ended.activeMs).toBe(-UPDATE_ELAPSED_MS);
-    expect(ended.activeStartedAt).toBeNull();
-    expect(ended.streamStartedAt).toBeNull();
+    expect(ended.activeStartedAt).toBeUndefined();
+    expect(ended.streamStartedAt).toBeUndefined();
   });
 });
 

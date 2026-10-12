@@ -55,6 +55,7 @@ describe("welcome intro lifecycle", () => {
     let timer: (() => void) | undefined;
     let cleared = 0;
     let renders = 0;
+    // biome-ignore lint/plugin/use-undefined: Object.create(null) makes the opaque timer fixture intentionally prototype-free.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const animation = new IntroAnimation(
       () => {
@@ -95,6 +96,7 @@ describe("IntroAnimation.start", () => {
     };
     let now = 0;
     let tick: (() => void) | undefined;
+    // biome-ignore lint/plugin/use-undefined: Object.create(null) makes the opaque timer fixture intentionally prototype-free.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const clearInterval = mock();
     const setInterval = mock((handler: () => void) => {
@@ -151,6 +153,7 @@ describe("IntroAnimation.start", () => {
     const elapsed = 750;
     const tickMilliseconds = 33;
     const now = spyOn(performance, "now").mockReturnValue(startedAt);
+    // biome-ignore lint/plugin/use-undefined: Object.create(null) makes the opaque timer fixture intentionally prototype-free.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const interval = spyOn(globalThis, "setInterval").mockImplementation(
       () => timerHandle,

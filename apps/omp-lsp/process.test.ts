@@ -30,8 +30,8 @@ interface FakeChild extends EventEmitter {
   stdout: PassThrough;
   stderr: PassThrough;
   pid: number;
-  exitCode: number | null;
-  signalCode: NodeJS.Signals | null;
+  exitCode: childProcess.ChildProcessWithoutNullStreams["exitCode"];
+  signalCode: childProcess.ChildProcessWithoutNullStreams["signalCode"];
   kill: childProcess.ChildProcessWithoutNullStreams["kill"];
 }
 
@@ -53,8 +53,11 @@ function fixture() {
     stdout: new PassThrough(),
     stderr: new PassThrough(),
     pid: TEST_CHILD_PID,
-    exitCode: null as number | null,
-    signalCode: null as NodeJS.Signals | null,
+    // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null exitCode for a running child.
+    exitCode: null as childProcess.ChildProcessWithoutNullStreams["exitCode"],
+    signalCode:
+      // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null signalCode for a running child.
+      null as childProcess.ChildProcessWithoutNullStreams["signalCode"],
     kill: mock<childProcess.ChildProcessWithoutNullStreams["kill"]>(() => true),
   });
   children.push(child);
@@ -93,6 +96,7 @@ function timers() {
 afterEach(() => {
   for (const child of children.splice(0)) {
     child.exitCode = 0;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
     child.emit("close", 0, null);
     child.stdin.destroy();
     child.stdout.destroy();
@@ -113,22 +117,25 @@ describe("runCommand", () => {
       childProcess.ChildProcessWithoutNullStreams,
       "stdin" | "stdout" | "stderr" | "signalCode"
     > &
-      EventEmitter & { exitCode: number | null } = Object.assign(
-      new EventEmitter(),
-      {
-        stdin: new PassThrough(),
-        stdout,
-        stderr,
-        exitCode: null,
-        signalCode: null,
-      },
-    );
+      EventEmitter & {
+        exitCode: childProcess.ChildProcessWithoutNullStreams["exitCode"];
+      } = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout,
+      stderr,
+      // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null exitCode for a running child.
+      exitCode: null,
+      // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null signalCode for a running child.
+      signalCode: null,
+    });
     spyOn(spawning, "spawn").mockImplementation(() => {
       queueMicrotask(() => {
         stdout.end(Buffer.alloc(OUTPUT_OVERFLOW_BYTES, "x"));
         stderr.end();
         child.exitCode = 0;
+        // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric exit.
         child.emit("exit", 0, null);
+        // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
         child.emit("close", 0, null);
       });
       return child as childProcess.ChildProcessWithoutNullStreams;
@@ -162,6 +169,7 @@ describe("runCommand", () => {
       controller.abort(new Error("cancelled after overflow"));
     } finally {
       child.exitCode = 1;
+      // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
       child.emit("close", 1, null);
       child.stdin.destroy();
       child.stdout.destroy();
@@ -193,7 +201,9 @@ describe("runCommand", () => {
     child.stdout.write(encoded.subarray(2));
     child.stderr.write("warning");
     child.exitCode = TEST_FAILURE_EXIT_CODE;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric exit.
     child.emit("exit", TEST_FAILURE_EXIT_CODE, null);
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
     child.emit("close", TEST_FAILURE_EXIT_CODE, null);
     expect(await pending).toEqual({
       stdout: "雪",
@@ -237,6 +247,7 @@ describe("runCommand", () => {
       Object.assign(new Error("broken pipe"), { code: "EPIPE" }),
     );
     child.exitCode = 2;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
     child.emit("close", 2, null);
     expect(await pending).toEqual({ stdout: "", stderr: "", exitCode: 2 });
     expect(signals.mock.calls).toEqual([]);
@@ -259,6 +270,7 @@ describe("runCommand", () => {
       process.platform === "win32" ? [["SIGTERM"]] : [],
     );
     child.signalCode = "SIGTERM";
+    // biome-ignore lint/plugin/use-undefined: Node emits a null code when a signal terminates the child.
     child.emit("close", null, "SIGTERM");
     expect(await pending).toBe(failure);
     expect(child.listenerCount("close")).toBe(0);
@@ -282,6 +294,7 @@ describe("runCommand", () => {
       process.platform === "win32" ? [["SIGTERM"]] : [],
     );
     child.signalCode = "SIGTERM";
+    // biome-ignore lint/plugin/use-undefined: Node emits a null code when a signal terminates the child.
     child.emit("close", null, "SIGTERM");
     expect(await pending).toBe(failure);
     expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
@@ -303,6 +316,7 @@ describe("runCommand", () => {
     expect(child.kill.mock.calls).toEqual(
       process.platform === "win32" ? [["SIGTERM"]] : [],
     );
+    // biome-ignore lint/plugin/use-undefined: Node emits a null code when a signal terminates the child.
     child.emit("close", null, "SIGTERM");
     expect(await pending).toMatchObject({ message: "Command timed out: hung" });
     expect(child.listenerCount("close")).toBe(0);
@@ -350,6 +364,7 @@ describe("stopProcess", () => {
       const pending = stopProcess(processChild);
       expect(signals.mock.calls).toEqual([[-TEST_CHILD_PID, "SIGTERM"]]);
       expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+      // biome-ignore lint/plugin/use-undefined: Node emits a null code when a signal terminates the child.
       child.emit("close", null, "SIGTERM");
       await pending;
       expect(child.listenerCount("close")).toBe(0);
@@ -401,6 +416,7 @@ describe("stopProcess", () => {
     );
     expect(scheduled[1]?.delay).toBe(FORCE_KILL_DEADLINE_MS);
     child.signalCode = "SIGKILL";
+    // biome-ignore lint/plugin/use-undefined: Node emits a null code when a signal terminates the child.
     child.emit("close", null, "SIGKILL");
     await pending;
     expect(child.listenerCount("close")).toBe(0);

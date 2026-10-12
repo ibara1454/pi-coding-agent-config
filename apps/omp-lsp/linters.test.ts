@@ -39,6 +39,7 @@ const filesystem: {
       buffer: Buffer,
       offset: number,
       length: number,
+      // biome-ignore lint/plugin/use-undefined: The mocked Node FileHandle.read contract uses null for the current position.
       position: null,
     ) => Promise<{ bytesRead: number }>;
     close: () => Promise<void>;
@@ -351,6 +352,7 @@ describe("lintWithCli", () => {
     ],
     [
       "a finding is not an object",
+      // biome-ignore lint/plugin/use-undefined: Deliberately reject a null diagnostic from external CLI JSON.
       { diagnostics: [null] },
       "without a message",
     ],
@@ -361,6 +363,7 @@ describe("lintWithCli", () => {
     ],
     [
       "the location is missing",
+      // biome-ignore lint/plugin/use-undefined: Deliberately reject a null location from external CLI JSON.
       { diagnostics: [{ ...finding, location: null }] },
       "could not locate",
     ],
@@ -382,6 +385,7 @@ describe("lintWithCli", () => {
       "the start position is missing",
       {
         diagnostics: [
+          // biome-ignore lint/plugin/use-undefined: Deliberately reject a null start position from external CLI JSON.
           { ...finding, location: { ...finding.location, start: null } },
         ],
       },
@@ -473,6 +477,7 @@ describe("lintWithCli", () => {
       Array.from({ length: 1001 }, () => swiftFinding),
       "more than 1000",
     ],
+    // biome-ignore lint/plugin/use-undefined: Deliberately reject a null violation from external SwiftLint JSON.
     ["a finding is not an object", [null], "invalid violation"],
     [
       "the reason is empty",

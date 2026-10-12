@@ -225,6 +225,7 @@ export async function runCommand(
       stop(error);
     }
   };
+  // biome-ignore lint/plugin/use-undefined: Node close events report a null code when terminated by a signal.
   const onClose = (code: number | null) => {
     if (settled) {
       return;

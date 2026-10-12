@@ -46,7 +46,7 @@ function createContext(options?: {
         getSessionName: () => undefined,
       },
     } as never,
-    footerData: null,
+    footerData: undefined,
     theme: {
       fg: (_color: string, text: string): string => text,
       getFgAnsi: (_color: string): string => "",
@@ -66,21 +66,21 @@ function createContext(options?: {
       cacheWrite: 0,
       premiumRequests: 0,
       cost: 0,
-      tokensPerSecond: null,
+      tokensPerSecond: undefined,
     },
     contextTokens: 0,
-    contextPercent: null,
+    contextPercent: undefined,
     contextWindow: 0,
     autoCompactEnabled: true,
     activeMs: 0,
     git: {
-      branch: null,
+      branch: undefined,
       staged: 0,
       unstaged: 0,
       untracked: 0,
       pr: options?.pullRequestUrl
         ? { number: 42, url: options.pullRequestUrl }
-        : null,
+        : undefined,
     },
   };
 }

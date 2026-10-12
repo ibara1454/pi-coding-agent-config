@@ -2,9 +2,9 @@ const MILLISECONDS_PER_SECOND = 1000;
 
 interface RunMetrics {
   readonly activeMs: number;
-  readonly activeStartedAt: number | null;
-  readonly streamStartedAt: number | null;
-  readonly tokensPerSecond: number | null;
+  readonly activeStartedAt: number | undefined;
+  readonly streamStartedAt: number | undefined;
+  readonly tokensPerSecond: number | undefined;
 }
 
 type RunMetricEvent =
@@ -14,9 +14,9 @@ type RunMetricEvent =
 
 export const EMPTY_RUN_METRICS: RunMetrics = {
   activeMs: 0,
-  activeStartedAt: null,
-  streamStartedAt: null,
-  tokensPerSecond: null,
+  activeStartedAt: undefined,
+  streamStartedAt: undefined,
+  tokensPerSecond: undefined,
 };
 
 /**
@@ -45,13 +45,13 @@ export function updateRunMetrics(
     return {
       ...metrics,
       activeMs: activeRunMilliseconds(metrics, nowMs),
-      activeStartedAt: null,
-      streamStartedAt: null,
+      activeStartedAt: undefined,
+      streamStartedAt: undefined,
     };
   }
   const { output } = event;
   if (
-    metrics.streamStartedAt === null ||
+    metrics.streamStartedAt === undefined ||
     typeof output !== "number" ||
     !Number.isFinite(output) ||
     output <= 0
@@ -77,6 +77,8 @@ export function activeRunMilliseconds(
 ): number {
   return (
     metrics.activeMs +
-    (metrics.activeStartedAt === null ? 0 : nowMs - metrics.activeStartedAt)
+    (metrics.activeStartedAt === undefined
+      ? 0
+      : nowMs - metrics.activeStartedAt)
   );
 }

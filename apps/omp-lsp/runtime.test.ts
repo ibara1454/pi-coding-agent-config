@@ -68,17 +68,18 @@ function fixture(
     ChildProcessWithoutNullStreams,
     "stdin" | "stdout" | "stderr" | "pid" | "signalCode"
   > &
-    EventEmitter & { exitCode: number | null } = Object.assign(
-    new EventEmitter(),
-    {
-      stdin,
-      stdout,
-      stderr,
-      pid: 12_345,
-      exitCode: null as number | null,
-      signalCode: null,
-    },
-  );
+    EventEmitter & {
+      exitCode: ChildProcessWithoutNullStreams["exitCode"];
+    } = Object.assign(new EventEmitter(), {
+    stdin,
+    stdout,
+    stderr,
+    pid: 12_345,
+    // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null exitCode for a running child.
+    exitCode: null as ChildProcessWithoutNullStreams["exitCode"],
+    // biome-ignore lint/plugin/use-undefined: The fake preserves Node's null signalCode for a running child.
+    signalCode: null,
+  });
   const peer = createMessageConnection(
     new StreamMessageReader(stdin),
     new StreamMessageWriter(stdout),
@@ -96,11 +97,14 @@ function fixture(
     }
     return { capabilities };
   });
+  // biome-ignore lint/plugin/use-undefined: LSP shutdown replies must contain a null result.
   peer.onRequest("shutdown", () => null);
   peer.onRequest("test/echo", (value: unknown) => value);
   peer.onNotification("exit", () => {
     child.exitCode = 0;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric exit.
     child.emit("exit", 0, null);
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
     child.emit("close", 0, null);
   });
   peer.listen();
@@ -109,7 +113,9 @@ function fixture(
   );
   const stop = spyOn(processes, "stopProcess").mockImplementation(() => {
     child.exitCode = 0;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric exit.
     child.emit("exit", 0, null);
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric close.
     child.emit("close", 0, null);
     return Promise.resolve();
   });
@@ -377,6 +383,7 @@ describe("LanguageServer.capabilities", () => {
     expect(client.capabilities.workspaceSymbolProvider).toBeUndefined();
     await expect(
       server.peer.sendRequest("client/unregisterCapability", {
+        // biome-ignore lint/plugin/use-undefined: This malformed peer entry tests rejection of external null.
         unregistrations: [{ id: "hover" }, null],
       }),
     ).rejects.toMatchObject({ code: -32_602 });
@@ -406,8 +413,17 @@ describe("LanguageServer.request", () => {
           { section: "toString" },
         ],
       }),
-    ).toEqual([server.config.settings, EXACT_TAB_SIZE, false, null, null]);
+    ).toEqual([
+      server.config.settings,
+      EXACT_TAB_SIZE,
+      false,
+      // biome-ignore lint/plugin/use-undefined: A missing LSP configuration section must serialize as null.
+      null,
+      // biome-ignore lint/plugin/use-undefined: An inherited configuration key is unavailable and must serialize as null.
+      null,
+    ]);
     await expect(
+      // biome-ignore lint/plugin/use-undefined: This malformed peer item tests rejection of external null.
       server.peer.sendRequest("workspace/configuration", { items: [null] }),
     ).rejects.toMatchObject({ code: -32_602 });
     await expect(
@@ -425,6 +441,7 @@ describe("LanguageServer.request", () => {
     const client = await server.pool.get(server.config);
     expect(
       await server.peer.sendRequest<unknown>("workspace/applyEdit", {
+        // biome-ignore lint/plugin/use-undefined: This malformed peer edit tests rejection of external null.
         edit: null,
       }),
     ).toEqual({ applied: false, failureReason: "Invalid workspace edit" });
@@ -477,8 +494,8 @@ describe("LanguageServer.saved", () => {
     await client.closeFile(file);
     await client.saved(file);
     // The peer's reply follows all preceding client notifications.
-    server.peer.onRequest("test/barrier", () => null);
-    await client.request("test/barrier", null);
+    server.peer.onRequest("test/barrier", () => undefined);
+    await client.request("test/barrier", undefined);
     expect(saves.mock.calls).toEqual([
       [{ textDocument: { uri }, text: "let value = 2;\n" }],
     ]);
@@ -499,6 +516,7 @@ describe("LanguageServer.shutdown", () => {
       `${"x".repeat(OVERSIZED_STDERR_CHARACTERS)}permission denied\n`,
     );
     server.child.exitCode = FAILURE_EXIT_CODE;
+    // biome-ignore lint/plugin/use-undefined: Node emits a null signal for a numeric exit.
     server.child.emit("exit", FAILURE_EXIT_CODE, null);
     await expect(client.request("textDocument/hover", {})).rejects.toThrow(
       "exited (3)",
@@ -518,6 +536,7 @@ describe("LanguageServer.shutdown", () => {
 
 describe("StdioLanguageServerPool.clients", () => {
   test("should keep active requests alive and stop idle clients when the owned idle sweep runs", async () => {
+    // biome-ignore lint/plugin/use-undefined: A null prototype creates an inert timer handle without inherited properties.
     const timerHandle: NodeJS.Timeout = Object.assign(Object.create(null), {
       unref: () => timerHandle,
     });
@@ -533,6 +552,7 @@ describe("StdioLanguageServerPool.clients", () => {
     const { promise: requested, resolve: began } =
       Promise.withResolvers<void>();
     const { promise: response, resolve: finish } =
+      // biome-ignore lint/plugin/use-undefined: An LSP hover response is null when no hover is available.
       Promise.withResolvers<null>();
     server.peer.onRequest("textDocument/hover", () => {
       began();
@@ -551,6 +571,7 @@ describe("StdioLanguageServerPool.clients", () => {
       sweep();
       expect(server.pool.clients()).toEqual([client]);
       expect(server.stop).not.toHaveBeenCalled();
+      // biome-ignore lint/plugin/use-undefined: An LSP hover reply is null when no hover is available.
       finish(null);
       await pending;
       clock.mockReturnValue(EXPIRED_CLOCK_MS);
@@ -562,6 +583,7 @@ describe("StdioLanguageServerPool.clients", () => {
       await server.pool.dispose();
       expect(clear).toHaveBeenCalledWith(timerHandle);
     } finally {
+      // biome-ignore lint/plugin/use-undefined: An LSP hover reply is null when no hover is available.
       finish(null);
       await pending;
     }
@@ -586,6 +608,7 @@ describe("LanguageServer.diagnostics", () => {
     });
     await server.peer.sendRequest("workspace/workspaceFolders");
     const { promise: polling, resolve: polled } = Promise.withResolvers<void>();
+    // biome-ignore lint/plugin/use-undefined: A null prototype creates an inert timer handle without inherited properties.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const { setTimeout: timeout, clearTimeout } = timers;
     let resume: (() => void) | undefined;
@@ -628,6 +651,7 @@ describe("LanguageServer.request", () => {
   test("should stop a peer that ignores request cancellation after the grace period", async () => {
     const server = fixture();
     const requested = Promise.withResolvers<void>();
+    // biome-ignore lint/plugin/use-undefined: Preserve the LSP nullable hover response.
     const response = Promise.withResolvers<null>();
     let hoverToken: CancellationToken | undefined;
     server.peer.onRequest(
@@ -641,6 +665,7 @@ describe("LanguageServer.request", () => {
     const client = await server.pool.get(server.config);
     const controller = new AbortController();
     const graceMs = 1000;
+    // biome-ignore lint/plugin/use-undefined: A null prototype creates an inert opaque timer handle.
     const handle: NodeJS.Timeout = Object.create(null);
     const { setTimeout: timeout, clearTimeout } = timers;
     let expire: (() => void) | undefined;
@@ -665,6 +690,7 @@ describe("LanguageServer.request", () => {
       expect(await canceled).toBe(reason);
       expect(client.isAlive).toBe(true);
       // The echo reply follows the preceding cancellation notification on this transport.
+      // biome-ignore lint/plugin/use-undefined: Preserve an explicit null on the JSON-RPC echo transport.
       await client.request("test/echo", null);
       expect(hoverToken?.isCancellationRequested).toBe(true);
       expect(server.stop).not.toHaveBeenCalled();
@@ -680,6 +706,7 @@ describe("LanguageServer.request", () => {
       expect(server.stop).toHaveBeenCalledTimes(1);
       expect(server.pool.clients()).toEqual([]);
     } finally {
+      // biome-ignore lint/plugin/use-undefined: Complete the pending LSP hover with an empty response.
       response.resolve(null);
       await canceled;
     }
@@ -803,6 +830,7 @@ describe("LanguageServer.shutdown", () => {
   test("should reject pending work and clear owned documents without sending cancellation traffic when the owner shuts down", async () => {
     const server = fixture();
     const requested = Promise.withResolvers<void>();
+    // biome-ignore lint/plugin/use-undefined: Preserve the LSP nullable hover response.
     const response = Promise.withResolvers<null>();
     let hoverToken: CancellationToken | undefined;
     server.peer.onRequest(
@@ -814,7 +842,9 @@ describe("LanguageServer.shutdown", () => {
       },
     );
     server.peer.onRequest("shutdown", () => {
+      // biome-ignore lint/plugin/use-undefined: Complete the pending LSP hover with an empty response.
       response.resolve(null);
+      // biome-ignore lint/plugin/use-undefined: The LSP shutdown response requires null.
       return null;
     });
     const client = await server.pool.get(server.config);
@@ -836,6 +866,7 @@ describe("LanguageServer.shutdown", () => {
       expect(server.stop).toHaveBeenCalledTimes(1);
       expect(server.child.listenerCount("error")).toBe(0);
     } finally {
+      // biome-ignore lint/plugin/use-undefined: Complete the pending LSP hover with an empty response.
       response.resolve(null);
       await rejected;
       await client.shutdown();

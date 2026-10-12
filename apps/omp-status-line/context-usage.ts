@@ -40,6 +40,7 @@ type ContextTokenEntry =
       >;
     };
 
+// biome-ignore-start lint/plugin/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
 interface ContextUsageInput {
   readonly reportedTokens: number | null | undefined;
   readonly providerAnchored: boolean;
@@ -48,10 +49,11 @@ interface ContextUsageInput {
   readonly contextWindow: number | null | undefined;
   readonly modelContextWindow: number | null | undefined;
 }
+// biome-ignore-end lint/plugin/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
 
 interface ContextUsage {
   readonly contextTokens: number;
-  readonly contextPercent: number | null;
+  readonly contextPercent: number | undefined;
   readonly contextWindow: number;
 }
 
@@ -182,7 +184,7 @@ export function estimateContextEntryTokens(
  * @param input Readonly reported usage, anchor decision and numeric estimates.
  * The adapter computes messages only for nullish reported counts, and overhead
  * only without an anchored nonnullish count; unused estimates may be zero.
- * @returns Tokens and percent (0–100 scale, not clamped), with a null percent for
+ * @returns Tokens and percent (0–100 scale, not clamped), with an undefined percent for
  * nonpositive windows. A reported zero is retained; windows fall back only when
  * nullish. Owns no effects/resources and does not mutate inputs.
  * @example calculateContextUsage({ reportedTokens: 0, providerAnchored: true, estimatedMessageTokens: 0, estimatedOverheadTokens: 0, contextWindow: 1000, modelContextWindow: undefined }).contextPercent === 0
@@ -201,7 +203,7 @@ export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
     contextPercent:
       contextWindow > 0
         ? (contextTokens / contextWindow) * PERCENT_SCALE
-        : null,
+        : undefined,
     contextWindow,
   };
 }

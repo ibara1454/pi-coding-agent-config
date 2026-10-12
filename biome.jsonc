@@ -8,6 +8,7 @@
     },
     "./packages/biome-rules/src/no-double-type-assertion.grit",
     "./packages/biome-rules/src/no-private-methods.grit",
+    "./packages/biome-rules/src/use-undefined.grit",
     {
       "path": "./packages/biome-rules/src/use-should-test-title.grit",
       "includes": ["**/*.test.ts", "**/*.integration.test.ts"]

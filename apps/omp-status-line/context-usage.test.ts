@@ -93,6 +93,7 @@ describe("calculateContextUsage", () => {
     const estimatedOverheadTokens = estimateContextOverhead(TOOL_OVERHEAD);
 
     const usage = calculateContextUsage({
+      // biome-ignore lint/plugin/use-undefined: Pi reports null when usage estimates are unavailable.
       reportedTokens: null,
       providerAnchored,
       estimatedMessageTokens,
@@ -162,6 +163,7 @@ describe("calculateContextUsage", () => {
 
   test.each([
     { label: "missing", reportedTokens: undefined },
+    // biome-ignore lint/plugin/use-undefined: Preserve the host's unavailable-token input case.
     { label: "null", reportedTokens: null },
   ])(
     "should add both estimates despite a provider anchor when reported usage is $label",
@@ -190,6 +192,7 @@ describe("calculateContextUsage", () => {
     },
     {
       label: "null with a model fallback",
+      // biome-ignore lint/plugin/use-undefined: Preserve fallback behavior for an unavailable host context window.
       contextWindow: null,
       modelContextWindow: 2000,
       expectedWindow: 2000,
@@ -207,21 +210,21 @@ describe("calculateContextUsage", () => {
       contextWindow: 0,
       modelContextWindow: 2000,
       expectedWindow: 0,
-      expectedPercent: null,
+      expectedPercent: undefined,
     },
     {
       label: "negative",
       contextWindow: -1,
       modelContextWindow: 2000,
       expectedWindow: -1,
-      expectedPercent: null,
+      expectedPercent: undefined,
     },
     {
       label: "missing without a model fallback",
       contextWindow: undefined,
       modelContextWindow: undefined,
       expectedWindow: 0,
-      expectedPercent: null,
+      expectedPercent: undefined,
     },
     {
       label: "smaller than usage",
@@ -309,6 +312,7 @@ describe("hasProviderContextAnchor", () => {
         totalTokens: "5",
         input: Number.NaN,
         output: Number.POSITIVE_INFINITY,
+        // biome-ignore lint/plugin/use-undefined: Malformed host usage must not become a provider anchor.
         cacheRead: null,
         cacheWrite: "5",
       },
