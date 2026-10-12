@@ -74,13 +74,13 @@ function createContext(options?: {
     autoCompactEnabled: true,
     activeMs: 0,
     git: {
-      branch: null,
+      branch: undefined,
       staged: 0,
       unstaged: 0,
       untracked: 0,
       pr: options?.pullRequestUrl
         ? { number: 42, url: options.pullRequestUrl }
-        : null,
+        : undefined,
     },
   };
 }

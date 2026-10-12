@@ -17,11 +17,11 @@ const SECOND_PR = {
   url: "https://example.com/pr/73",
 };
 const EMPTY_SNAPSHOT = {
-  branch: null,
+  branch: undefined,
   staged: 0,
   unstaged: 0,
   untracked: 0,
-  pr: null,
+  pr: undefined,
 };
 
 interface CommandResult {
@@ -54,7 +54,7 @@ function createStatus(
   const input: {
     now: number;
     context: { owner: symbol; cwd: string } | null;
-    branch: string | null;
+    branch: string | undefined;
     branchReads: number;
     changes: number;
   } = {
@@ -347,13 +347,13 @@ describe("createGitStatus.refresh", () => {
 
   test("should skip PR lookup without a branch and retain the branch when the provider becomes unavailable", async () => {
     const { status, input, calls } = createStatus();
-    input.branch = null;
+    input.branch = undefined;
     await status.refresh(true);
     expect(status.snapshot).toEqual({ ...EMPTY_SNAPSHOT, staged: 1 });
     expect(calls).toHaveLength(1);
     input.branch = "main";
     await status.refresh(true);
-    input.branch = null;
+    input.branch = undefined;
     await status.refresh(true);
     expect(status.snapshot.branch).toBe("main");
     expect(status.snapshot.pr).toEqual(FIRST_PR);
@@ -441,7 +441,7 @@ describe("createGitStatus.refresh", () => {
     input.context = { owner: Symbol("replacement"), cwd: "/repo" };
     pending.resolve({ code: 0, stdout: JSON.stringify(FIRST_PR) });
     await pending.promise;
-    expect(status.snapshot.pr).toBeNull();
+    expect(status.snapshot.pr).toBeUndefined();
     expect(input.changes).toBe(2);
     status.dispose();
   });
@@ -457,7 +457,7 @@ describe("createGitStatus.refresh", () => {
     input.context = null;
     pending.reject(new Error("old lookup failed"));
     await pending.promise.catch(() => undefined);
-    expect(status.snapshot.pr).toBeNull();
+    expect(status.snapshot.pr).toBeUndefined();
     expect(input.changes).toBe(2);
     status.dispose();
   });
@@ -507,7 +507,7 @@ describe("createGitStatus.invalidate", () => {
     expect(calls.filter(({ command }) => command === "gh")).toHaveLength(1);
     pending.reject(new Error("cancelled lookup"));
     await pending.promise.catch(() => undefined);
-    expect(status.snapshot.pr).toBeNull();
+    expect(status.snapshot.pr).toBeUndefined();
     expect(input.changes).toBe(2);
     status.dispose();
   });

@@ -512,7 +512,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     /** Returns host identity separately from cwd so replaced contexts reject stale work. */
     readContext: () =>
       currentCtx ? { owner: currentCtx, cwd: currentCtx.cwd } : null,
-    readBranch: () => footerData?.getGitBranch() ?? null,
+    readBranch: () => footerData?.getGitBranch() ?? undefined,
     changed: requestRender,
   });
 

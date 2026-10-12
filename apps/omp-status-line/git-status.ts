@@ -5,7 +5,7 @@ const GIT_TTL_MS = 1000;
 const COMMAND_TIMEOUT_MS = 2000;
 
 type GitSnapshot = Readonly<Omit<GitState, "pr">> & {
-  readonly pr: Readonly<NonNullable<GitState["pr"]>> | null;
+  readonly pr: Readonly<NonNullable<GitState["pr"]>> | undefined;
 };
 
 interface GitContext {
@@ -20,17 +20,23 @@ interface GitEffects {
     options: { cwd: string; timeout: number; signal: AbortSignal },
   ) => Promise<{ code: number; stdout: string }>;
   readonly readContext: () => GitContext | null;
-  readonly readBranch: () => string | null;
+  readonly readBranch: () => string | undefined;
   readonly changed: () => void;
 }
 
 /**
  * Creates empty owned state without sharing mutable data between sessions.
- * @returns A fresh snapshot with no branch, counts, or pull request; no effects.
+ * @returns A fresh snapshot with undefined branch/PR and zero counts; no effects.
  * @example emptyGitState().staged === 0
  */
 function emptyGitState(): GitSnapshot {
-  return { branch: null, staged: 0, unstaged: 0, untracked: 0, pr: null };
+  return {
+    branch: undefined,
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+    pr: undefined,
+  };
 }
 
 /**
@@ -105,15 +111,15 @@ export function createGitStatus(effects: GitEffects) {
    * Looks up optional PR data once per cwd/branch without delaying Git completion.
    * Detached/missing branches hide PR data. Command and JSON failures clear PR
    * only while the command, context owner, and cache key still belong to this lookup.
-   * @param branch Branch observed lazily after Git status completed.
+   * @param branch Branch observed after Git status completed, or undefined if unavailable.
    * @returns Optional lookup completion; command/JSON failures are absorbed.
    * @example await refreshPr("main"); // Queries gh once for this cwd/branch.
    */
-  async function refreshPr(branch: string | null): Promise<void> {
+  async function refreshPr(branch: string | undefined): Promise<void> {
     const context = effects.readContext();
     if (!(context && branch) || branch === "detached" || prController) {
       if (!branch || branch === "detached") {
-        snapshot = { ...snapshot, pr: null };
+        snapshot = { ...snapshot, pr: undefined };
       }
       return;
     }
@@ -141,7 +147,7 @@ export function createGitStatus(effects: GitEffects) {
       ) {
         return;
       }
-      let pr: GitSnapshot["pr"] = null;
+      let pr: GitSnapshot["pr"];
       if (result.code === 0) {
         const parsed: unknown = JSON.parse(result.stdout);
         if (isObjectRecord(parsed)) {
@@ -158,7 +164,7 @@ export function createGitStatus(effects: GitEffects) {
         ownsContext(context) &&
         prBranchKey === key
       ) {
-        snapshot = { ...snapshot, pr: null };
+        snapshot = { ...snapshot, pr: undefined };
       }
     } finally {
       if (prController === controller) {
@@ -211,7 +217,7 @@ export function createGitStatus(effects: GitEffects) {
           ...snapshot,
           branch,
           ...changes,
-          pr: branchChanged ? null : snapshot.pr,
+          pr: branchChanged ? undefined : snapshot.pr,
         };
         if (branchChanged) {
           prBranchKey = null;
