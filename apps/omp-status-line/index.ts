@@ -494,8 +494,8 @@ function fitStatusSegments(
 
 /**
  * Registers the status-line renderer and session-owned refresh resources.
- * Event effects run synchronously; handlers return promises and reject on failure.
- * Shutdown cancels timers and commands and releases only UI slots still owned here.
+ * Async lifecycle handlers own refresh startup/stop; synchronous callbacks only signal work.
+ * Shutdown cancels timers, joins commands, and releases only UI slots still owned here.
  * @param pi Host extension API used for events, UI state, and command execution.
  * @example ompStatusLine(pi); // Installs UI on session_start in TUI mode.
  */
@@ -524,17 +524,19 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   });
 
   /**
-   * Releases owned timers, commands and UI slots, then clears host references.
+   * Releases owned timers and subscriptions, joins refresh work, then releases owned UI slots.
+   * Lifecycle calls are serial; startup awaits this cleanup before acquiring another session.
+   * @returns Completion after all owned resources and host references have been released.
    * @example A repeated session_shutdown leaves no owned handles or subscriptions.
    */
-  const releaseSessionResources = (): void => {
+  const releaseSessionResources = async (): Promise<void> => {
     clearInterval(ticker);
     ticker = undefined;
     clearTimeout(delayedRefresh);
     delayedRefresh = undefined;
     footerUnsubscribe?.();
     footerUnsubscribe = undefined;
-    gitStatus.dispose();
+    await gitStatus.stop();
     disposeUi?.();
     disposeUi = undefined;
     currentCtx = undefined;
@@ -610,15 +612,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       ...contextUsage,
       autoCompactEnabled: true,
       activeMs: activeRunMilliseconds(runMetrics, now),
-      git: {
-        ...gitStatus.snapshot,
-        branch: footerData?.getGitBranch() ?? gitStatus.snapshot.branch,
-      },
+      git: gitStatus.snapshot,
     };
   };
 
   /**
-   * Fits ANSI segments to width in terminal cells, not string length; refreshes Git nonblocking.
+   * Fits cached ANSI segments to width in terminal cells without starting Git/PR work.
    * @param width Available cells, including separators and caps.
    * Drops right segments, then shortens the path before dropping other left segments.
    * @returns Styled row or empty text without a session/positive width; host errors propagate.
@@ -628,8 +627,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     if (width <= 0) {
       return "";
     }
-    // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not block rendering.
-    void gitStatus.refresh();
     const preset = effectivePreset(settings);
     const segmentCtx = buildSegmentContext(theme, preset.segmentOptions);
     if (!segmentCtx) {
@@ -796,12 +793,9 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       footerUnsubscribe?.();
       const unsubscribe = data.onBranchChange(() => {
         gitStatus.invalidate("branch");
-        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and branch notifications stay nonblocking.
-        void gitStatus.refresh(true);
       });
       footerUnsubscribe = unsubscribe;
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and footer installation stays synchronous.
-      void gitStatus.refresh(true);
+      gitStatus.requestRefresh();
       return {
         dispose(): void {
           ownsFooterSlot = false;
@@ -846,27 +840,32 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
   };
 
-  // Executors retain synchronous event effects and turn thrown failures into rejections.
   /**
-   * Resets session state and installs TUI chrome plus an owned one-second refresh timer.
+   * Releases the previous session before acquiring TUI chrome and owned refresh scheduling.
+   * Setup failures release newly acquired resources before rejecting with the original error.
+   * @returns Setup completion without waiting for optional Git/PR commands.
    * @example A non-TUI session_start resets counters without installing UI or a ticker.
    */
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
+    await releaseSessionResources();
     currentCtx = ctx;
     settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
     runMetrics = EMPTY_RUN_METRICS;
-    gitStatus.reset();
     if (ctx.mode !== "tui") {
-      return Promise.resolve();
+      return;
     }
 
-    installUi(ctx);
-    ticker = setInterval(() => {
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay this render tick.
-      void gitStatus.refresh();
-      requestRender();
-    }, STATUS_REFRESH_INTERVAL_MS);
-    return Promise.resolve();
+    try {
+      await gitStatus.start();
+      installUi(ctx);
+      ticker = setInterval(() => {
+        gitStatus.requestRefresh();
+        requestRender();
+      }, STATUS_REFRESH_INTERVAL_MS);
+    } catch (error) {
+      await releaseSessionResources();
+      throw error;
+    }
   });
 
   // ponytail: share one context-refresh callback across these five hooks.
@@ -947,8 +946,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     currentCtx = ctx;
     if (event.toolName === "write" || event.toolName === "edit") {
       gitStatus.invalidate("working-tree");
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
-      void gitStatus.refresh(true);
       return;
     }
     if (event.toolName !== "bash" || !isObjectRecord(event.input)) {
@@ -957,8 +954,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const { command } = event.input;
     if (typeof command === "string" && GIT_BRANCH_COMMAND_RE.test(command)) {
       gitStatus.invalidate("branch");
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
-      void gitStatus.refresh(true);
     }
   });
   /**
@@ -967,19 +962,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
    */
   pi.on("user_bash", (event, ctx) => {
     currentCtx = ctx;
-    if (GIT_BRANCH_COMMAND_RE.test(event.command)) {
+    if (ticker && GIT_BRANCH_COMMAND_RE.test(event.command)) {
       clearTimeout(delayedRefresh);
       delayedRefresh = setTimeout(() => {
         delayedRefresh = undefined;
         gitStatus.invalidate("pending-pr");
-        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and the coalescing timer stays nonblocking.
-        void gitStatus.refresh(true);
       }, GIT_REFRESH_COALESCE_DELAY_MS);
     }
     return Promise.resolve();
   });
-  pi.on("session_shutdown", () => {
-    releaseSessionResources();
-    return Promise.resolve();
+  /**
+   * Stops queued/running refresh jobs and releases the session's timers, subscriptions, and UI.
+   * @returns Completion after owned commands are aborted/joined without waiting for late exec results.
+   * @example await session_shutdown(); // A later ticker signal cannot execute optional commands.
+   */
+  pi.on("session_shutdown", async () => {
+    await releaseSessionResources();
   });
 }

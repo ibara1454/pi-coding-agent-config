@@ -272,6 +272,7 @@ test("should release owned resources without replacing newer UI", async () => {
   const fixture = await createSettingsFixture({ preset: "default" });
   let commandSignal: AbortSignal | undefined;
   let unsubscribeCalls = 0;
+  const commandStarted = Promise.withResolvers<void>();
   const command = Promise.withResolvers<{
     stdout: string;
     stderr: string;
@@ -283,6 +284,7 @@ test("should release owned resources without replacing newer UI", async () => {
     trusted: true,
     exec: async (_command, _args, options) => {
       commandSignal = options.signal;
+      commandStarted.resolve();
       options.signal?.addEventListener(
         "abort",
         () =>
@@ -317,6 +319,7 @@ test("should release owned resources without replacing newer UI", async () => {
         },
       },
     );
+    await commandStarted.promise;
     footer.dispose();
 
     const replacementFooter = (): Record<string, never> => ({});
@@ -338,7 +341,7 @@ test("should release owned resources without replacing newer UI", async () => {
 /**
  * Installs the exported extension against in-memory settings, commands, and host UI.
  * @param settings Segment layout to render; no existing config or repository is read.
- * @param options Deterministic host path, command responses, and hook statuses.
+ * @param options Deterministic host path, command responses, hook statuses, and optional initial-refresh waiting.
  * @returns Rendered public components, deterministic clock/refresh controls, and cleanup owning session shutdown and environment restoration.
  * @example const fixture = await createRenderedFixture({ leftSegments: ["path"] }); // fixture.top(40)
  */
@@ -348,6 +351,7 @@ async function createRenderedFixture(
     cwd?: string;
     exec?: Parameters<typeof createHarness>[0]["exec"];
     statuses?: Map<string, string>;
+    waitForInitialRefresh?: boolean;
   } = {},
 ) {
   const agentDir = "/virtual/status-line-agent";
@@ -393,7 +397,32 @@ async function createRenderedFixture(
   let branch = "main";
   let notifyBranchChange = (): void => undefined;
   const unsubscribe = mock(() => undefined);
-  const requestRender = mock(() => undefined);
+  const renderWaiters = new Set<() => void>();
+  const requestRender = mock(() => {
+    for (const check of renderWaiters) {
+      check();
+    }
+  });
+  /**
+   * Waits for a test-owned observable UI result, checking again only on render notifications.
+   * @param ready Predicate reading rendered output or recorded host effects.
+   * @returns Completion once the requested result is visible; owns no timer or production hook.
+   * @example await waitForRender(() => top().includes("#73"));
+   */
+  const waitForRender = (ready: () => boolean): Promise<void> => {
+    if (ready()) {
+      return Promise.resolve();
+    }
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const check = (): void => {
+      if (ready()) {
+        renderWaiters.delete(check);
+        resolve();
+      }
+    };
+    renderWaiters.add(check);
+    return promise;
+  };
 
   /** Releases session resources and restores every mocked boundary, including on setup failure. */
   const cleanup = async (): Promise<void> => {
@@ -439,6 +468,16 @@ async function createRenderedFixture(
       dispose: () => void;
       invalidate: () => void;
     };
+    /**
+     * Renders the installed editor's status row at a fixed default cell width without effects.
+     * @returns ANSI-free public editor output for presentation assertions.
+     * @example top().includes("Test"); // The configured model segment is visible.
+     */
+    const top = (width = WIDE_STATUS_RENDER_WIDTH): string =>
+      Bun.stripANSI(editor.render(width)[0] ?? "");
+    if (options.waitForInitialRefresh !== false) {
+      await waitForRender(() => requestRender.mock.calls.length > 0);
+    }
     return {
       harness,
       footer,
@@ -447,13 +486,18 @@ async function createRenderedFixture(
       clock,
       interval,
       requestRender,
-      top: (width = WIDE_STATUS_RENDER_WIDTH): string =>
-        Bun.stripANSI(editor.render(width)[0] ?? ""),
+      top,
+      waitForRender,
+      /**
+       * Signals the subscribed host branch change and waits until that branch is rendered.
+       * @param nextBranch Cached footer branch to expose to the owner.
+       * @returns Completion when a render notification exposes the new branch.
+       * @example await fixture.changeBranch("feature"); // top() includes "feature".
+       */
       async changeBranch(nextBranch: string): Promise<void> {
         branch = nextBranch;
         notifyBranchChange();
-        // The command boundary resolves immediately; flush its refresh continuation.
-        await Promise.resolve();
+        await waitForRender(() => top().includes(nextBranch));
       },
     };
   } catch (error) {
@@ -463,6 +507,78 @@ async function createRenderedFixture(
 }
 
 describe("ompStatusLine", () => {
+  test("should release acquired resources and preserve the error when TUI setup fails", async () => {
+    const settings = await createSettingsFixture({ preset: "default" });
+    const exec = mock(async () => ({
+      stdout: "",
+      stderr: "",
+      code: 0,
+      killed: false,
+    }));
+    const harness = createHarness({
+      cwd: settings.projectDir,
+      trusted: true,
+      exec,
+    });
+    const failure = new Error("Footer setup failed");
+    const unsubscribe = mock(() => undefined);
+    const requestRender = mock(() => undefined);
+    let notifyBranchChange = (): void => undefined;
+    let editor: { render: (width: number) => string[] } | undefined;
+    const installFooter = spyOn(
+      harness.context.ui,
+      "setFooter",
+    ).mockImplementation((factory) => {
+      if (typeof factory !== "function") {
+        return;
+      }
+      const editorFactory = harness.getEditorFactory();
+      if (typeof editorFactory !== "function") {
+        throw new Error("Expected acquired editor component");
+      }
+      editor = editorFactory({}, harness.theme, {});
+      factory({ requestRender }, harness.theme, {
+        getGitBranch: () => "main",
+        getExtensionStatuses: () => new Map(),
+        onBranchChange: (callback: () => void) => {
+          notifyBranchChange = callback;
+          return unsubscribe;
+        },
+      });
+      throw failure;
+    });
+    try {
+      const ompStatusLine = await loadExtension();
+      ompStatusLine(harness.pi as never);
+
+      await expect(
+        harness.handlers.get("session_start")?.({}, harness.context),
+      ).rejects.toBe(failure);
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(installFooter).toHaveBeenLastCalledWith(undefined);
+      expect(harness.getEditorFactory()).toBe(harness.baseEditorFactory);
+      expect(harness.getFooterFactory()).toBeUndefined();
+      if (!editor) {
+        throw new Error("Expected the partially installed editor");
+      }
+      expect(editor.render(WIDE_STATUS_RENDER_WIDTH)[0]).toBe("header");
+      expect(exec).not.toHaveBeenCalled();
+      notifyBranchChange();
+      await harness.handlers.get("session_shutdown")?.({});
+      expect(exec).not.toHaveBeenCalled();
+      expect(requestRender).not.toHaveBeenCalled();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      try {
+        await harness.handlers.get("session_shutdown")?.({});
+      } finally {
+        installFooter.mockRestore();
+        await settings.cleanup();
+      }
+    }
+  });
+
   test.each([
     "session_info_changed",
     "model_select",
@@ -745,6 +861,11 @@ describe("ompStatusLine", () => {
           { toolName, input },
           fixture.harness.context,
         );
+        await fixture.waitForRender(
+          () =>
+            (statusText(fixture.top()).match(/[+*?]\d+/g) ?? []).join() ===
+            counters.join(),
+        );
         const renderedCounters: string[] =
           statusText(fixture.top()).match(/[+*?]\d+/g) ?? [];
         expect(renderedCounters).toEqual(counters);
@@ -833,6 +954,8 @@ describe("ompStatusLine", () => {
   test("should coalesce git-changing shell events and release the pending refresh when the session shuts down", async () => {
     const result = { stdout: "", stderr: "", code: 0, killed: false };
     const pendingPr = Promise.withResolvers<typeof result>();
+    const prStarted = Promise.withResolvers<void>();
+    const coalescedGitStarted = Promise.withResolvers<void>();
     const timerSpies: { mockRestore: () => void }[] = [];
     let gitFetches = 0;
     let prSignal: AbortSignal | undefined;
@@ -842,14 +965,19 @@ describe("ompStatusLine", () => {
         exec: (command, _args, options) => {
           if (command === "gh") {
             prSignal = options.signal;
+            prStarted.resolve();
             return pendingPr.promise;
           }
           gitFetches++;
+          if (gitFetches === COALESCED_GIT_FETCH_COUNT) {
+            coalescedGitStarted.resolve();
+          }
           return Promise.resolve(result);
         },
       },
     );
     try {
+      await prStarted.promise;
       // biome-ignore-start lint/plugin/use-undefined: Null prototypes create inert opaque timer handles for the host fixture.
       const firstTimer: NodeJS.Timeout = Object.create(null);
       const latestTimer: NodeJS.Timeout = Object.create(null);
@@ -887,7 +1015,7 @@ describe("ompStatusLine", () => {
         throw new Error("Expected coalesced shell refresh callback");
       }
       refresh();
-      await Promise.resolve();
+      await coalescedGitStarted.promise;
       expect(gitFetches).toBe(COALESCED_GIT_FETCH_COUNT);
       expect(prSignal?.aborted).toBe(true);
 
@@ -912,63 +1040,221 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should reject a stale PR response and abort the lookup owned by a replaced branch", async () => {
-    let oldSignal: AbortSignal | undefined;
-    let completeOldLookup: (() => void) | undefined;
-    let lookupCount = 0;
+  test("should render cached git and PR without starting commands when the cache lifetime expires", async () => {
+    let stdout = "M  staged\n?? new\n";
+    const exec = mock(async (command: string) => ({
+      stdout:
+        command === "git"
+          ? stdout
+          : '{"number":73,"url":"https://example.com/pr/73"}',
+      stderr: "",
+      code: 0,
+      killed: false,
+    }));
     const fixture = await createRenderedFixture(
       { leftSegments: ["git", "pr"] },
+      { exec },
+    );
+    try {
+      await fixture.waitForRender(() => fixture.top().includes("#73"));
+      const cached = fixture.top();
+      const commandCount = exec.mock.calls.length;
+      fixture.clock.mockReturnValue(
+        FIXED_STATUS_CLOCK_MS + STREAM_UPDATE_ELAPSED_MS,
+      );
+      stdout = " M changed\n";
+
+      expect(fixture.top()).toBe(cached);
+      fixture.top(PATH_STATUS_RENDER_WIDTH);
+      fixture.footer.render(WIDE_STATUS_RENDER_WIDTH);
+      expect(exec).toHaveBeenCalledTimes(commandCount);
+
+      const tick = fixture.interval.mock.calls[0]?.[0];
+      if (typeof tick !== "function") {
+        throw new Error("Expected the session refresh callback");
+      }
+      tick();
+      expect(exec).toHaveBeenCalledTimes(commandCount);
+      await fixture.waitForRender(() => fixture.top().includes("*1"));
+      expect(fixture.top()).toContain("main");
+      expect(fixture.top()).toContain("#73");
+      expect(fixture.top()).not.toContain("+1");
+      expect(exec).toHaveBeenCalledTimes(commandCount + 1);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("should release the prior TUI lifetime without waiting for git when a non-TUI session replaces it", async () => {
+    const result = { stdout: "", stderr: "", code: 0, killed: false };
+    const pendingGit = Promise.withResolvers<typeof result>();
+    const commandStarted = Promise.withResolvers<void>();
+    let signal: AbortSignal | undefined;
+    const exec = mock(
+      (
+        _command: string,
+        _args: string[],
+        options: { signal?: AbortSignal },
+      ) => {
+        ({ signal } = options);
+        commandStarted.resolve();
+        return pendingGit.promise;
+      },
+    );
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["model", "git"] },
+      { exec, waitForInitialRefresh: false },
+    );
+    const cancelInterval = spyOn(globalThis, "clearInterval");
+    const schedule = spyOn(globalThis, "setTimeout");
+    try {
+      await commandStarted.promise;
+      const { handlers, context } = fixture.harness;
+      expect(fixture.top()).toContain("Test");
+      await handlers.get("tool_result")?.({ toolName: "write" }, context);
+      expect(exec).toHaveBeenCalledTimes(1);
+      const priorTick = fixture.interval.mock.calls[0]?.[0];
+
+      await handlers.get("session_start")?.({}, { ...context, mode: "rpc" });
+
+      expect(signal?.aborted).toBe(true);
+      expect(cancelInterval).toHaveBeenCalledWith(
+        fixture.interval.mock.results[0]?.value,
+      );
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(fixture.harness.getEditorFactory()).toBe(
+        fixture.harness.baseEditorFactory,
+      );
+      expect(fixture.harness.getFooterFactory()).toBeUndefined();
+      expect(fixture.interval).toHaveBeenCalledTimes(1);
+      expect(exec).toHaveBeenCalledTimes(1);
+      schedule.mockClear();
+      await handlers.get("user_bash")?.(
+        { command: "git switch feature" },
+        { ...context, mode: "rpc" },
+      );
+      expect(schedule).not.toHaveBeenCalled();
+
+      await handlers.get("session_shutdown")?.({});
+      if (typeof priorTick !== "function") {
+        throw new Error("Expected the prior session refresh callback");
+      }
+      const renderCount = fixture.requestRender.mock.calls.length;
+      priorTick();
+      expect(exec).toHaveBeenCalledTimes(1);
+      expect(fixture.requestRender).toHaveBeenCalledTimes(renderCount);
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      pendingGit.resolve(result);
+      try {
+        await fixture.cleanup();
+      } finally {
+        cancelInterval.mockRestore();
+        schedule.mockRestore();
+      }
+    }
+  });
+
+  test("should replace TUI resources and keep rendering git when a prior session has a slow PR", async () => {
+    const result = {
+      stdout: "M  staged\n",
+      stderr: "",
+      code: 0,
+      killed: false,
+    };
+    const pendingPr = Promise.withResolvers<typeof result>();
+    const prStarted = Promise.withResolvers<void>();
+    let prSignal: AbortSignal | undefined;
+    let lookups = 0;
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["model", "git", "pr"] },
       {
         exec: (command, _args, options) => {
-          const result = {
-            stdout: '{"number":73,"url":"https://example.com/pr/73"}',
-            stderr: "",
-            code: 0,
-            killed: false,
-          };
-          if (command !== "gh") {
-            return Promise.resolve({ ...result, stdout: "" });
+          if (command === "git") {
+            return Promise.resolve(result);
           }
-          lookupCount++;
-          if (lookupCount === 1) {
-            oldSignal = options.signal;
-            return new Promise<typeof result>((resolve) => {
-              completeOldLookup = () => {
-                resolve({
-                  ...result,
-                  stdout: '{"number":42,"url":"https://example.com/pr/42"}',
-                });
-              };
-            });
+          lookups++;
+          if (lookups === 1) {
+            prSignal = options.signal;
+            prStarted.resolve();
+            return pendingPr.promise;
           }
-          return Promise.resolve(result);
+          return Promise.resolve({
+            ...result,
+            stdout: '{"number":84,"url":"https://example.com/pr/84"}',
+          });
         },
       },
     );
+    const cancelInterval = spyOn(globalThis, "clearInterval");
+    const unsubscribe = mock(() => undefined);
     try {
+      await prStarted.promise;
+      const { handlers, context } = fixture.harness;
+      expect(fixture.top()).toContain("+1");
       expect(fixture.top()).not.toContain("#");
-      expect(oldSignal?.aborted).toBe(false);
+      await handlers.get("tool_result")?.({ toolName: "read" }, context);
+      const previousEditorFactory = fixture.harness.getEditorFactory();
+      const nextContext = {
+        ...context,
+        model: { ...context.model, name: "Replacement" },
+      };
 
-      await fixture.changeBranch("feature");
-      await Promise.resolve();
-      expect(oldSignal?.aborted).toBe(true);
-      expect(fixture.top()).toContain("#73");
+      await handlers.get("session_start")?.({}, nextContext);
 
-      if (!completeOldLookup) {
-        throw new Error("Expected the first branch lookup to remain pending");
+      expect(prSignal?.aborted).toBe(true);
+      expect(fixture.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(cancelInterval).toHaveBeenCalledWith(
+        fixture.interval.mock.results[0]?.value,
+      );
+      expect(fixture.interval).toHaveBeenCalledTimes(2);
+      const editorFactory = fixture.harness.getEditorFactory();
+      const footerFactory = fixture.harness.getFooterFactory();
+      if (
+        typeof editorFactory !== "function" ||
+        typeof footerFactory !== "function"
+      ) {
+        throw new Error("Expected replacement session components");
       }
-      completeOldLookup();
-      await Promise.resolve();
-      await Promise.resolve();
+      expect(editorFactory).not.toBe(previousEditorFactory);
+      const editor = editorFactory({}, fixture.harness.theme, {});
+      footerFactory(
+        { requestRender: fixture.requestRender },
+        fixture.harness.theme,
+        {
+          getGitBranch: () => "feature",
+          getExtensionStatuses: () => new Map(),
+          onBranchChange: () => unsubscribe,
+        },
+      );
+      await fixture.waitForRender(() =>
+        Bun.stripANSI(
+          editor.render(WIDE_STATUS_RENDER_WIDTH)[0] ?? "",
+        ).includes("#84"),
+      );
+      const rendered = Bun.stripANSI(
+        editor.render(WIDE_STATUS_RENDER_WIDTH)[0] ?? "",
+      );
+      expect(rendered).toContain("Replacement");
+      expect(rendered).toContain("feature");
+      expect(rendered).toContain("+1");
+      expect(rendered).not.toContain("main");
+      expect(rendered.match(/╭──/g)).toHaveLength(1);
+      expect(Bun.stringWidth(rendered)).toBe(WIDE_STATUS_RENDER_WIDTH);
 
-      const top = fixture.top();
-      expect(top).toContain("feature");
-      expect(top).toContain("#73");
-      expect(top).not.toContain("#42");
-      expect(Bun.stringWidth(top)).toBe(WIDE_STATUS_RENDER_WIDTH);
-    } finally {
-      completeOldLookup?.();
       await fixture.cleanup();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(fixture.harness.getEditorFactory()).toBe(
+        fixture.harness.baseEditorFactory,
+      );
+      expect(fixture.harness.getFooterFactory()).toBeUndefined();
+    } finally {
+      pendingPr.resolve(result);
+      try {
+        await fixture.cleanup();
+      } finally {
+        cancelInterval.mockRestore();
+      }
     }
   });
 });
