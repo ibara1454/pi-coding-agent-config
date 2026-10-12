@@ -107,6 +107,7 @@ interface ExtensionHarness {
  * @example required([42][0]) // 42
  */
 function required<T>(value: T): NonNullable<T> {
+  // biome-ignore lint/plugin/use-undefined: Fixture assertions deliberately reject null as well as undefined.
   if (value === undefined || value === null) {
     throw new Error("Expected a present fixture value");
   }

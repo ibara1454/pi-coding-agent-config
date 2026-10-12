@@ -98,18 +98,18 @@ export interface UsageStats {
   cacheWrite: number;
   premiumRequests: number;
   cost: number;
-  tokensPerSecond: number | null;
+  tokensPerSecond: number | undefined;
 }
 
 export interface SegmentContext {
   extensionContext: ExtensionContext;
-  footerData: ReadonlyFooterDataProvider | null;
+  footerData: ReadonlyFooterDataProvider | undefined;
   theme: Theme;
   settings: StatusLineSettings;
   options: StatusLineSegmentOptions;
   usage: UsageStats;
   contextTokens: number;
-  contextPercent: number | null;
+  contextPercent: number | undefined;
   contextWindow: number;
   autoCompactEnabled: boolean;
   activeMs: number;

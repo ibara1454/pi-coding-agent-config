@@ -46,6 +46,7 @@ function toNonNullRecord<T extends Record<string, unknown>>(
   // them: retained values are unchanged, and the filter removes nullish values.
   return Object.fromEntries(
     Object.entries(record).filter(
+      // biome-ignore lint/plugin/use-undefined: Provider host fields may be null and must be omitted from registration options.
       ([, value]) => value !== null && value !== undefined,
     ),
   ) as NonNullRecord<T>;

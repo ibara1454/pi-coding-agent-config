@@ -156,7 +156,7 @@ describe("commitSettings", () => {
               extensions: ["./extensions", "-extensions/alpha.ts"],
               theme: "light",
             },
-            null,
+            undefined,
             "\t",
           )}\n`,
         );

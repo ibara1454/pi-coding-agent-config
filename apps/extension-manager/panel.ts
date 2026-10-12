@@ -104,6 +104,7 @@ function parseMouse(data: string):
     return undefined;
   }
   const match = data.slice(prefix.length).match(MOUSE_REPORT);
+  // biome-ignore lint/plugin/use-undefined: String.match returns null for malformed terminal mouse reports.
   if (match === null) {
     return undefined;
   }

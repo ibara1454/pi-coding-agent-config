@@ -24,6 +24,7 @@ const MUTATING_FLAG =
 const LINE_BREAK = /\r?\n/;
 
 function record(value: unknown): value is Record<string, unknown> {
+  // biome-ignore lint/plugin/use-undefined: CLI JSON output may contain null instead of the required object.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -99,6 +100,7 @@ async function sourceLines(
         bytes,
         length,
         bytes.length - length,
+        // biome-ignore lint/plugin/use-undefined: Node FileHandle.read uses null to advance the current file position.
         null,
       );
       if (result.bytesRead === 0) {

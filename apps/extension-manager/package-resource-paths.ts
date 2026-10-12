@@ -49,10 +49,12 @@ function packageManifestResources(
     );
     const pi =
       typeof manifest === "object" &&
+      // biome-ignore lint/plugin/use-undefined: Parsed package.json may contain a null root.
       manifest !== null &&
       !Array.isArray(manifest) &&
       "pi" in manifest &&
       typeof manifest.pi === "object" &&
+      // biome-ignore lint/plugin/use-undefined: External package.json may set pi to null.
       manifest.pi !== null &&
       !Array.isArray(manifest.pi)
         ? (manifest.pi as Record<string, unknown>)

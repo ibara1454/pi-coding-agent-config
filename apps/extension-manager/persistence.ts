@@ -45,6 +45,7 @@ export interface PersistenceIo {
 function isMissingFile(error: unknown): boolean {
   return (
     typeof error === "object" &&
+    // biome-ignore lint/plugin/use-undefined: Thrown external values can be null and must be rejected before inspecting their code.
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"

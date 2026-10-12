@@ -117,18 +117,24 @@ export function sanitizeInlineText(text: string): string {
   return sanitized;
 }
 
-function safeHyperlinkUrl(text: string): string | null {
+/**
+ * Validates a terminal hyperlink without changing its text or acquiring resources.
+ * @param text Candidate URL from PR metadata.
+ * @returns The original HTTP(S) URL, or undefined if invalid or unsafe.
+ * @example safeHyperlinkUrl("file:///tmp") === undefined
+ */
+function safeHyperlinkUrl(text: string): string | undefined {
   const sanitized = sanitizeInlineText(text).trim();
   if (sanitized !== text || WHITESPACE_RE.test(sanitized)) {
-    return null;
+    return undefined;
   }
   try {
     const url = new URL(sanitized);
     return url.protocol === "http:" || url.protocol === "https:"
       ? sanitized
-      : null;
+      : undefined;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -347,7 +353,7 @@ function renderContext(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const usage =
     ctx.contextWindow > 0
-      ? `${ctx.contextPercent === null ? "?" : `${ctx.contextPercent.toFixed(1)}%`}/${formatNumber(ctx.contextWindow)}`
+      ? `${ctx.contextPercent === undefined ? "?" : `${ctx.contextPercent.toFixed(1)}%`}/${formatNumber(ctx.contextWindow)}`
       : `${formatNumber(ctx.contextTokens)}/?`;
   const auto = ctx.autoCompactEnabled && icons.auto ? ` ${icons.auto}` : "";
   return {

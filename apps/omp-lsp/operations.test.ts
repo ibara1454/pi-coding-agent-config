@@ -173,6 +173,7 @@ describe("normalizeDiagnostics", () => {
     },
     {
       condition: "a finding is not an object",
+      // biome-ignore lint/plugin/use-undefined: Deliberately reject a null diagnostic from the LSP server.
       value: [null],
       error: "Invalid diagnostic response",
     },
@@ -344,6 +345,7 @@ describe("locations", () => {
   });
 
   test("should return no navigation targets when the server returns null", () => {
+    // biome-ignore lint/plugin/use-undefined: LSP navigation uses null when no target exists.
     expect(locations(null)).toEqual([]);
   });
 

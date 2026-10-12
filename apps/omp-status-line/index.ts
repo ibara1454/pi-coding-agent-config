@@ -172,6 +172,7 @@ function toNonNullRecord<T extends Record<string, unknown>>(
   // them: retained values are unchanged, and the filter removes nullish values.
   return Object.fromEntries(
     Object.entries(record).filter(
+      // biome-ignore lint/plugin/use-undefined: External settings can contain null; omit those fields.
       ([, value]) => value !== null && value !== undefined,
     ),
   ) as NonNullRecord<T>;
@@ -276,9 +277,16 @@ function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/**
+ * Reads usage totals from the current session branch without modifying entries.
+ * @param ctx Host context whose session branch supplies usage records.
+ * @param tokensPerSecond Current stream rate, or undefined before measurement.
+ * @returns Totals with invalid numeric fields treated as zero; host read errors propagate.
+ * @example aggregateUsage(ctx, undefined).tokensPerSecond === undefined
+ */
 function aggregateUsage(
   ctx: ExtensionContext,
-  tokensPerSecond: number | null,
+  tokensPerSecond: number | undefined,
 ): UsageStats {
   const stats: UsageStats = {
     input: 0,
@@ -493,14 +501,14 @@ function fitStatusSegments(
  * @example ompStatusLine(pi); // Installs UI on session_start in TUI mode.
  */
 export default function ompStatusLine(pi: ExtensionAPI): void {
-  let currentCtx: ExtensionContext | null = null;
+  let currentCtx: ExtensionContext | undefined;
   let settings: StatusLineSettings = readSettings(process.cwd(), false);
-  let footerData: ReadonlyFooterDataProvider | null = null;
-  let tui: { requestRender: () => void } | null = null;
-  let footerUnsubscribe: (() => void) | null = null;
+  let footerData: ReadonlyFooterDataProvider | undefined;
+  let tui: { requestRender: () => void } | undefined;
+  let footerUnsubscribe: (() => void) | undefined;
   let ticker: NodeJS.Timeout | undefined;
   let delayedRefresh: NodeJS.Timeout | undefined;
-  let disposeUi: (() => void) | null = null;
+  let disposeUi: (() => void) | undefined;
   let runMetrics = EMPTY_RUN_METRICS;
 
   const requestRender = (): void => {
@@ -511,7 +519,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     exec: (command, args, options) => pi.exec(command, args, options),
     /** Returns host identity separately from cwd so replaced contexts reject stale work. */
     readContext: () =>
-      currentCtx ? { owner: currentCtx, cwd: currentCtx.cwd } : null,
+      currentCtx ? { owner: currentCtx, cwd: currentCtx.cwd } : undefined,
     readBranch: () => footerData?.getGitBranch() ?? undefined,
     changed: requestRender,
   });
@@ -526,13 +534,13 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     clearTimeout(delayedRefresh);
     delayedRefresh = undefined;
     footerUnsubscribe?.();
-    footerUnsubscribe = null;
+    footerUnsubscribe = undefined;
     gitStatus.dispose();
     disposeUi?.();
-    disposeUi = null;
-    currentCtx = null;
-    footerData = null;
-    tui = null;
+    disposeUi = undefined;
+    currentCtx = undefined;
+    footerData = undefined;
+    tui = undefined;
     runMetrics = EMPTY_RUN_METRICS;
   };
 
@@ -541,19 +549,20 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
    * Only absent reported tokens acquire entries; anchored totals skip prompt/tool acquisition.
    * @param theme Styling callbacks retained for segment rendering; host errors propagate.
    * @param options Per-segment display options, retained without mutation.
-   * @returns Context with 0–100 percentage units, or null before a session is available.
-   * @example With no currentCtx, buildSegmentContext(theme, {}) returns null.
+   * @returns Context with 0–100 percentage units, or undefined before a session is available.
+   * @example With no currentCtx, buildSegmentContext(theme, {}) returns undefined.
    */
   const buildSegmentContext = (
     theme: Theme,
     options: StatusLineSegmentOptions,
-  ): SegmentContext | null => {
+  ): SegmentContext | undefined => {
     if (!currentCtx) {
-      return null;
+      return undefined;
     }
     const context = currentCtx.getContextUsage();
     const contextWindow = context?.contextWindow;
     const modelContextWindow =
+      // biome-ignore lint/plugin/use-undefined: Host context estimates can be unavailable.
       contextWindow === null || contextWindow === undefined
         ? currentCtx.model?.contextWindow
         : undefined;
@@ -562,6 +571,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     );
     const reportedTokens = context?.tokens;
     const estimatedMessageTokens =
+      // biome-ignore lint/plugin/use-undefined: Pi reports null until token estimates are available.
       reportedTokens === null || reportedTokens === undefined
         ? estimateContextEntryTokens(
             currentCtx.sessionManager.buildContextEntries().map((entry) =>
@@ -576,6 +586,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         : 0;
     const estimatedOverheadTokens =
       providerAnchored &&
+      // biome-ignore lint/plugin/use-undefined: Unavailable Pi token estimates require prompt/tool estimation.
       reportedTokens !== null &&
       reportedTokens !== undefined
         ? 0
@@ -774,8 +785,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       if (ctx.ui.getEditorComponent() === installedEditorFactory) {
         ctx.ui.setEditorComponent(previousEditorFactory);
       }
-      footerData = null;
-      tui = null;
+      footerData = undefined;
+      tui = undefined;
       disposed = true;
     };
     disposeUi = releaseInstalledUi;
@@ -800,11 +811,11 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           ownsFooterSlot = false;
           if (footerUnsubscribe === unsubscribe) {
             unsubscribe();
-            footerUnsubscribe = null;
+            footerUnsubscribe = undefined;
           }
           if (footerData === data) {
-            footerData = null;
-            tui = null;
+            footerData = undefined;
+            tui = undefined;
           }
         },
         invalidate(): void {

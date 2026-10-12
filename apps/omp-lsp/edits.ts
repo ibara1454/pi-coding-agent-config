@@ -61,7 +61,7 @@ type Operation =
       file: string;
       documentFile?: string;
       edits: TextEdit[];
-      version: number | null;
+      version: number | undefined;
     }
   | { kind: "create"; file: string; overwrite: boolean; ignore: boolean }
   | {
@@ -83,6 +83,7 @@ interface PlannedChange {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
+  // biome-ignore lint/plugin/use-undefined: WorkspaceEdit objects may be external JSON null and must be rejected.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Invalid ${label}`);
   }
@@ -92,6 +93,7 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function missing(error: unknown): boolean {
   return (
     typeof error === "object" &&
+    // biome-ignore lint/plugin/use-undefined: Filesystem failures are untrusted thrown values and may be null.
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
@@ -382,6 +384,7 @@ function operations(value: unknown): Operation[] {
       throw new Error("Workspace edit is missing its document URI");
     }
     if (
+      // biome-ignore lint/plugin/use-undefined: LSP permits a null document version for unversioned edits.
       version !== null &&
       version !== undefined &&
       !Number.isSafeInteger(version)
@@ -392,7 +395,7 @@ function operations(value: unknown): Operation[] {
     const parsed = textEdits(edits, annotation);
     const prior = pending.get(file);
     if (prior) {
-      if (prior.version !== (version ?? null)) {
+      if (prior.version !== (version ?? undefined)) {
         throw new Error(`Conflicting document versions for ${file}`);
       }
       prior.edits.push(...parsed);
@@ -402,7 +405,10 @@ function operations(value: unknown): Operation[] {
         file,
         edits: parsed,
         version:
-          version === null || version === undefined ? null : Number(version),
+          // biome-ignore lint/plugin/use-undefined: Normalize the LSP null version to internal undefined absence.
+          version === null || version === undefined
+            ? undefined
+            : Number(version),
       });
     }
   };
@@ -434,7 +440,7 @@ function operations(value: unknown): Operation[] {
       for (const [uri, edits] of Object.entries(
         record(changes, "workspace changes"),
       )) {
-        add(uri, edits, null);
+        add(uri, edits, undefined);
       }
     }
   }
@@ -450,11 +456,11 @@ function operations(value: unknown): Operation[] {
 /**
  * Captures a filesystem entry for later stale-state checks without following final symlinks.
  * @param file - Path whose lstat metadata and, for files, UTF-8 contents are read.
- * @returns A signature and entry data, or null for a missing path.
+ * @returns A signature and entry data, or undefined for a missing path.
  * @throws For unsupported objects, nondirectory entries over 16 MiB, or other filesystem failures.
- * @example entry("/missing/a.ts") resolves to null when that path does not exist.
+ * @example entry("/missing/a.ts") resolves to undefined when that path does not exist.
  */
-async function entry(file: string): Promise<Entry | null> {
+async function entry(file: string): Promise<Entry | undefined> {
   try {
     const stat = await fs.lstat(file);
     let kind: Entry["kind"] | undefined;
@@ -481,7 +487,7 @@ async function entry(file: string): Promise<Entry | null> {
     return { kind, signature, content: await fs.readFile(file, "utf8") };
   } catch (error) {
     if (missing(error)) {
-      return null;
+      return undefined;
     }
     throw error;
   }
@@ -553,7 +559,7 @@ export async function directoryFiles(
  */
 async function canonicalTextOperation(
   op: Extract<Operation, { kind: "text" }>,
-  existing: Entry | null,
+  existing: Entry | undefined,
   canonicalNames: ReadonlyMap<string, string>,
 ): Promise<Extract<Operation, { kind: "text" }>> {
   const documentFile = op.file;
@@ -582,7 +588,7 @@ async function canonicalTextOperation(
  */
 function validateResourceSource(
   op: Exclude<Operation, { kind: "text" }>,
-  before: Entry | null,
+  before: Entry | undefined,
   label: string,
 ): boolean {
   if (op.kind === "create") {
@@ -631,21 +637,24 @@ function validateResourceSource(
 async function plan(
   edit: unknown,
   options: EditOptions,
-): Promise<{ changes: PlannedChange[]; originals: Map<string, Entry | null> }> {
-  const originals = new Map<string, Entry | null>();
-  const virtual = new Map<string, Entry | null>();
+): Promise<{
+  changes: PlannedChange[];
+  originals: Map<string, Entry | undefined>;
+}> {
+  const originals = new Map<string, Entry | undefined>();
+  const virtual = new Map<string, Entry | undefined>();
   const changes: PlannedChange[] = [];
   let snapshotBytes = 0;
   /**
    * Loads one original entry into the virtual plan, reusing any prior virtual state.
    * @param file - Path used as the snapshot/cache key.
-   * @returns The current virtual entry or null for a missing/deleted path.
+   * @returns The current virtual entry or undefined for a missing/deleted path.
    * @throws On entry-read failures or when accumulated UTF-8 snapshot bytes exceed 64 MiB.
-   * @example Loading a missing path records null in originals and virtual without creating it.
+   * @example Loading a missing path records undefined in originals and virtual without creating it.
    */
-  const load = async (file: string): Promise<Entry | null> => {
+  const load = async (file: string): Promise<Entry | undefined> => {
     if (virtual.has(file)) {
-      return virtual.get(file) ?? null;
+      return virtual.get(file);
     }
     const value = await entry(file);
     originals.set(file, value);
@@ -731,7 +740,7 @@ async function plan(
    */
   const planTextEdit = (
     op: Extract<Operation, { kind: "text" }>,
-    before: Entry | null,
+    before: Entry | undefined,
     label: string,
   ): { entry: Entry; change: PlannedChange } | undefined => {
     if (op.edits.length === 0) {
@@ -743,7 +752,7 @@ async function plan(
     const snapshot = options.documents?.get(op.documentFile ?? op.file);
     const live = options.document?.(op.documentFile ?? op.file);
     if (
-      op.version !== null &&
+      op.version !== undefined &&
       (!(snapshot && live) ||
         op.version !== snapshot.version ||
         op.version !== live.version)
@@ -804,7 +813,7 @@ async function plan(
         (file) => virtual.get(file)?.kind !== "directory",
       );
       for (const file of subtree) {
-        virtual.set(file, null);
+        virtual.set(file, undefined);
       }
       changes.push({ op, files, summary: `Deleted ${label}` });
     } else {
@@ -825,7 +834,7 @@ async function plan(
       );
       await parents(op.newFile);
       for (const candidate of targetTree) {
-        virtual.set(candidate, null);
+        virtual.set(candidate, undefined);
       }
       for (const candidate of sourceTree) {
         const destination = path.join(
@@ -833,8 +842,8 @@ async function plan(
           path.relative(op.file, candidate),
         );
         await load(destination);
-        virtual.set(destination, virtual.get(candidate) ?? null);
-        virtual.set(candidate, null);
+        virtual.set(destination, virtual.get(candidate));
+        virtual.set(candidate, undefined);
       }
       changes.push({
         op,
@@ -966,7 +975,7 @@ async function restoreTextEdits(
  */
 async function inspectFailedMutationEffects(
   change: PlannedChange,
-  originals: ReadonlyMap<string, Entry | null>,
+  originals: ReadonlyMap<string, Entry | undefined>,
 ): Promise<{ changes: ExecutedChange[]; summary: string[] }> {
   const result: { changes: ExecutedChange[]; summary: string[] } = {
     changes: [],
@@ -1031,7 +1040,7 @@ async function commitFileChange(
 ): Promise<void> {
   if (op.kind === "text") {
     const live = options.document?.(op.documentFile ?? op.file);
-    if (op.version !== null && live?.version !== op.version) {
+    if (op.version !== undefined && live?.version !== op.version) {
       throw new Error(`Document version changed before mutation: ${op.file}`);
     }
     await fs.writeFile(op.file, after ?? "", "utf8");
@@ -1056,7 +1065,7 @@ async function commitFileChange(
  * @example An originally absent /a.ts that now exists rejects before any edit is written.
  */
 async function assertOriginalsUnchanged(
-  originals: ReadonlyMap<string, Entry | null>,
+  originals: ReadonlyMap<string, Entry | undefined>,
 ): Promise<void> {
   for (const [file, original] of originals) {
     const current = await entry(file);

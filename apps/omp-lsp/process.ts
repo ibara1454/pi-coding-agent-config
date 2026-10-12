@@ -85,6 +85,7 @@ export function spawnProcess(
 export async function stopProcess(
   child: ChildProcessWithoutNullStreams,
 ): Promise<void> {
+  // biome-ignore lint/plugin/use-undefined: Node uses null exitCode and signalCode while a child is running.
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
@@ -225,6 +226,7 @@ export async function runCommand(
       stop(error);
     }
   };
+  // biome-ignore lint/plugin/use-undefined: Node close events report a null code when terminated by a signal.
   const onClose = (code: number | null) => {
     if (settled) {
       return;

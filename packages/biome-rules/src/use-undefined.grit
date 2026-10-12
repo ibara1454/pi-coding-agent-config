@@ -1,0 +1,8 @@
+language js
+
+or {
+  JsNullLiteralExpression(),
+  TsNullLiteralType()
+} as $null where {
+  register_diagnostic(span=$null, message="Use `undefined` for absence. Keep `null` only when an external contract requires it, with a documented suppression.", severity="error")
+}

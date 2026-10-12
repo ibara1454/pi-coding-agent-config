@@ -85,7 +85,7 @@ function put(path: string, content: string): void {
 }
 
 function settings(path: string, value: Record<string, unknown>): void {
-  put(path, `${JSON.stringify(value, null, 2)}\n`);
+  put(path, `${JSON.stringify(value, undefined, 2)}\n`);
 }
 
 function manifest(value: unknown): string {

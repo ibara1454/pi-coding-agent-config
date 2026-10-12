@@ -7,6 +7,23 @@ The private-method rule rejects class methods written as `private method()` or
 `#method()`, including overload signatures. Private fields remain allowed. Move
 internal helpers to module scope rather than making them public.
 
+## Undefined instead of null
+
+`use-undefined` rejects `null` expressions and types in source and tests. Use
+`undefined` for internal absence. The rule has no autofix: JSON serialization
+and external APIs distinguish these values.
+
+Keep required protocol/host nulls, null-rejection fixtures, and null-prototype
+objects. Place a narrow suppression immediately above the line containing
+`null`, not above the start of a multiline statement:
+
+```ts
+// biome-ignore lint/plugin/use-undefined: LSP requires null for an unversioned document.
+const document = { uri, version: null };
+```
+
+Do not suppress internal absence; update its producers, consumers, and tests.
+
 ## Testing
 
 Each rule has a colocated `*.integration.test.ts` file with inline valid and

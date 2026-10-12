@@ -19,7 +19,7 @@ interface GitEffects {
     args: string[],
     options: { cwd: string; timeout: number; signal: AbortSignal },
   ) => Promise<{ code: number; stdout: string }>;
-  readonly readContext: () => GitContext | null;
+  readonly readContext: () => GitContext | undefined;
   readonly readBranch: () => string | undefined;
   readonly changed: () => void;
 }
@@ -83,9 +83,9 @@ function parseGitChanges(
 export function createGitStatus(effects: GitEffects) {
   let snapshot = emptyGitState();
   let lastFetch = 0;
-  let gitController: AbortController | null = null;
-  let prController: AbortController | null = null;
-  let prBranchKey: string | null = null;
+  let gitController: AbortController | undefined;
+  let prController: AbortController | undefined;
+  let prBranchKey: string | undefined;
 
   /**
    * Checks opaque context identity without treating an absent host as an owner.
@@ -95,7 +95,7 @@ export function createGitStatus(effects: GitEffects) {
    */
   function ownsContext(context: GitContext): boolean {
     const current = effects.readContext();
-    return current !== null && current.owner === context.owner;
+    return current !== undefined && current.owner === context.owner;
   }
 
   /**
@@ -104,7 +104,7 @@ export function createGitStatus(effects: GitEffects) {
    */
   function cancelPr(): void {
     prController?.abort();
-    prController = null;
+    prController = undefined;
   }
 
   /**
@@ -168,7 +168,7 @@ export function createGitStatus(effects: GitEffects) {
       }
     } finally {
       if (prController === controller) {
-        prController = null;
+        prController = undefined;
         effects.changed();
       }
     }
@@ -208,7 +208,7 @@ export function createGitStatus(effects: GitEffects) {
       }
       if (result.code !== 0) {
         snapshot = emptyGitState();
-        prBranchKey = null;
+        prBranchKey = undefined;
       } else {
         const changes = parseGitChanges(result.stdout);
         const branch = effects.readBranch() ?? snapshot.branch;
@@ -220,7 +220,7 @@ export function createGitStatus(effects: GitEffects) {
           pr: branchChanged ? undefined : snapshot.pr,
         };
         if (branchChanged) {
-          prBranchKey = null;
+          prBranchKey = undefined;
         }
         // biome-ignore lint/complexity/noVoid: PR errors are absorbed and must not delay Git.
         void refreshPr(branch);
@@ -232,7 +232,7 @@ export function createGitStatus(effects: GitEffects) {
       }
     } finally {
       if (gitController === controller) {
-        gitController = null;
+        gitController = undefined;
         effects.changed();
       }
     }
@@ -249,7 +249,7 @@ export function createGitStatus(effects: GitEffects) {
       lastFetch = 0;
     }
     if (reason === "branch") {
-      prBranchKey = null;
+      prBranchKey = undefined;
     }
     if (reason !== "working-tree") {
       cancelPr();
@@ -264,7 +264,7 @@ export function createGitStatus(effects: GitEffects) {
   function reset(): void {
     snapshot = emptyGitState();
     lastFetch = 0;
-    prBranchKey = null;
+    prBranchKey = undefined;
   }
 
   /**
@@ -274,7 +274,7 @@ export function createGitStatus(effects: GitEffects) {
    */
   function dispose(): void {
     gitController?.abort();
-    gitController = null;
+    gitController = undefined;
     cancelPr();
   }
 
