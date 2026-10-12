@@ -83,7 +83,6 @@ interface PlannedChange {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: WorkspaceEdit objects may be external JSON null and must be rejected.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Invalid ${label}`);
   }
@@ -93,7 +92,6 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function missing(error: unknown): boolean {
   return (
     typeof error === "object" &&
-    // biome-ignore lint/plugin/use-undefined: Filesystem failures are untrusted thrown values and may be null.
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
@@ -384,7 +382,6 @@ function operations(value: unknown): Operation[] {
       throw new Error("Workspace edit is missing its document URI");
     }
     if (
-      // biome-ignore lint/plugin/use-undefined: LSP permits a null document version for unversioned edits.
       version !== null &&
       version !== undefined &&
       !Number.isSafeInteger(version)
@@ -405,7 +402,6 @@ function operations(value: unknown): Operation[] {
         file,
         edits: parsed,
         version:
-          // biome-ignore lint/plugin/use-undefined: Normalize the LSP null version to internal undefined absence.
           version === null || version === undefined
             ? undefined
             : Number(version),

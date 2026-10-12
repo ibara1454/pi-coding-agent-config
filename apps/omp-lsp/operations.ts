@@ -42,7 +42,6 @@ const MAX_EDITORCONFIG_BYTES = 1_048_576;
 function missing(error: unknown): boolean {
   return (
     typeof error === "object" &&
-    // biome-ignore lint/plugin/use-undefined: Filesystem failures are untrusted thrown values and may be null.
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
@@ -50,7 +49,6 @@ function missing(error: unknown): boolean {
 }
 
 export function object(value: unknown, label: string): Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: External LSP JSON null is not a valid response object.
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Invalid ${label} response`);
   }
@@ -237,7 +235,6 @@ export interface NavigationLocation {
 
 /** Normalizes Location and LocationLink responses to distinct file/range targets. */
 export function locations(value: unknown): NavigationLocation[] {
-  // biome-ignore lint/plugin/use-undefined: LSP navigation responses use null when no target exists.
   if (value === null || value === undefined) {
     return [];
   }
@@ -285,7 +282,6 @@ export function symbols(
   value: unknown,
   documentFile?: string,
 ): DisplaySymbol[] {
-  // biome-ignore lint/plugin/use-undefined: LSP symbol responses use null when no symbols exist.
   if (value === null || value === undefined) {
     return [];
   }
@@ -360,7 +356,6 @@ export function symbols(
 
 /** Converts LSP hover content variants to plain text or fenced source without changing the payload. */
 export function hoverText(value: unknown): string {
-  // biome-ignore lint/plugin/use-undefined: LSP hover responses use null when no hover exists.
   if (value === null || value === undefined) {
     return "";
   }

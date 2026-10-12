@@ -33,7 +33,6 @@ const TRAILING_SLASHES = /\/+$/;
 const LINE_BREAK = /\r?\n/;
 
 function record(value: unknown): value is Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: Go workspace JSON and process failures may contain null instead of an object.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

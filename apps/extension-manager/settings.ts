@@ -31,7 +31,6 @@ type SettingsOwnerSnapshot =
     };
 
 export function isJsonObject(value: unknown): value is JsonObject {
-  // biome-ignore lint/plugin/use-undefined: JSON permits null, which must be rejected before treating settings as an object.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

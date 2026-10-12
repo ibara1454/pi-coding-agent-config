@@ -122,7 +122,6 @@ describe("ExtensionManagerPanel.handleInput", () => {
 
       const displayedRows = panel.render(NARROW_PANEL_WIDTH).flatMap((line) => {
         const match = line.match(DISPLAYED_ROW);
-        // biome-ignore lint/plugin/use-undefined: String.match returns null for rendered lines without a resource row.
         return match === null ? [] : [match[1]];
       });
       expect(displayedRows).toEqual([

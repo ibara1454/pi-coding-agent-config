@@ -156,7 +156,6 @@ function errorText(error: unknown): string {
 function methodNotFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
-    // biome-ignore lint/plugin/use-undefined: JSON-RPC failures are untrusted values and may be null.
     error !== null &&
     "code" in error &&
     error.code === LSP_METHOD_NOT_FOUND_CODE
@@ -166,7 +165,6 @@ function methodNotFound(error: unknown): boolean {
 function missing(error: unknown): boolean {
   return (
     typeof error === "object" &&
-    // biome-ignore lint/plugin/use-undefined: Filesystem failures are untrusted thrown values and may be null.
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
@@ -739,7 +737,6 @@ async function dispatchAction(
         { ...target, newName: params.new_name },
         signal,
       );
-      // biome-ignore lint/plugin/use-undefined: LSP rename uses null to report no edit.
       if (edit === null) {
         return workspaceResult(
           params,
@@ -1251,11 +1248,9 @@ async function codeActions(
     },
     signal,
   );
-  // biome-ignore lint/plugin/use-undefined: LSP code action results explicitly allow null when no actions exist.
   if (response !== null && !Array.isArray(response)) {
     throw new Error("Invalid code action response");
   }
-  // biome-ignore lint/plugin/use-undefined: Normalize the LSP null result to the internal empty action list.
   const actions = response === null ? [] : response.map(parseCodeAction);
   if (actions.length === 0) {
     return workspaceResult(
@@ -1714,7 +1709,6 @@ async function renameFile(
         { files: pairs },
         signal,
       );
-      // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles uses null to report no edits.
       if (response === null) {
         continue;
       }
@@ -2211,7 +2205,6 @@ async function formatDocument(
       },
       signal,
     );
-    // biome-ignore lint/plugin/use-undefined: LSP formatting uses null to report no edits.
     if (response === null) {
       return [];
     }

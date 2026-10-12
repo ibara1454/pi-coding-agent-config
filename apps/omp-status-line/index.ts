@@ -172,7 +172,6 @@ function toNonNullRecord<T extends Record<string, unknown>>(
   // them: retained values are unchanged, and the filter removes nullish values.
   return Object.fromEntries(
     Object.entries(record).filter(
-      // biome-ignore lint/plugin/use-undefined: External settings can contain null; omit those fields.
       ([, value]) => value !== null && value !== undefined,
     ),
   ) as NonNullRecord<T>;
@@ -562,7 +561,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const context = currentCtx.getContextUsage();
     const contextWindow = context?.contextWindow;
     const modelContextWindow =
-      // biome-ignore lint/plugin/use-undefined: Host context estimates can be unavailable.
       contextWindow === null || contextWindow === undefined
         ? currentCtx.model?.contextWindow
         : undefined;
@@ -571,7 +569,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     );
     const reportedTokens = context?.tokens;
     const estimatedMessageTokens =
-      // biome-ignore lint/plugin/use-undefined: Pi reports null until token estimates are available.
       reportedTokens === null || reportedTokens === undefined
         ? estimateContextEntryTokens(
             currentCtx.sessionManager.buildContextEntries().map((entry) =>
@@ -586,7 +583,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
         : 0;
     const estimatedOverheadTokens =
       providerAnchored &&
-      // biome-ignore lint/plugin/use-undefined: Unavailable Pi token estimates require prompt/tool estimation.
       reportedTokens !== null &&
       reportedTokens !== undefined
         ? 0

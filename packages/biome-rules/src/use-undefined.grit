@@ -1,8 +1,42 @@
 language js
 
-or {
-  JsNullLiteralExpression(),
-  TsNullLiteralType()
-} as $null where {
-  register_diagnostic(span=$null, message="Use `undefined` for absence. Keep `null` only when an external contract requires it, with a documented suppression.", severity="error")
+pattern null_operand() {
+  or {
+    JsNullLiteralExpression(),
+    `($inner)` where { $inner <: null_operand() }
+  }
 }
+
+pattern equality_comparison($left, $right) {
+  or {
+    `$left == $right`,
+    `$left != $right`,
+    `$left === $right`,
+    `$left !== $right`
+  }
+}
+
+pattern check_nulls() {
+  // Inspect operands separately: only a compared null is exempt, not nulls
+  // nested inside calls, object values, return values, or type annotations.
+  contains or {
+    equality_comparison($left, $right) where {
+      $left <: maybe or {
+        null_operand(),
+        check_nulls()
+      },
+      $right <: maybe or {
+        null_operand(),
+        check_nulls()
+      }
+    },
+    or {
+      JsNullLiteralExpression(),
+      TsNullLiteralType()
+    } as $null where {
+      register_diagnostic(span=$null, message="Use `undefined` for absence. Keep `null` only when an external contract requires it, with a documented suppression.", severity="error")
+    }
+  } until equality_comparison($_, $_)
+}
+
+file($body) where { $body <: check_nulls() }

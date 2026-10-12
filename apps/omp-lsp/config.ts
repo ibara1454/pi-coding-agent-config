@@ -53,7 +53,6 @@ const SETTING_DEFAULTS: Readonly<LspSettings> = {
 };
 
 function record(value: unknown): value is Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: Configuration objects come from JSON/YAML and null is not a record.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -173,7 +172,6 @@ function validateJsonPayload(
     );
   }
   if (
-    // biome-ignore lint/plugin/use-undefined: Server initialization and settings payloads must accept JSON null values.
     value === null ||
     typeof value === "string" ||
     typeof value === "boolean"

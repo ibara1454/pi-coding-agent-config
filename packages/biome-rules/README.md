@@ -9,9 +9,13 @@ internal helpers to module scope rather than making them public.
 
 ## Undefined instead of null
 
-`use-undefined` rejects `null` expressions and types in source and tests. Use
-`undefined` for internal absence. The rule has no autofix: JSON serialization
-and external APIs distinguish these values.
+`use-undefined` rejects `null` values and types in source and tests. Equality
+checks (`==`, `!=`, `===`, `!==`) allow null operands, including parentheses.
+This does not exempt nested values: `null === send(null)` still reports the
+argument.
+
+Use `undefined` for internal absence. The rule has no autofix: JSON
+serialization and external APIs distinguish these values.
 
 Keep required protocol/host nulls, null-rejection fixtures, and null-prototype
 objects. Place a narrow suppression immediately above the line containing

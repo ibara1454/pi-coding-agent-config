@@ -40,7 +40,6 @@ function gitPackageIdentity(source: string): string | undefined {
   const scp = candidate.match(SCP_GIT_URL);
   let host: string;
   let path: string;
-  // biome-ignore lint/plugin/use-undefined: String.match returns null when the external Git source does not match.
   if (scp !== null) {
     host = scp[1] ?? "";
     path = scp[2] ?? "";

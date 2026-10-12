@@ -12,11 +12,50 @@ describe("use-undefined", () => {
     ["a value initializer", "const value = null;"],
     ["an absence type", "type Value = null;"],
     ["a nullable member", "interface State { value: string | null; }"],
-    ["a comparison", "const missing = value === null;"],
+    ["an assignment", "value = null;"],
+    ["an argument", "send(null);"],
+    ["a return", "function read() { return null; }"],
+    ["a numeric comparison", "value >= null;"],
     ["a default parameter", "function value(input = null) { return input; }"],
     // biome-ignore lint/suspicious/noTemplateCurlyInString: This is source code for the parser, not interpolated test data.
     ["a template expression", "const value = `${null}`;"],
   ])("should report an error when null appears in %s", (_label, source) => {
+    expect(lintRule("use-undefined", source)).toEqual([diagnostic]);
+  });
+
+  test.each(["==", "!=", "===", "!=="])(
+    "should allow null on either side of %s",
+    (operator) => {
+      expect(
+        lintRule(
+          "use-undefined",
+          `value ${operator} null; null ${operator} value;`,
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  test("should allow parenthesized and nested null checks in boolean results", () => {
+    expect(
+      lintRule(
+        "use-undefined",
+        `
+        const missing = value === ((null));
+        function hasValue(value) { return ((null)) !== value; }
+        send(value !== null);
+        (value === null) === (other !== null);
+        `,
+      ),
+    ).toEqual([]);
+  });
+
+  test.each([
+    ["an argument", "null === send(null);"],
+    ["an object value", "null === { value: null };"],
+    ["a fallback", "value === (other ?? null);"],
+    ["a type assertion", "null === (value as null);"],
+    ["a nested return", "null === (() => { return null; });"],
+  ])("should reject null used as %s inside a comparison", (_label, source) => {
     expect(lintRule("use-undefined", source)).toEqual([diagnostic]);
   });
 

@@ -108,7 +108,6 @@ export const STARTUP_TIPS = [
 function readJson(filePath: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
-    // biome-ignore lint/plugin/use-undefined: Parsed JSON may contain a null root rather than a settings object.
     return parsed !== null &&
       typeof parsed === "object" &&
       !Array.isArray(parsed)
@@ -160,7 +159,6 @@ function cleanSettings(settings: Record<string, unknown>): PiSettings {
           return result;
         }
         if (
-          // biome-ignore lint/plugin/use-undefined: External settings may contain null package entries.
           entry === null ||
           typeof entry !== "object" ||
           Array.isArray(entry)
@@ -360,7 +358,6 @@ function manifestExtensionEntries(directory: string): string[] | undefined {
   const manifest = readJson(join(directory, "package.json"));
   const { pi } = manifest;
   if (
-    // biome-ignore lint/plugin/use-undefined: External package.json may set pi to null.
     pi === null ||
     typeof pi !== "object" ||
     Array.isArray(pi) ||
@@ -819,7 +816,6 @@ function packageFiles(
   const manifest = readJson(join(root, "package.json"));
   const { pi } = manifest;
   const hasPiManifest =
-    // biome-ignore lint/plugin/use-undefined: External package.json may set pi to null.
     pi !== null && typeof pi === "object" && !Array.isArray(pi);
   const extensions =
     hasPiManifest && "extensions" in pi && Array.isArray(pi.extensions)

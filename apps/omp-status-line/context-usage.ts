@@ -192,7 +192,6 @@ export function estimateContextEntryTokens(
 export function calculateContextUsage(input: ContextUsageInput): ContextUsage {
   const contextTokens =
     input.providerAnchored &&
-    // biome-ignore lint/plugin/use-undefined: Reject Pi's unavailable-token sentinel before using provider usage.
     input.reportedTokens !== null &&
     input.reportedTokens !== undefined
       ? input.reportedTokens

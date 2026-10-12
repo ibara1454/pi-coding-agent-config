@@ -24,7 +24,6 @@ const MUTATING_FLAG =
 const LINE_BREAK = /\r?\n/;
 
 function record(value: unknown): value is Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: CLI JSON output may contain null instead of the required object.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

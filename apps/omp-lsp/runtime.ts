@@ -157,7 +157,6 @@ const RUST_ANALYZER_COMMAND = /^rust-analyzer(?:\.exe)?$/;
 const FILE_OPERATION_METHOD = /\/(will|did)(Create|Rename|Delete)Files$/;
 
 function record(value: unknown): value is Record<string, unknown> {
-  // biome-ignore lint/plugin/use-undefined: Unknown JSON values may be null and must not pass the object guard.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -702,9 +701,7 @@ class StdioLanguageServer implements LanguageServer {
   get isAlive(): boolean {
     return (
       !this.state.lifetime.signal.aborted &&
-      // biome-ignore lint/plugin/use-undefined: Node exitCode is null until the process exits.
       this.child.exitCode === null &&
-      // biome-ignore lint/plugin/use-undefined: Node signalCode is null until termination by signal.
       this.child.signalCode === null
     );
   }
@@ -1238,9 +1235,7 @@ class StdioLanguageServer implements LanguageServer {
       try {
         if (
           graceful &&
-          // biome-ignore lint/plugin/use-undefined: Node exitCode is null until the process exits.
           this.child.exitCode === null &&
-          // biome-ignore lint/plugin/use-undefined: Node signalCode is null until termination by signal.
           this.child.signalCode === null
         ) {
           let exitListener: (() => void) | undefined;
@@ -1632,7 +1627,6 @@ function publish(
   }
   if (
     version !== undefined &&
-    // biome-ignore lint/plugin/use-undefined: Peer diagnostics can carry a null version and remain unversioned.
     version !== null &&
     (!Number.isInteger(version) || version !== document.version)
   ) {
