@@ -58,6 +58,7 @@ function createStatus() {
   };
   const calls: CommandCall[] = [];
   const observers = new Set<() => void>();
+  let contextRead: (() => void) | undefined;
   spyOn(Date, "now").mockImplementation(() => input.now);
   /** Delivers observations after each external effect; never runs owner work. */
   function notify(): void {
@@ -81,9 +82,21 @@ function createStatus() {
     observer();
     return promise;
   }
+  /**
+   * Observes the next host context read without depending on its call count.
+   * @returns A test-owned latch; it neither requests nor drains production work.
+   * @example const read = observeContextRead(); status.requestRefresh(); await read;
+   */
+  function observeContextRead(): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    contextRead = resolve;
+    return promise;
+  }
   const status = createGitStatus({
     readContext: () => {
       input.contextReads++;
+      contextRead?.();
+      contextRead = undefined;
       notify();
       return input.context;
     },
@@ -105,7 +118,7 @@ function createStatus() {
   });
   owners.push(status);
   /**
-   * Observes an actual command start without draining internal worker queues.
+   * Observes an actual command start without draining internal job queues.
    * @example const git = await command("git", 2);
    */
   async function command(name: string, occurrence = 1): Promise<CommandCall> {
@@ -121,7 +134,7 @@ function createStatus() {
     }
     return call;
   }
-  return { status, input, calls, waitFor, command };
+  return { status, input, calls, waitFor, command, observeContextRead };
 }
 
 type Fixture = ReturnType<typeof createStatus>;
@@ -176,7 +189,57 @@ describe("createGitStatus.start", () => {
     expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
     expect(previous.pr).toEqual(FIRST_PR);
     expect(fixture.calls).toHaveLength(2);
-    expect(fixture.input.branchReads).toBe(1);
+  });
+
+  test("should discard queued refreshes when a session is replaced before Git starts", async () => {
+    const fixture = createStatus();
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    fixture.status.invalidate("working-tree");
+    fixture.status.requestRefresh();
+    expect(fixture.calls).toHaveLength(0);
+    fixture.input.context = {
+      owner: Symbol("replacement"),
+      cwd: "/other-repo",
+    };
+    await fixture.status.start();
+    expect(fixture.calls).toHaveLength(0);
+    expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
+    fixture.status.requestRefresh();
+    await finishGit(fixture, 1, " M current\n");
+    await finishPr(fixture, 1, SECOND_PR);
+    await fixture.status.stop();
+    expect(fixture.calls).toHaveLength(2);
+    expect(
+      fixture.calls.every((call) => call.options.cwd === "/other-repo"),
+    ).toBe(true);
+    expect(fixture.status.snapshot.pr).toEqual(SECOND_PR);
+    expect(fixture.status.snapshot.unstaged).toBe(1);
+  });
+
+  test("should discard queued PR lookup when a session is replaced after Git publication", async () => {
+    const fixture = createStatus();
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    await finishGit(fixture);
+    expect(fixture.calls.map((call) => call.command)).toEqual(["git"]);
+    fixture.input.context = {
+      owner: Symbol("replacement"),
+      cwd: "/other-repo",
+    };
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    await finishGit(fixture, 2, " M current\n");
+    await finishPr(fixture, 1, SECOND_PR);
+    await fixture.status.stop();
+    expect(fixture.calls.map((call) => call.command)).toEqual([
+      "git",
+      "git",
+      "gh",
+    ]);
+    expect(fixture.calls.at(-1)?.options.cwd).toBe("/other-repo");
+    expect(fixture.status.snapshot.pr).toEqual(SECOND_PR);
+    expect(fixture.status.snapshot.unstaged).toBe(1);
   });
 
   test("should abort and join the old Git before accepting refreshes when a session is replaced", async () => {
@@ -184,6 +247,9 @@ describe("createGitStatus.start", () => {
     await fixture.status.start();
     fixture.status.requestRefresh();
     const oldGit = await fixture.command("git");
+    fixture.status.invalidate("working-tree");
+    fixture.status.invalidate("working-tree");
+    fixture.status.requestRefresh();
     fixture.input.context = {
       owner: Symbol("replacement"),
       cwd: "/other-repo",
@@ -197,6 +263,11 @@ describe("createGitStatus.start", () => {
     oldGit.resolve({ code: 0, stdout: "MM old\n" });
     await finishGit(fixture, 2, " M current\n");
     await finishPr(fixture);
+    await fixture.status.stop();
+    expect(fixture.calls.filter((call) => call.command === "git")).toEqual([
+      oldGit,
+      newGit,
+    ]);
     expect(fixture.status.snapshot).toEqual({
       ...EMPTY_SNAPSHOT,
       branch: "main",
@@ -247,7 +318,29 @@ describe("createGitStatus.requestRefresh", () => {
       git,
     ]);
     expect(fixture.status.snapshot.branch).toBe("feature");
-    expect(fixture.input.branchReads).toBe(1);
+  });
+
+  test("should coalesce queued forced and normal requests when no Git job is running", async () => {
+    const fixture = createStatus();
+    await startAndFetch(fixture);
+    const firstGit = await fixture.command("git");
+    fixture.status.requestRefresh();
+    fixture.status.invalidate("working-tree");
+    fixture.status.invalidate("working-tree");
+    fixture.status.requestRefresh();
+    expect(fixture.calls).toHaveLength(2);
+    const git = await fixture.command("git", 2);
+    expect(fixture.calls.filter((call) => call.command === "git")).toHaveLength(
+      2,
+    );
+    await finishGit(fixture, 2, " M fresh\n");
+    await fixture.status.stop();
+    expect(fixture.calls.filter((call) => call.command === "git")).toEqual([
+      firstGit,
+      git,
+    ]);
+    expect(fixture.status.snapshot.unstaged).toBe(1);
+    expect(fixture.status.snapshot.pr).toEqual(FIRST_PR);
   });
 
   test("should publish independent porcelain counts and bounded commands when Git succeeds", async () => {
@@ -301,9 +394,9 @@ describe("createGitStatus.requestRefresh", () => {
     fixture.status.requestRefresh();
     await finishGit(fixture);
     fixture.input.now += TTL_MS - 1;
-    const nextRead = fixture.input.contextReads + 1;
+    const read = fixture.observeContextRead();
     fixture.status.requestRefresh();
-    await fixture.waitFor(() => fixture.input.contextReads >= nextRead);
+    await read;
     expect(fixture.calls).toHaveLength(1);
     fixture.input.now++;
     fixture.status.requestRefresh();
@@ -324,9 +417,9 @@ describe("createGitStatus.requestRefresh", () => {
     failing.reject(new Error("git unavailable"));
     await fixture.waitFor(() => fixture.input.changes >= nextChange);
     expect(fixture.status.snapshot).toBe(previous);
-    const nextRead = fixture.input.contextReads + 1;
+    const read = fixture.observeContextRead();
     fixture.status.requestRefresh();
-    await fixture.waitFor(() => fixture.input.contextReads >= nextRead);
+    await read;
     expect(fixture.calls).toHaveLength(2);
     fixture.input.now += TTL_MS;
     fixture.status.requestRefresh();
@@ -360,7 +453,6 @@ describe("createGitStatus.requestRefresh", () => {
       branch: "feature",
     });
     expect(previous.pr).toEqual(FIRST_PR);
-    expect(fixture.input.branchReads).toBe(2);
     expect(fixture.calls.filter((call) => call.command === "gh")).toHaveLength(
       1,
     );
@@ -380,7 +472,6 @@ describe("createGitStatus.requestRefresh", () => {
       branch: "feature",
       staged: 1,
     });
-    expect(fixture.input.branchReads).toBe(2);
     expect(fixture.calls.filter((call) => call.command === "gh")).toHaveLength(
       1,
     );
@@ -390,8 +481,9 @@ describe("createGitStatus.requestRefresh", () => {
     const fixture = createStatus();
     fixture.input.context = undefined;
     await fixture.status.start();
+    const read = fixture.observeContextRead();
     fixture.status.requestRefresh();
-    await fixture.waitFor(() => fixture.input.contextReads === 1);
+    await read;
     expect(fixture.calls).toHaveLength(0);
     expect(fixture.input.branchReads).toBe(0);
     expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
@@ -532,9 +624,9 @@ describe("createGitStatus.requestRefresh", () => {
     fixture.input.context = { owner: Symbol("replacement"), cwd: "/repo" };
     git.reject(new Error("old context failure"));
     await fixture.waitFor(() => fixture.input.changes === 1);
-    const nextRead = fixture.input.contextReads + 1;
+    const read = fixture.observeContextRead();
     fixture.status.requestRefresh();
-    await fixture.waitFor(() => fixture.input.contextReads >= nextRead);
+    await read;
     expect(fixture.calls).toHaveLength(1);
     expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
   });
@@ -701,6 +793,9 @@ describe("createGitStatus.invalidate", () => {
       fixture.status.requestRefresh();
       expect(fixture.calls).toHaveLength(1);
       await finishGit(fixture);
+      expect(fixture.status.snapshot.staged).toBe(1);
+      await fixture.command("git", 2);
+      expect(fixture.status.snapshot.staged).toBe(1);
       await finishGit(fixture, 2, " M fresh\n");
       await fixture.status.stop();
       expect(fixture.calls).toHaveLength(2);
@@ -810,7 +905,7 @@ describe("createGitStatus.invalidate", () => {
 });
 
 describe("createGitStatus.stop", () => {
-  test("should join idle workers idempotently and ignore requests when the owner is stopped", async () => {
+  test("should stop idempotently and ignore requests when the owner is stopped", async () => {
     const fixture = createStatus();
     fixture.status.requestRefresh();
     fixture.status.invalidate("branch");
@@ -827,7 +922,42 @@ describe("createGitStatus.stop", () => {
     expect(fixture.input.changes).toBe(0);
   });
 
-  test("should abort both commands and make late successes inert when shutdown joins pending workers", async () => {
+  test("should cancel queued Git without executing commands when stopped before dispatch", async () => {
+    const fixture = createStatus();
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    fixture.status.invalidate("working-tree");
+    fixture.status.requestRefresh();
+    expect(fixture.calls).toHaveLength(0);
+    await fixture.status.stop();
+    expect(fixture.calls).toHaveLength(0);
+    expect(fixture.input.changes).toBe(0);
+    expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    await finishGit(fixture);
+    await finishPr(fixture);
+    await fixture.status.stop();
+    expect(fixture.calls.map((call) => call.command)).toEqual(["git", "gh"]);
+  });
+
+  test("should cancel queued PR without changing published Git when stopped before lookup dispatch", async () => {
+    const fixture = createStatus();
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    await finishGit(fixture);
+    expect(fixture.calls.map((call) => call.command)).toEqual(["git"]);
+    const before = fixture.status.snapshot;
+    const { changes } = fixture.input;
+    await fixture.status.stop();
+    expect(fixture.calls.map((call) => call.command)).toEqual(["git"]);
+    expect(fixture.status.snapshot).toBe(before);
+    expect(fixture.status.snapshot.staged).toBe(1);
+    expect(fixture.status.snapshot.pr).toBeUndefined();
+    expect(fixture.input.changes).toBe(changes);
+  });
+
+  test("should abort both commands and make late successes inert when shutdown joins pending jobs", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();

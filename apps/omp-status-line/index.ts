@@ -841,7 +841,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   /**
-   * Releases the previous session before acquiring TUI chrome and owned refresh workers/timer.
+   * Releases the previous session before acquiring TUI chrome and owned refresh scheduling.
    * Setup failures release newly acquired resources before rejecting with the original error.
    * @returns Setup completion without waiting for optional Git/PR commands.
    * @example A non-TUI session_start resets counters without installing UI or a ticker.
@@ -972,7 +972,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     return Promise.resolve();
   });
   /**
-   * Stops refresh workers and releases the current session's timers, subscriptions, and UI.
+   * Stops queued/running refresh jobs and releases the session's timers, subscriptions, and UI.
    * @returns Completion after owned commands are aborted/joined without waiting for late exec results.
    * @example await session_shutdown(); // A later ticker signal cannot execute optional commands.
    */
