@@ -18,7 +18,7 @@ The original code was adapted to the extension APIs exposed by `@earendil-works/
 - Rounded welcome box matching oh-my-pi:
 
   ```text
-  ╭─── pi v0.84.1 ───────────────────────────────────────────────────────────────╮
+  ╭─── pi v0.99.2 ───────────────────────────────────────────────────────────────╮
   │                         │                                                    │
   │     Welcome back!       │ Tips                                               │
   │                         │ / for commands                                     │
@@ -93,7 +93,7 @@ Pi does not expose control of its loaded-resource container through the public e
 
 The private override is enabled only when both conditions hold:
 
-1. The installed `@earendil-works/pi-coding-agent` version must satisfy `>=0.84.0 <0.86.0`.
+1. The installed `@earendil-works/pi-coding-agent` version must be exactly `0.99.2`, whose private renderer was reviewed. New versions require a fresh review before enabling this override.
 2. `showLoadedResources()` still contains the reviewed control-flow seams.
 
 If either guard fails, the extension fails open: Pi's native inventory remains visible, the welcome still renders, and one TUI warning explains that inventory suppression is unavailable. It never attempts an unverified patch.

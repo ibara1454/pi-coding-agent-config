@@ -261,7 +261,14 @@ function effectivePreset(settings: StatusLineSettings): PresetDef {
   };
 }
 
-function messageUsage(message: unknown): Record<string, unknown> | undefined {
+/**
+ * Reads assistant usage records without accepting other message roles.
+ * Numeric fields remain untrusted until their consumer validates them.
+ * @example messageUsage({ role: "user", content: "hello" }) // undefined
+ */
+function messageUsage(
+  message: unknown,
+): (Record<string, unknown> & { output?: unknown }) | undefined {
   if (!isObjectRecord(message)) {
     return undefined;
   }
@@ -547,7 +554,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
 
   /**
    * Snapshots host usage and wall-clock active milliseconds without starting timers.
-   * Only absent reported tokens acquire entries; anchored totals skip prompt/tool acquisition.
+   * Only absent reported tokens acquire projected messages; anchored totals skip prompt/tool acquisition.
    * @param theme Styling callbacks retained for segment rendering; host errors propagate.
    * @param options Per-segment display options, retained without mutation.
    * @returns Context with 0–100 percentage units, or undefined before a session is available.
@@ -573,14 +580,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const estimatedMessageTokens =
       reportedTokens === null || reportedTokens === undefined
         ? estimateContextEntryTokens(
-            currentCtx.sessionManager.buildContextEntries().map((entry) =>
-              entry.type === "message"
-                ? {
-                    type: "message" as const,
-                    tokens: estimateTokens(entry.message),
-                  }
-                : entry,
-            ),
+            currentCtx.sessionManager
+              .buildSessionProjection()
+              .messages.map((message) => ({
+                type: "message" as const,
+                tokens: estimateTokens(message),
+              })),
           )
         : 0;
     const estimatedOverheadTokens =
@@ -912,7 +917,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     currentCtx = ctx;
     runMetrics = updateRunMetrics(
       runMetrics,
-      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      { kind: "output", output: messageUsage(event.message)?.output },
       Date.now(),
     );
     requestRender();
@@ -926,7 +931,7 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     currentCtx = ctx;
     runMetrics = updateRunMetrics(
       runMetrics,
-      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      { kind: "output", output: messageUsage(event.message)?.output },
       Date.now(),
     );
     requestRender();

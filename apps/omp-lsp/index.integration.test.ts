@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
@@ -107,7 +108,7 @@ function fixture() {
         params,
         signal,
         undefined,
-        context as ExtensionContext,
+        context as ExtensionToolContext,
       );
     },
     /**

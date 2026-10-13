@@ -6,13 +6,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 
+const estimateTokens = mock((_message: unknown) => 0);
+
 mock.module("@earendil-works/pi-coding-agent", () => ({
   // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
-  estimateTokens: () => 0,
+  estimateTokens,
 }));
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+const DEFAULT_CONTEXT_TOKENS = 18_768;
 const STATUS_LINE_LEADING_BORDER = "╭──";
 const WIDE_STATUS_RENDER_WIDTH = 160;
 const NARROW_STATUS_WIDTH_PADDING = 4;
@@ -81,9 +84,17 @@ async function createSettingsFixture(
   };
 }
 
+/**
+ * Create an in-memory host fixture with independently supplied raw and projected messages.
+ * An explicitly undefined reportedTokens value selects fallback estimation.
+ * @example createHarness({ cwd: "/work", trusted: true, reportedTokens: undefined })
+ */
 function createHarness(options: {
   cwd: string;
   trusted: boolean;
+  reportedTokens?: number | undefined;
+  rawMessages?: unknown[];
+  projectedMessages?: unknown[];
   exec?: (
     command: string,
     args: string[],
@@ -127,7 +138,13 @@ function createHarness(options: {
       reasoning: false,
     },
     thinkingLevel: "off",
-    getContextUsage: () => ({ tokens: 18_768, contextWindow: 272_000 }),
+    getContextUsage: () => ({
+      tokens:
+        "reportedTokens" in options
+          ? options.reportedTokens
+          : DEFAULT_CONTEXT_TOKENS,
+      contextWindow: 272_000,
+    }),
     getSystemPrompt: () => "",
     modelRegistry: {
       // biome-ignore lint/style/useNamingConvention: host API method name
@@ -144,7 +161,14 @@ function createHarness(options: {
           },
         },
       ],
-      buildContextEntries: () => [],
+      buildContextEntries: () =>
+        (options.rawMessages ?? []).map((message) => ({
+          type: "message",
+          message,
+        })),
+      buildSessionProjection: () => ({
+        messages: options.projectedMessages ?? [],
+      }),
       getSessionName: () => undefined,
       getSessionId: () => undefined,
     },
@@ -183,6 +207,58 @@ async function loadExtension() {
   // Load after the Pi-host runtime module is mocked.
   return (await import("./index.ts")).default;
 }
+
+test("should estimate only projected content when context edits omit and replace messages", async () => {
+  const fixture = await createSettingsFixture({
+    preset: "custom",
+    leftSegments: ["context_pct"],
+    rightSegments: [],
+    sessionAccent: false,
+  });
+  const omitted = {
+    role: "user",
+    content: "omitted from model context",
+    timestamp: 0,
+  };
+  const original = {
+    role: "user",
+    content: "original content",
+    timestamp: 1,
+  };
+  const replacement = {
+    ...original,
+    content: "replacement content",
+  };
+  const harness = createHarness({
+    cwd: fixture.projectDir,
+    trusted: true,
+    reportedTokens: undefined,
+    rawMessages: [omitted, original],
+    projectedMessages: [replacement],
+  });
+  const projectedTokens = 2720;
+  estimateTokens.mockReturnValue(projectedTokens);
+  try {
+    const ompStatusLine = await loadExtension();
+    ompStatusLine(harness.pi as never);
+    await harness.handlers.get("session_start")?.({}, harness.context);
+    const editorFactory = harness.getEditorFactory();
+    if (typeof editorFactory !== "function") {
+      throw new Error("Expected editor component to be installed");
+    }
+    const editor = editorFactory({}, harness.theme, {});
+    expect(
+      statusText(editor.render(WIDE_STATUS_RENDER_WIDTH)[0] ?? ""),
+    ).toContain("1.0%/272K");
+    expect(estimateTokens).toHaveBeenCalledWith(replacement);
+    expect(estimateTokens).not.toHaveBeenCalledWith(omitted);
+    expect(estimateTokens).not.toHaveBeenCalledWith(original);
+  } finally {
+    await harness.handlers.get("session_shutdown")?.();
+    estimateTokens.mockReturnValue(0);
+    await fixture.cleanup();
+  }
+});
 
 test("should shrink the path before dropping context usage", async () => {
   const fixture = await createSettingsFixture({
