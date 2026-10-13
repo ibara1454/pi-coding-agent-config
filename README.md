@@ -139,7 +139,7 @@ Run strict type checking for every workspace:
 bun run typecheck
 ```
 
-Run all workspace tests through Turborepo:
+Run all workspace tests with coverage through Turborepo:
 
 ```bash
 bun run test
@@ -168,16 +168,15 @@ bun test apps/extension-manager/panel.test.ts
 ### Coverage
 
 ```bash
-bun run test:coverage
+bun run test
 ```
 
-Minimum coverage: **60% lines and functions per instrumented file**, configured in
-`bunfig.toml`. `apps/sandbox/**` is excluded.
+`apps/sandbox/**` is excluded.
 
 Each workspace writes `coverage/lcov.info`.
 
-CI uploads LCOV to Codecov, which updates one PR comment with coverage and
-base-to-head changes for each package.
+CI uploads LCOV to Codecov for per-package PR reports. The required
+`codecov/patch` check enforces **95% coverage of changed, instrumented lines**.
 
 ### Stress mode
 
@@ -188,7 +187,7 @@ each, to surface order dependence and leaked shared state:
 bun run test:stress
 ```
 
-`test:coverage` and `test:stress` are uncached Turborepo tasks, so each invocation
+`test` and `test:stress` are uncached Turborepo tasks, so each invocation
 re-runs the suites.
 
 ### Snapshots
@@ -200,5 +199,5 @@ resulting diff before committing:
 bun test --update-snapshots
 ```
 
-CI runs `bun run check` and `bun run test:coverage`. It never updates snapshots or
+CI runs `bun run check` and `bun run test`. It never updates snapshots or
 runs stress mode.

@@ -26,12 +26,17 @@ import {
   formattingOptions,
   hoverText,
   locations,
+  type NavigationLocation,
   normalizeDiagnostics,
   object,
   resolvePosition,
   symbols,
 } from "./operations.ts";
-import { type LanguageServer, LanguageServerPool } from "./runtime.ts";
+import {
+  type LanguageServer,
+  type LanguageServerPool,
+  StdioLanguageServerPool,
+} from "./runtime.ts";
 import type {
   LspConfig,
   LspParams,
@@ -189,6 +194,7 @@ async function concurrent<T, U>(
 
 interface WorkspaceState {
   readonly options: WorkspaceOptions;
+  readonly poolFactory: typeof createPool;
   config: LspConfig;
   pool: LanguageServerPool;
   readonly lifetime: AbortController;
@@ -203,9 +209,9 @@ interface WorkspaceState {
 }
 
 /**
- * Creates a session-owned pool with the configured idle policy and edit handler.
+ * Creates a session-owned pool; clients start on demand and an idle timer may start immediately.
  * @param cwd - Absolute workspace root.
- * @param idleTimeoutMs - Optional idle timeout passed through to the pool.
+ * @param idleTimeoutMs - Optional idle timeout in milliseconds passed through to the pool.
  * @param onApplyEdit - Trust-gated handler for server-requested workspace edits.
  * @returns A pool that the workspace must dispose or replace on reload.
  * @example
@@ -223,7 +229,7 @@ function createPool(
     server: LanguageServer,
   ) => Promise<{ applied: boolean; failureReason?: string }>,
 ): LanguageServerPool {
-  return new LanguageServerPool({
+  return new StdioLanguageServerPool({
     cwd,
     ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
     onApplyEdit,
@@ -416,17 +422,15 @@ async function languageServerFor(
 }
 
 /**
- * Reads a bounded regular file, synchronizes it, and remembers the opened path.
- * @param knownFiles - Workspace-owned set updated only after synchronization succeeds.
+ * Reads a bounded regular file and synchronizes it without changing workspace tracking.
  * @param server - Server that owns the synchronized document.
  * @param file - Absolute file path to read.
  * @param signal - Cancellation for file synchronization.
- * @returns The UTF-8 file content sent to the server.
+ * @returns UTF-8 content after successful synchronization; the caller records the opened path.
  * @throws If canceled, filesystem access fails, the target is not a file, it exceeds 16 MiB, or synchronization fails.
- * @example Opening "/project/a.ts" containing "let x = 1;" returns that text and records its path.
+ * @example Opening "/project/a.ts" containing "let x = 1;" returns that text without retaining the path.
  */
 async function openDocument(
-  knownFiles: Set<string>,
   server: LanguageServer,
   file: string,
   signal: AbortSignal,
@@ -441,7 +445,6 @@ async function openDocument(
   }
   const content = await fs.readFile(file, "utf8");
   await server.syncFile(file, content, signal);
-  knownFiles.add(file);
   return content;
 }
 
@@ -549,7 +552,7 @@ async function serverCapabilities(
       const server = await state.pool.get(config, signal);
       return {
         success: true,
-        text: `${config.name}:\n${JSON.stringify(server.capabilities, null, 2)}`,
+        text: `${config.name}:\n${JSON.stringify(server.capabilities, undefined, 2)}`,
       };
     } catch (error) {
       return {
@@ -626,7 +629,8 @@ async function dispatchAction(
     | "code_actions" = params.action;
   const file = path.resolve(state.options.cwd, params.file);
   const server = await languageServerFor(state, file, signal);
-  const content = await openDocument(state.knownFiles, server, file, signal);
+  const content = await openDocument(server, file, signal);
+  state.knownFiles.add(file);
   const uri = fileToUri(file);
   if (
     !server.config.isLinter &&
@@ -662,21 +666,12 @@ async function dispatchAction(
           ? { context: { includeDeclaration: true } }
           : {}),
       };
-      let found = locations(await server.request(method, request, signal));
-      if (action === "references" && !server.config.isLinter) {
-        for (
-          let attempt = 0;
-          attempt < 2 &&
-          (found.length === 0 ||
-            (found.length === 1 &&
-              found[0]?.file === file &&
-              found[0].range.start.line === position.line));
-          attempt++
-        ) {
-          await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
-          found = locations(await server.request(method, request, signal));
-        }
-      }
+      const found = await navigationLocations(
+        server,
+        method,
+        { file, request },
+        signal,
+      );
       const label = action === "type_definition" ? "type definition" : action;
       if (found.length === 0) {
         return workspaceResult(
@@ -690,29 +685,11 @@ async function dispatchAction(
         action === "references"
           ? MAX_REFERENCE_RESULTS
           : MAX_NAVIGATION_RESULTS;
-      const contexts = new Map<string, string[]>();
-      const lines: string[] = [];
-      for (const location of found.slice(0, limit)) {
-        signal.throwIfAborted();
-        let context = contexts.get(location.file);
-        if (!context) {
-          try {
-            if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
-              throw new Error("file exceeds context limit");
-            }
-            context = (await fs.readFile(location.file, "utf8")).split(
-              LINE_BREAK,
-            );
-          } catch (error) {
-            context = [`Context unavailable: ${errorText(error)}`];
-          }
-          contexts.set(location.file, context);
-        }
-        const text = context[location.range.start.line]?.trim();
-        lines.push(
-          `${path.relative(state.options.cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
-        );
-      }
+      const lines = await navigationContextLines(
+        state.options.cwd,
+        found.slice(0, limit),
+        signal,
+      );
       return workspaceResult(
         params,
         `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
@@ -754,6 +731,7 @@ async function dispatchAction(
         throw new Error("new_name parameter required for rename");
       }
       const snapshots = documentSnapshots(state.knownFiles, server);
+      // biome-ignore lint/plugin/use-undefined: LSP rename results explicitly allow null when no edit exists.
       const edit = await server.request<WorkspaceEdit | null>(
         "textDocument/rename",
         { ...target, newName: params.new_name },
@@ -784,6 +762,75 @@ async function dispatchAction(
     default:
       throw new Error(`Unsupported LSP action: ${String(action)}`);
   }
+}
+
+/**
+ * Requests navigation locations, retrying semantic references that only find the declaration.
+ * Request and cancellation failures propagate; the caller owns result limits and context reads.
+ * @example References containing only the requested declaration are retried at most twice.
+ */
+async function navigationLocations(
+  server: LanguageServer,
+  method: string,
+  target: {
+    file: string;
+    request: { textDocument: { uri: string }; position: Position };
+  },
+  signal: AbortSignal,
+): Promise<NavigationLocation[]> {
+  const { file, request } = target;
+  const { position } = request;
+  let found = locations(await server.request(method, request, signal));
+  if (method !== "textDocument/references" || server.config.isLinter) {
+    return found;
+  }
+  for (
+    let attempt = 0;
+    attempt < 2 &&
+    (found.length === 0 ||
+      (found.length === 1 &&
+        found[0]?.file === file &&
+        found[0].range.start.line === position.line));
+    attempt++
+  ) {
+    await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
+    found = locations(await server.request(method, request, signal));
+  }
+  return found;
+}
+
+/**
+ * Reads bounded source context for selected navigation locations in result order.
+ * Unreadable files retain an unavailable-context note; cancellation still throws.
+ * @example A location at line 0 in a.ts yields "a.ts:1:1  source text".
+ */
+async function navigationContextLines(
+  cwd: string,
+  found: readonly NavigationLocation[],
+  signal: AbortSignal,
+): Promise<string[]> {
+  const contexts = new Map<string, string[]>();
+  const lines: string[] = [];
+  for (const location of found) {
+    signal.throwIfAborted();
+    let context = contexts.get(location.file);
+    if (!context) {
+      try {
+        if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
+          throw new Error("file exceeds context limit");
+        }
+        context = (await fs.readFile(location.file, "utf8")).split(LINE_BREAK);
+      } catch (error) {
+        context = [`Context unavailable: ${errorText(error)}`];
+      }
+      contexts.set(location.file, context);
+    }
+    const text = context[location.range.start.line]?.trim();
+    lines.push(
+      `${path.relative(cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
+    );
+  }
+  return lines;
 }
 
 /**
@@ -822,9 +869,11 @@ async function rawRequest(
     }
   }
   const server = await languageServerFor(state, file, signal);
-  const content = file
-    ? await openDocument(state.knownFiles, server, file, signal)
-    : undefined;
+  let content: string | undefined;
+  if (file) {
+    content = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+  }
   if (params.payload === undefined) {
     payload = file
       ? {
@@ -845,13 +894,15 @@ async function rawRequest(
     const result = await server.request(method, payload, signal);
     return workspaceResult(
       params,
-      `${server.config.name} ← ${method}:\n${typeof result === "string" ? result : JSON.stringify(result ?? null, null, 2)}`,
+      // biome-ignore lint/plugin/use-undefined: Render empty JSON-RPC results as their wire-level JSON null.
+      `${server.config.name} ← ${method}:\n${typeof result === "string" ? result : JSON.stringify(result ?? null, undefined, 2)}`,
       true,
       server.config.name,
     );
   } catch (error) {
     return workspaceResult(
       params,
+      // biome-ignore lint/plugin/use-undefined: Render absent JSON-RPC params as JSON null in request diagnostics.
       `LSP error from ${server.config.name} on ${method}: ${errorText(error)}\n  params: ${JSON.stringify(payload ?? null).slice(0, MAX_RAW_REQUEST_PAYLOAD_LENGTH)}`,
       false,
       server.config.name,
@@ -906,7 +957,8 @@ async function collectDiagnostics(
         );
       } else {
         const server = await state.pool.get(config, signal);
-        await openDocument(state.knownFiles, server, file, signal);
+        await openDocument(server, file, signal);
+        state.knownFiles.add(file);
         const report = await server.diagnostics(
           file,
           signal,
@@ -1521,19 +1573,15 @@ async function reconcileChanges(
 }
 
 /**
- * Coordinates server rename edits before committing a file or directory move.
- * @param state - Session root, available servers, observed documents, and edit lifetime.
- * @param params - Source file, new_name destination, and optional apply: false preview.
- * @param signal - Cancellation for discovery, server requests, and application.
- * @returns Rename summary, preserving server notes, validation failures, and partial-application errors.
- * @throws If paths are invalid, the destination exists, documents disagree, directory contents change, or required work fails or is canceled.
- * @example With file "a.ts", new_name "b.ts", and apply: false, the move is previewed without changing either path.
+ * Validates rename paths and discovers the files and servers participating in the move.
+ * Filesystem and cancellation failures propagate before requesting any server edits.
+ * @example Moving "src" to "lib" pairs each source file with its matching destination.
  */
-async function renameFile(
+async function prepareFileRename(
   state: WorkspaceState,
   params: LspParams,
   signal: AbortSignal,
-): Promise<LspResult> {
+) {
   if (!(params.file && params.new_name?.trim())) {
     throw new Error(
       "rename_file requires file (source) and new_name (destination)",
@@ -1571,6 +1619,44 @@ async function renameFile(
       }
     }
   }
+  return { source, destination, sourceStat, files, pairs, configs };
+}
+
+/**
+ * Rejects conflicting server content before the caller records a snapshot.
+ * @param file - Absolute document path used in the failure diagnostic.
+ * @param snapshot - Incoming server snapshot, left unchanged.
+ * @param previous - Earlier server snapshot, if any; versions are server-specific.
+ * @throws If two servers report different content for the same path.
+ * @example Snapshots with equal text and different versions agree; different text throws.
+ */
+function assertSnapshotContentMatches(
+  file: string,
+  snapshot: Readonly<DocumentSnapshot>,
+  previous: Readonly<DocumentSnapshot> | undefined,
+): void {
+  if (previous && previous.content !== snapshot.content) {
+    throw new Error(`Servers disagree about current content of ${file}`);
+  }
+}
+
+/**
+ * Coordinates server rename edits before committing a file or directory move.
+ * Records each successful open immediately, retaining tracking when a later open fails.
+ * @param state - Session root, available servers, observed documents, and edit lifetime.
+ * @param params - Source file, new_name destination, and optional apply: false preview.
+ * @param signal - Cancellation for discovery, server requests, and application.
+ * @returns Rename summary, preserving server notes, validation failures, and partial-application errors.
+ * @throws If paths are invalid, the destination exists, documents disagree, directory contents change, or required work fails or is canceled.
+ * @example With file "a.ts", new_name "b.ts", and apply: false, the move is previewed without changing either path.
+ */
+async function renameFile(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const { source, destination, sourceStat, files, pairs, configs } =
+    await prepareFileRename(state, params, signal);
   const buckets = new Map<string, Array<{ edit: TextEdit; server: string }>>();
   const documentChanges: NonNullable<WorkspaceEdit["documentChanges"]> = [];
   const annotations: NonNullable<WorkspaceEdit["changeAnnotations"]> = {};
@@ -1580,6 +1666,7 @@ async function renameFile(
   const flush = (): void => {
     for (const [uri, values] of buckets) {
       documentChanges.push({
+        // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
         textDocument: { uri, version: null },
         edits: values.map((value) => value.edit),
       });
@@ -1604,20 +1691,19 @@ async function renameFile(
       for (const file of files) {
         if (
           selectedServers(state.config, file).some(
-            (candidate) => candidate.name === config.name,
+            (candidate) => candidate.name === server.config.name,
           )
         ) {
-          await openDocument(state.knownFiles, server, file, signal);
+          await openDocument(server, file, signal);
+          state.knownFiles.add(file);
         }
       }
       const serverSnapshots = documentSnapshots(state.knownFiles, server);
       for (const [file, document] of serverSnapshots) {
-        const prior = snapshots.get(file);
-        if (prior && prior.content !== document.content) {
-          throw new Error(`Servers disagree about current content of ${file}`);
-        }
+        assertSnapshotContentMatches(file, document, snapshots.get(file));
         snapshots.set(file, document);
       }
+      // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
       const response = await server.request<WorkspaceEdit | null>(
         "workspace/willRenameFiles",
         { files: pairs },
@@ -1685,27 +1771,27 @@ async function renameFile(
         }
         buckets.set(uri, previous);
       };
-      if (response.documentChanges !== undefined) {
-        for (const change of response.documentChanges) {
-          if ("textDocument" in change) {
-            add(change.textDocument.uri, change.edits as TextEdit[]);
-          } else {
-            flush();
-            documentChanges.push(annotate(change));
-          }
-        }
-      } else {
+      if (response.documentChanges === undefined) {
         for (const [uri, edits] of Object.entries(response.changes ?? {})) {
           add(uri, edits);
+        }
+        continue;
+      }
+      for (const change of response.documentChanges) {
+        if ("textDocument" in change) {
+          add(change.textDocument.uri, change.edits as TextEdit[]);
+        } else {
+          flush();
+          documentChanges.push(annotate(change));
         }
       }
     } catch (error) {
       signal.throwIfAborted();
       if (methodNotFound(error)) {
         notes.push(`${config.name}: willRenameFiles is not supported`);
-      } else {
-        failures.push(`${config.name}: ${errorText(error)}`);
+        continue;
       }
+      failures.push(`${config.name}: ${errorText(error)}`);
     }
   }
   signal.throwIfAborted();
@@ -1716,13 +1802,14 @@ async function renameFile(
       false,
     );
   }
-  if (sourceStat.isDirectory()) {
-    const current = await directoryFiles(source, signal);
-    if (JSON.stringify(current) !== JSON.stringify(files)) {
-      throw new Error(
-        "Directory contents changed while computing rename references; no files moved",
-      );
-    }
+  if (
+    sourceStat.isDirectory() &&
+    JSON.stringify(await directoryFiles(source, signal)) !==
+      JSON.stringify(files)
+  ) {
+    throw new Error(
+      "Directory contents changed while computing rename references; no files moved",
+    );
   }
   flush();
   documentChanges.push({
@@ -1757,8 +1844,8 @@ async function renameFile(
  * @param params - Reload request; a concrete file selects its first matching server.
  * @param signal - Cancellation for loading and server reload operations.
  * @returns Reload results and configuration warnings, including unavailable-server failures.
- * @throws If loading configuration, stopping pools, or cancellation prevents completion.
- * @example Changing idleTimeoutMs from 60000 to 120000 disposes the old pool and installs one with the new idle policy.
+ * @throws If configuration loading, pool disposal or creation, or cancellation prevents completion.
+ * @example Changing idleTimeoutMs from 60000 to 120000 disposes the old pool and uses the session factory to acquire its replacement.
  */
 async function reloadWorkspace(
   state: WorkspaceState,
@@ -1779,7 +1866,7 @@ async function reloadWorkspace(
   state.config = next;
   if (previous.idleTimeoutMs !== next.idleTimeoutMs) {
     await state.pool.dispose();
-    state.pool = createPool(
+    state.pool = state.poolFactory(
       state.options.cwd,
       next.idleTimeoutMs,
       (edit, server) => applyServerEdit(state, edit, server),
@@ -1833,6 +1920,7 @@ async function reloadWorkspace(
         path.basename(config.command) === "rust-analyzer"
       ) {
         try {
+          // biome-ignore lint/plugin/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
           await server.request("rust-analyzer/reloadWorkspace", null, signal);
         } catch (error) {
           if (!methodNotFound(error)) {
@@ -1937,24 +2025,7 @@ async function mutationFeedback(
       }
       state.knownFiles.add(file);
       const relevant = serversForFile(state.config, file).length > 0;
-      for (const server of state.pool.clients()) {
-        if (
-          server.isAlive &&
-          (server.document(file) ||
-            selectedServers(state.config, file).some(
-              (config) => config.name === server.config.name,
-            ))
-        ) {
-          try {
-            await server.syncFile(file, undefined, signal);
-            await server.saved(file);
-          } catch (error) {
-            notes.push(
-              `${server.config.name}: synchronization failed: ${errorText(error)}`,
-            );
-          }
-        }
-      }
+      notes.push(...(await synchronizeMutationDocuments(state, file, signal)));
       if (
         relevant &&
         source === "write" &&
@@ -1977,45 +2048,16 @@ async function mutationFeedback(
           return "";
         }
         signal.throwIfAborted();
-        const unverified = report.unverifiedSources.length > 0;
-        const fingerprint = JSON.stringify([
-          report.unverifiedSources,
-          report.diagnostics.map((item) => [
-            item.range,
-            item.severity,
-            item.message,
-          ]),
-        ]);
-        const previous = state.diagnosticFingerprints.get(file);
+        const diagnosticFeedback = mutationDiagnosticFeedback(
+          state,
+          file,
+          report,
+        );
+        notes.push(...diagnosticFeedback.notes);
         if (report.responders > 0) {
-          const hasFeedback =
-            report.diagnostics.length > 0 ||
-            unverified ||
-            previous?.hadFindings ||
-            previous?.unverified;
-          if (
-            (!state.config.settings.diagnosticsDeduplicate ||
-              previous?.fingerprint !== fingerprint) &&
-            hasFeedback
-          ) {
-            notes.push(
-              diagnosticsText(
-                file,
-                report.diagnostics,
-                state.options.cwd,
-                report.unverifiedSources,
-              ),
-            );
-          }
-          state.diagnosticFingerprints.set(file, {
-            fingerprint,
-            hadFindings: report.diagnostics.length > 0,
-            unverified,
-          });
-        }
-        if (report.failures.length > 0) {
-          notes.push(
-            `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
+          state.diagnosticFingerprints.set(
+            file,
+            diagnosticFeedback.fingerprint,
           );
         }
       }
@@ -2053,6 +2095,41 @@ async function mutationFeedback(
         details: { action: "afterMutation", source },
       }
     : undefined;
+}
+
+/**
+ * Synchronizes a host-mutated file with live servers already observing or selected for it.
+ * Saves follow successful syncs; per-server failures become notes without stopping later servers.
+ * @example A failed sync adds a synchronization note and skips that server's saved notification.
+ */
+async function synchronizeMutationDocuments(
+  state: WorkspaceState,
+  file: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const notes: string[] = [];
+  for (const server of state.pool.clients()) {
+    if (
+      !(
+        server.isAlive &&
+        (server.document(file) ||
+          selectedServers(state.config, file).some(
+            (config) => config.name === server.config.name,
+          ))
+      )
+    ) {
+      continue;
+    }
+    try {
+      await server.syncFile(file, undefined, signal);
+      await server.saved(file);
+    } catch (error) {
+      notes.push(
+        `${server.config.name}: synchronization failed: ${errorText(error)}`,
+      );
+    }
+  }
+  return notes;
 }
 
 /**
@@ -2111,14 +2188,15 @@ async function formatDocument(
     if (!server.capabilities.documentFormattingProvider) {
       continue;
     }
-    if (
-      (await openDocument(state.knownFiles, server, file, signal)) !== content
-    ) {
+    const openedContent = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+    if (openedContent !== content) {
       throw new Error(
         "File changed before formatting; stale formatter result discarded",
       );
     }
     const snapshots = documentSnapshots(state.knownFiles, server);
+    // biome-ignore lint/plugin/use-undefined: LSP formatting results explicitly allow null when no edits exist.
     const response = await server.request<TextEdit[] | null>(
       "textDocument/formatting",
       {
@@ -2155,15 +2233,22 @@ export class LspWorkspace {
   readonly #state: WorkspaceState;
 
   /**
-   * Initializes one private state record and its session-owned language-server pool.
-   * @param options - Trust decision and configuration roots for this session.
+   * Initializes private session state and acquires its owned pool from the supplied factory.
+   * @param options - Trust decision and configuration roots for the session.
    * @param config - Already-loaded effective LSP configuration.
-   * @example A cwd of "." is resolved before constructing the pool; no server starts here.
+   * @param poolFactory - Acquires a pool owned by this workspace, also retained for reloads.
+   * @throws If the factory cannot create the pool.
+   * @example A cwd of "." is resolved before calling the factory; the default pool starts no servers here.
    */
-  private constructor(options: WorkspaceOptions, config: LspConfig) {
+  private constructor(
+    options: WorkspaceOptions,
+    config: LspConfig,
+    poolFactory: typeof createPool,
+  ) {
     const normalizedOptions = { ...options, cwd: path.resolve(options.cwd) };
     const state: WorkspaceState = {
       options: normalizedOptions,
+      poolFactory,
       config,
       lifetime: new AbortController(),
       jobs: new Set(),
@@ -2171,7 +2256,7 @@ export class LspWorkspace {
       hooks: new Map(),
       diagnosticFingerprints: new Map(),
       disposePromise: undefined,
-      pool: createPool(
+      pool: poolFactory(
         normalizedOptions.cwd,
         config.idleTimeoutMs,
         (edit, server) => applyServerEdit(state, edit, server),
@@ -2181,16 +2266,28 @@ export class LspWorkspace {
   }
 
   /**
-   * Loads configuration and optionally warms servers; the caller owns disposal.
+   * Loads configuration, acquires an owned pool, and optionally warms servers.
+   * The caller must dispose the workspace; it also disposes pools replaced on reload.
    * @param options - Workspace root, agent configuration directory, and trust decision.
-   * @returns One session-owned workspace with eager-startup failures retained as warnings.
-   * @throws If configuration loading or workspace initialization fails.
-   * @example With trusted: false, create({ cwd: "/project", agentDir: "/agent", trusted: false }) starts no servers.
+   * @param poolFactory - Acquires pools for initial creation and idle-timeout changes; defaults to real session-owned language servers.
+   * @returns One workspace with eager-startup failures retained as warnings.
+   * @throws If configuration loading or pool creation fails.
+   * @example
+   * ```ts
+   * const workspace = await LspWorkspace.create({
+   *   cwd: "/project", agentDir: "/agent", trusted: false,
+   * }); // The default pool starts no servers in an untrusted project.
+   * await workspace.dispose(); // Releases the session-owned pool and idle timer.
+   * ```
    */
-  static async create(options: WorkspaceOptions): Promise<LspWorkspace> {
+  static async create(
+    options: WorkspaceOptions,
+    poolFactory: typeof createPool = createPool,
+  ): Promise<LspWorkspace> {
     const workspace = new LspWorkspace(
       options,
       await loadLspConfig(options.cwd, options.agentDir, options.trusted),
+      poolFactory,
     );
     if (
       options.trusted &&
@@ -2324,4 +2421,57 @@ export class LspWorkspace {
     }
     return state.disposePromise;
   }
+}
+
+/**
+ * Computes diagnostic feedback and its next deduplication fingerprint without updating history.
+ * The caller records the fingerprint only when a source responded and the hook is current.
+ * @example A clean response after earlier findings emits a clearing diagnostic message.
+ */
+function mutationDiagnosticFeedback(
+  state: WorkspaceState,
+  file: string,
+  report: DiagnosticReport,
+) {
+  const notes: string[] = [];
+  const unverified = report.unverifiedSources.length > 0;
+  const fingerprint = JSON.stringify([
+    report.unverifiedSources,
+    report.diagnostics.map((item) => [item.range, item.severity, item.message]),
+  ]);
+  const previous = state.diagnosticFingerprints.get(file);
+  if (report.responders > 0) {
+    const hasFeedback =
+      report.diagnostics.length > 0 ||
+      unverified ||
+      previous?.hadFindings ||
+      previous?.unverified;
+    if (
+      (!state.config.settings.diagnosticsDeduplicate ||
+        previous?.fingerprint !== fingerprint) &&
+      hasFeedback
+    ) {
+      notes.push(
+        diagnosticsText(
+          file,
+          report.diagnostics,
+          state.options.cwd,
+          report.unverifiedSources,
+        ),
+      );
+    }
+  }
+  if (report.failures.length > 0) {
+    notes.push(
+      `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
+    );
+  }
+  return {
+    notes,
+    fingerprint: {
+      fingerprint,
+      hadFindings: report.diagnostics.length > 0,
+      unverified,
+    },
+  };
 }

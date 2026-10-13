@@ -61,6 +61,40 @@ export interface LanguageServer {
   shutdown: () => Promise<void>;
 }
 
+/** Session-owned server access; the workspace owns stopping and disposing the pool. */
+export interface LanguageServerPool {
+  /**
+   * Acquires an initialized client shared by effective configuration.
+   * @param config - Server configuration identifying the shared client.
+   * @param signal - Cancels this caller's wait, not shared startup.
+   * @returns A live client after any previous instance finishes stopping.
+   * @throws On cancellation, disabled configuration, disposal, or startup/cleanup failure.
+   * @example await pool.get(config); // Reuses a live client for the same configuration.
+   */
+  get: (config: ServerConfig, signal?: AbortSignal) => Promise<LanguageServer>;
+  /**
+   * Lists initialized, live clients without starting servers.
+   * @returns A snapshot excluding starting and stopping clients.
+   * @example pool.clients(); // Returns [] before any server finishes initialization.
+   */
+  clients: () => readonly LanguageServer[];
+  /**
+   * Stops selected servers without preventing later acquisitions.
+   * @param names - Server names to stop; omitted means all servers.
+   * @returns Completion after every selected shutdown attempt settles.
+   * @throws An AggregateError if any selected shutdown fails.
+   * @example await pool.stop(["typescript-native"]); // Other servers stay running.
+   */
+  stop: (names?: readonly string[]) => Promise<void>;
+  /**
+   * Prevents acquisitions and releases owned servers and idle timers.
+   * @returns The same shutdown promise on every call, including after settlement.
+   * @throws An AggregateError if any owned server shutdown fails.
+   * @example await pool.dispose(); // Future get calls reject.
+   */
+  dispose: () => Promise<void>;
+}
+
 interface PoolOptions {
   cwd: string;
   onApplyEdit: (
@@ -719,7 +753,9 @@ class StdioLanguageServer implements LanguageServer {
    * child.emit("exit", 1, null); // Pending work fails with an exit-status-1 message.
    */
   private readonly onExit = (
+    // biome-ignore lint/plugin/use-undefined: Node exit events report a null code when terminated by a signal.
     code: number | null,
+    // biome-ignore lint/plugin/use-undefined: Node exit events report a null signal after a numeric exit.
     signal: NodeJS.Signals | null,
   ): void => {
     fail(
@@ -960,43 +996,43 @@ class StdioLanguageServer implements LanguageServer {
             },
           });
         }
-      } else {
-        let change: {
-          text: string;
-          range?: {
-            start: { line: number; character: number };
-            end: { line: number; character: number };
-          };
-        } = { text };
-        if (sync.change === 2) {
-          let line = 0;
-          let lineStart = 0;
-          for (let index = 0; index < prior.content.length; index++) {
-            const char = prior.content.charCodeAt(index);
-            if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
-              if (
-                char === CARRIAGE_RETURN_CODE &&
-                prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
-              ) {
-                index++;
-              }
-              line++;
-              lineStart = index + 1;
-            }
-          }
-          change = {
-            text,
-            range: {
-              start: { line: 0, character: 0 },
-              end: { line, character: prior.content.length - lineStart },
-            },
-          };
-        }
-        await this.notify("textDocument/didChange", {
-          textDocument: { uri, version: snapshot.version },
-          contentChanges: [change],
-        });
+        return;
       }
+      let change: {
+        text: string;
+        range?: {
+          start: { line: number; character: number };
+          end: { line: number; character: number };
+        };
+      } = { text };
+      if (sync.change === 2) {
+        let line = 0;
+        let lineStart = 0;
+        for (let index = 0; index < prior.content.length; index++) {
+          const char = prior.content.charCodeAt(index);
+          if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
+            if (
+              char === CARRIAGE_RETURN_CODE &&
+              prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
+            ) {
+              index++;
+            }
+            line++;
+            lineStart = index + 1;
+          }
+        }
+        change = {
+          text,
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line, character: prior.content.length - lineStart },
+          },
+        };
+      }
+      await this.notify("textDocument/didChange", {
+        textDocument: { uri, version: snapshot.version },
+        contentChanges: [change],
+      });
     });
   }
 
@@ -1208,6 +1244,7 @@ class StdioLanguageServer implements LanguageServer {
             this.child.once("exit", resolvePromise);
           });
           try {
+            // biome-ignore lint/plugin/use-undefined: LSP shutdown has no payload and uses null on the JSON-RPC wire.
             await rpc(this, "shutdown", null, {
               timeoutMs: 1000,
               stopping: true,
@@ -1412,6 +1449,8 @@ async function waitForWorkspace(
 
 /**
  * Sends one bounded RPC, canceling its token on timeout and stopping peers that ignore cancellation.
+ * Caller cancellation sends a token cancellation while the owner is live; owner
+ * teardown rejects pending waits and owns process cleanup without new cancellation traffic.
  * @param server - Owner of the connection, lifetime, failure state, and cleanup timers.
  * @param method - Protocol request method.
  * @param params - Request payload; the caller validates returned peer data.
@@ -1464,7 +1503,9 @@ async function rpc<T>(
       timeoutMs,
       label: `LSP ${server.config.name} ${method}`,
       onCancel: () => {
-        source.cancel();
+        if (!state.lifetime.signal.aborted) {
+          source.cancel();
+        }
         // jsonrpc retains canceled response slots until a reply. Kill a server that ignores cancellation rather than leak them forever.
         if (!(settled || state.lifetime.signal.aborted || stopping)) {
           cleanupTimer = setTimeout(() => {
@@ -1721,6 +1762,7 @@ async function serverRequest(
                 : undefined;
           }
         }
+        // biome-ignore lint/plugin/use-undefined: LSP configuration responses require null for unavailable settings.
         return value ?? null;
       });
     }
@@ -1792,6 +1834,7 @@ async function serverRequest(
         state.baseCapabilities,
         state.registrations.values(),
       );
+      // biome-ignore lint/plugin/use-undefined: LSP capability registration returns a null result.
       return null;
     }
     case "client/unregisterCapability": {
@@ -1827,17 +1870,21 @@ async function serverRequest(
         state.baseCapabilities,
         state.registrations.values(),
       );
+      // biome-ignore lint/plugin/use-undefined: LSP capability unregistration returns a null result.
       return null;
     }
     case "window/workDoneProgress/create":
+      // biome-ignore lint/plugin/use-undefined: LSP progress-token creation returns a null result.
       return null;
     case "window/showMessageRequest":
+      // biome-ignore lint/plugin/use-undefined: LSP showMessageRequest uses null when no action is selected.
       return null;
     case "window/showDocument":
       return { success: false };
     case "workspace/diagnostic/refresh":
       state.publications.clear();
       state.diagnosticErrors.clear();
+      // biome-ignore lint/plugin/use-undefined: LSP diagnostic refresh returns a null result.
       return null;
     case "workspace/semanticTokens/refresh":
     case "workspace/inlayHint/refresh":
@@ -1845,6 +1892,7 @@ async function serverRequest(
     case "workspace/codeAction/refresh":
     case "workspace/inlineValue/refresh":
     case "workspace/foldingRange/refresh":
+      // biome-ignore lint/plugin/use-undefined: LSP refresh requests return a null result.
       return null;
     default:
       throw new ResponseError(
@@ -1863,7 +1911,7 @@ interface PoolEntry {
 }
 
 /** Owns a session's shared server startups, live processes, and optional idle timer. */
-export class LanguageServerPool {
+export class StdioLanguageServerPool implements LanguageServerPool {
   private readonly options: PoolOptions;
   private readonly entries = new Map<string, PoolEntry>();
   private readonly idleTimer: NodeJS.Timeout | undefined;

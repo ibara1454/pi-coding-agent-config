@@ -15,8 +15,7 @@ import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
 import {
   applySettingsMutations,
-  captureMutationOwners,
-  currentOwner,
+  hasSettingsConflict,
   parseSettingsDocument,
 } from "./settings.ts";
 import { serializeSettings } from "./settings-serialization.ts";
@@ -131,6 +130,17 @@ function scopeFailure(scope: ResourceScope, error: unknown): ScopeCommitResult {
   };
 }
 
+/**
+ * Validates staged settings and target identities under all selected locks,
+ * then writes changed scopes without rolling back successful earlier writes.
+ * Snapshot/current parse errors and owner conflicts precede target validation;
+ * mutations are applied only after each scope's targets pass validation.
+ * @param request Staged documents and mutations; caller-owned inputs are read-only.
+ * @param io Owns lock, read, identity-validation, and atomic-write effects.
+ * @returns Ordered scope outcomes and only the scopes actually written.
+ * Acquired locks are released in reverse order, including on failure.
+ * @example await commitSettings({ documents: new Map(), mutations: [] }) // no effects
+ */
 export async function commitSettings(
   request: CommitRequest,
   io: PersistenceIo = nodePersistenceIo,
@@ -210,16 +220,7 @@ export async function commitSettings(
           continue;
         }
 
-        const owners = captureMutationOwners(document.value, mutations);
-        if (
-          owners.some(
-            (owner) =>
-              !isDeepStrictEqual(
-                owner.value,
-                currentOwner(current.value, owner),
-              ),
-          )
-        ) {
+        if (hasSettingsConflict(document.value, current.value, mutations)) {
           conflicts.add(scope);
           continue;
         }

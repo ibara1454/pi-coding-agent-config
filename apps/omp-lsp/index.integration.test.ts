@@ -387,6 +387,7 @@ describe("lsp.tool_result", () => {
       condition: "the mutation path is not a string",
       toolName: "edit",
       isError: false,
+      // biome-ignore lint/plugin/use-undefined: Deliberately reject an external host mutation with a null path.
       path: null,
       trusted: true,
     },

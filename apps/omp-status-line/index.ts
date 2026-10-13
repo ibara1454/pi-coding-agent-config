@@ -13,21 +13,33 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  calculateContextUsage,
+  estimateContextEntryTokens,
+  estimateContextOverhead,
+  hasProviderContextAnchor,
+} from "./context-usage.ts";
+import { createGitStatus } from "./git-status.ts";
 import { isObjectRecord } from "./guards.ts";
 import { getPreset } from "./presets.ts";
+import {
+  activeRunMilliseconds,
+  EMPTY_RUN_METRICS,
+  updateRunMetrics,
+} from "./run-metrics.ts";
 import { renderSegment, sanitizeInlineText } from "./segments.ts";
 import {
   DEFAULT_STATUS_BG,
   EMPTY_END_CAPS,
   getSeparator,
   RESET,
+  type SeparatorDef,
   STATUS_BG_AS_FG,
   STATUS_SEPARATOR_FG,
   sessionAccentAnsi,
   TRANSPARENT_BG,
 } from "./theme.ts";
 import type {
-  GitState,
   PresetDef,
   SegmentContext,
   StatusLineSegmentId,
@@ -100,13 +112,10 @@ const STATUS_KEYS: Record<string, true> = {
   usage: true,
 };
 const MILLISECONDS_PER_SECOND = 1000;
-const GIT_TTL_MS = MILLISECONDS_PER_SECOND;
 const STATUS_REFRESH_INTERVAL_MS = MILLISECONDS_PER_SECOND;
 const EDITOR_BORDER_RE = /^─{3,}/;
 const GIT_BRANCH_COMMAND_RE =
   /\bgit\s+(checkout|switch|branch|merge|rebase|pull|reset|worktree|stash)/;
-const TOKEN_ESTIMATE_ROUNDING_OFFSET = 3;
-const PERCENT_SCALE = 100;
 const DEFAULT_PATH_MAX_LENGTH = 40;
 const MIN_PATH_MAX_LENGTH = 4;
 const MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS = 8;
@@ -267,9 +276,16 @@ function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/**
+ * Reads usage totals from the current session branch without modifying entries.
+ * @param ctx Host context whose session branch supplies usage records.
+ * @param tokensPerSecond Current stream rate, or undefined before measurement.
+ * @returns Totals with invalid numeric fields treated as zero; host read errors propagate.
+ * @example aggregateUsage(ctx, undefined).tokensPerSecond === undefined
+ */
 function aggregateUsage(
   ctx: ExtensionContext,
-  tokensPerSecond: number | null,
+  tokensPerSecond: number | undefined,
 ): UsageStats {
   const stats: UsageStats = {
     input: 0,
@@ -306,321 +322,285 @@ function aggregateUsage(
 }
 
 /**
+ * Shrinks rendered path text by up to the overflow in terminal cells without changing options.
+ * @param content Current ANSI path, including its icon.
+ * @param overflow Positive cell reduction requested by the layout.
+ * @returns Last visible rendering, or the original when shrinking is unavailable.
+ * Renderer errors propagate; at most eight corrections account for icon width.
+ * @example shrinkStatusPath("short", 2, ctx); // "short" (below the eight-cell floor)
+ */
+function shrinkStatusPath(
+  content: string,
+  overflow: number,
+  segmentCtx: SegmentContext,
+): string {
+  const currentWidth = visibleWidth(content);
+  const minPathWidth = 8;
+  const shrinkable = currentWidth - minPathWidth;
+  if (shrinkable <= 0) {
+    return content;
+  }
+  const shrinkBy = Math.min(shrinkable, overflow);
+  const currentMaxLength =
+    segmentCtx.options.path?.maxLength ?? DEFAULT_PATH_MAX_LENGTH;
+  let nextMaxLength = Math.max(
+    MIN_PATH_MAX_LENGTH,
+    Math.min(currentMaxLength, currentWidth) - shrinkBy,
+  );
+  /**
+   * Copies context options with a path-text cell budget, leaving the shared snapshot unchanged.
+   * @example pathCtx(4).options.path?.maxLength; // 4
+   */
+  const pathCtx = (maxLength: number): SegmentContext => ({
+    ...segmentCtx,
+    options: {
+      ...segmentCtx.options,
+      path: { ...segmentCtx.options.path, maxLength },
+    },
+  });
+  let adjusted = renderSegment("path", pathCtx(nextMaxLength));
+  if (!(adjusted.visible && adjusted.content)) {
+    return content;
+  }
+  // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
+  for (
+    let attempt = 0;
+    attempt < MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS;
+    attempt++
+  ) {
+    const saved = currentWidth - visibleWidth(adjusted.content);
+    if (saved >= shrinkBy) {
+      break;
+    }
+    const correctedMaxLength = Math.max(
+      MIN_PATH_MAX_LENGTH,
+      nextMaxLength - (shrinkBy - saved),
+    );
+    if (correctedMaxLength >= nextMaxLength) {
+      break;
+    }
+    nextMaxLength = correctedMaxLength;
+    const rerendered = renderSegment("path", pathCtx(nextMaxLength));
+    if (!(rerendered.visible && rerendered.content)) {
+      break;
+    }
+    adjusted = rerendered;
+  }
+  return adjusted.content;
+}
+
+/**
+ * Renders visible segments and fits them in terminal cells, including padding and caps.
+ * Drops right segments first, shrinks the path, then drops non-path left segments first.
+ * @param width Available terminal cells.
+ * @returns Owned segment arrays, fitted cell widths, and caps; inputs remain unchanged.
+ * Segment rendering errors propagate; this operation owns no session resources.
+ * @example An empty preset produces empty left/right arrays with zero widths.
+ */
+function fitStatusSegments(
+  width: number,
+  preset: PresetDef,
+  segmentCtx: SegmentContext,
+  separator: SeparatorDef,
+): {
+  left: string[];
+  right: string[];
+  leftWidth: number;
+  rightWidth: number;
+  endCaps: SeparatorDef["endCaps"];
+} {
+  const endCaps = segmentCtx.settings.transparent
+    ? EMPTY_END_CAPS
+    : separator.endCaps;
+  const left: string[] = [];
+  const leftIds: StatusLineSegmentId[] = [];
+  for (const id of preset.leftSegments) {
+    const rendered = renderSegment(id, segmentCtx);
+    if (rendered.visible && rendered.content) {
+      left.push(rendered.content);
+      leftIds.push(id);
+    }
+  }
+  const right: string[] = [];
+  for (const id of preset.rightSegments) {
+    const rendered = renderSegment(id, segmentCtx);
+    if (rendered.visible && rendered.content) {
+      right.push(rendered.content);
+    }
+  }
+
+  const leftSeparatorWidth = visibleWidth(separator.left);
+  const rightSeparatorWidth = visibleWidth(separator.right);
+  const leftCapWidth = visibleWidth(endCaps.right);
+  const rightCapWidth = visibleWidth(endCaps.left);
+  /**
+   * Counts ANSI content, inter-segment spaces, outer padding and a nonempty group's cap.
+   * @returns Terminal cells without changing parts.
+   * @example groupWidth([], 1, 1); // 0
+   */
+  const groupWidth = (
+    parts: string[],
+    capWidth: number,
+    separatorWidth: number,
+  ): number => {
+    if (parts.length === 0) {
+      return 0;
+    }
+    return (
+      parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
+      Math.max(0, parts.length - 1) * (separatorWidth + 2) +
+      2 +
+      capWidth
+    );
+  };
+
+  let leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  let rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
+  /** Returns occupied cells, reserving one gap cell only when both groups remain.
+   * @example Empty left/right arrays produce zero cells.
+   */
+  const totalWidth = (): number =>
+    leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
+
+  while (totalWidth() > width && right.length > 0) {
+    right.pop();
+    rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
+  }
+
+  const pathIndex = leftIds.indexOf("path");
+  if (pathIndex >= 0 && totalWidth() > width) {
+    left[pathIndex] = shrinkStatusPath(
+      left[pathIndex] ?? "",
+      totalWidth() - width,
+      segmentCtx,
+    );
+    leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  }
+
+  while (totalWidth() > width && left.length > 0) {
+    let dropIndex = leftIds.length - 1;
+    while (dropIndex >= 0 && leftIds[dropIndex] === "path") {
+      dropIndex--;
+    }
+    if (dropIndex < 0) {
+      dropIndex = left.length - 1;
+    }
+    left.splice(dropIndex, 1);
+    leftIds.splice(dropIndex, 1);
+    leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
+  }
+  return { left, right, leftWidth, rightWidth, endCaps };
+}
+
+/**
  * Registers the status-line renderer and session-owned refresh resources.
- * Event effects run synchronously; handlers return promises and reject on failure.
- * Shutdown cancels timers and commands and releases only UI slots still owned here.
+ * Async lifecycle handlers own refresh startup/stop; synchronous callbacks only signal work.
+ * Shutdown cancels timers, joins commands, and releases only UI slots still owned here.
  * @param pi Host extension API used for events, UI state, and command execution.
  * @example ompStatusLine(pi); // Installs UI on session_start in TUI mode.
  */
 export default function ompStatusLine(pi: ExtensionAPI): void {
-  let currentCtx: ExtensionContext | null = null;
+  let currentCtx: ExtensionContext | undefined;
   let settings: StatusLineSettings = readSettings(process.cwd(), false);
-  let footerData: ReadonlyFooterDataProvider | null = null;
-  let tui: { requestRender: () => void } | null = null;
-  let footerUnsubscribe: (() => void) | null = null;
+  let footerData: ReadonlyFooterDataProvider | undefined;
+  let tui: { requestRender: () => void } | undefined;
+  let footerUnsubscribe: (() => void) | undefined;
   let ticker: NodeJS.Timeout | undefined;
   let delayedRefresh: NodeJS.Timeout | undefined;
-  let disposeUi: (() => void) | null = null;
-  let activeMs = 0;
-  let activeStartedAt: number | null = null;
-  let streamStartedAt: number | null = null;
-  let tokensPerSecond: number | null = null;
-  let gitLastFetch = 0;
-  let gitController: AbortController | null = null;
-  let gitInFlight = false;
-  let prBranchKey: string | null = null;
-  let prController: AbortController | null = null;
-  let prInFlight = false;
-  let gitState: GitState = {
-    branch: null,
-    staged: 0,
-    unstaged: 0,
-    untracked: 0,
-    pr: null,
-  };
+  let disposeUi: (() => void) | undefined;
+  let runMetrics = EMPTY_RUN_METRICS;
 
   const requestRender = (): void => {
     tui?.requestRender();
   };
 
-  const releaseSessionResources = (): void => {
+  const gitStatus = createGitStatus({
+    exec: (command, args, options) => pi.exec(command, args, options),
+    /** Returns host identity separately from cwd so replaced contexts reject stale work. */
+    readContext: () =>
+      currentCtx ? { owner: currentCtx, cwd: currentCtx.cwd } : undefined,
+    readBranch: () => footerData?.getGitBranch() ?? undefined,
+    changed: requestRender,
+  });
+
+  /**
+   * Releases owned timers and subscriptions, joins refresh work, then releases owned UI slots.
+   * Lifecycle calls are serial; startup awaits this cleanup before acquiring another session.
+   * @returns Completion after all owned resources and host references have been released.
+   * @example A repeated session_shutdown leaves no owned handles or subscriptions.
+   */
+  const releaseSessionResources = async (): Promise<void> => {
     clearInterval(ticker);
     ticker = undefined;
     clearTimeout(delayedRefresh);
     delayedRefresh = undefined;
     footerUnsubscribe?.();
-    footerUnsubscribe = null;
-    gitController?.abort();
-    gitController = null;
-    gitInFlight = false;
-    prController?.abort();
-    prController = null;
-    prInFlight = false;
+    footerUnsubscribe = undefined;
+    await gitStatus.stop();
     disposeUi?.();
-    disposeUi = null;
-    currentCtx = null;
-    footerData = null;
-    tui = null;
-    activeMs = 0;
-    activeStartedAt = null;
-    streamStartedAt = null;
-    tokensPerSecond = null;
-  };
-
-  const refreshPr = async (
-    branch: string | null,
-    force = false,
-  ): Promise<void> => {
-    const ctx = currentCtx;
-    if (!(ctx && branch) || branch === "detached" || prInFlight) {
-      if (!branch || branch === "detached") {
-        gitState.pr = null;
-      }
-      return;
-    }
-    const key = `${ctx.cwd}\0${branch}`;
-    if (!force && prBranchKey === key) {
-      return;
-    }
-    prBranchKey = key;
-    prInFlight = true;
-    const controller = new AbortController();
-    prController = controller;
-    try {
-      const result = await pi.exec(
-        "gh",
-        ["pr", "view", "--json", "number,url"],
-        { cwd: ctx.cwd, timeout: 2000, signal: controller.signal },
-      );
-      if (
-        prController !== controller ||
-        currentCtx !== ctx ||
-        prBranchKey !== key
-      ) {
-        return;
-      }
-      if (result.code !== 0) {
-        gitState.pr = null;
-      } else {
-        const parsed: unknown = JSON.parse(result.stdout);
-        if (isObjectRecord(parsed)) {
-          const { number, url } = parsed;
-          gitState.pr =
-            typeof number === "number" && typeof url === "string"
-              ? { number, url }
-              : null;
-        } else {
-          gitState.pr = null;
-        }
-      }
-    } catch {
-      if (
-        prController === controller &&
-        currentCtx === ctx &&
-        prBranchKey === key
-      ) {
-        gitState.pr = null;
-      }
-    } finally {
-      if (prController === controller) {
-        prController = null;
-        prInFlight = false;
-        requestRender();
-      }
-    }
-  };
-
-  const refreshGit = async (force = false): Promise<void> => {
-    const ctx = currentCtx;
-    if (
-      !ctx ||
-      gitInFlight ||
-      (!force && Date.now() - gitLastFetch < GIT_TTL_MS)
-    ) {
-      return;
-    }
-    gitInFlight = true;
-    const controller = new AbortController();
-    gitController = controller;
-    try {
-      const result = await pi.exec(
-        "git",
-        ["status", "--porcelain=v1", "--untracked-files=normal"],
-        { cwd: ctx.cwd, timeout: 2000, signal: controller.signal },
-      );
-      if (gitController !== controller || currentCtx !== ctx) {
-        return;
-      }
-      if (result.code !== 0) {
-        gitState = {
-          branch: null,
-          staged: 0,
-          unstaged: 0,
-          untracked: 0,
-          pr: null,
-        };
-        prBranchKey = null;
-      } else {
-        let staged = 0;
-        let unstaged = 0;
-        let untracked = 0;
-        for (const line of result.stdout.split("\n")) {
-          if (line.length < 2) {
-            continue;
-          }
-          const [x, y] = line;
-          if (x === "?" && y === "?") {
-            untracked++;
-            continue;
-          }
-          if (x !== " " && x !== "?") {
-            staged++;
-          }
-          if (y !== " " && y !== "?") {
-            unstaged++;
-          }
-        }
-        const branch = footerData?.getGitBranch() ?? gitState.branch;
-        const branchChanged = branch !== gitState.branch;
-        gitState = {
-          ...gitState,
-          branch,
-          staged,
-          unstaged,
-          untracked,
-          pr: branchChanged ? null : gitState.pr,
-        };
-        if (branchChanged) {
-          prBranchKey = null;
-        }
-        // biome-ignore lint/complexity/noVoid: PR refresh handles command errors and must not delay Git completion.
-        void refreshPr(branch);
-      }
-      gitLastFetch = Date.now();
-    } catch {
-      if (gitController === controller) {
-        gitLastFetch = Date.now();
-      }
-    } finally {
-      if (gitController === controller) {
-        gitController = null;
-        gitInFlight = false;
-        requestRender();
-      }
-    }
-  };
-
-  /**
-   * Estimates text tokens as UTF-8 bytes rounded up to groups of four.
-   * @param text Text measured in bytes, not characters or terminal cells.
-   * @example estimateTextTokens("hello"); // 2, not an exact tokenizer count.
-   */
-  const estimateTextTokens = (text: string): number =>
-    (Buffer.byteLength(text, "utf8") + TOKEN_ESTIMATE_ROUNDING_OFFSET) >> 2;
-
-  const estimateNonMessageTokens = (ctx: ExtensionContext): number => {
-    let tokens = estimateTextTokens(ctx.getSystemPrompt());
-    const activeTools = new Set(pi.getActiveTools());
-    for (const tool of pi.getAllTools()) {
-      if (!activeTools.has(tool.name)) {
-        continue;
-      }
-      tokens += estimateTextTokens(tool.name);
-      tokens += estimateTextTokens(tool.description);
-      try {
-        tokens += estimateTextTokens(JSON.stringify(tool.parameters));
-      } catch {
-        // A cyclic extension schema cannot be sent verbatim either; omit only that schema.
-      }
-    }
-    return tokens;
-  };
-
-  const estimateContextEntryTokens = (ctx: ExtensionContext): number => {
-    let tokens = 0;
-    for (const entry of ctx.sessionManager.buildContextEntries()) {
-      if (entry.type === "message") {
-        tokens += estimateTokens(entry.message);
-      } else if (
-        entry.type === "compaction" ||
-        entry.type === "branch_summary"
-      ) {
-        tokens += estimateTextTokens(entry.summary);
-      } else if (entry.type === "custom_message") {
-        tokens += estimateTextTokens(
-          typeof entry.content === "string"
-            ? entry.content
-            : JSON.stringify(entry.content),
-        );
-      }
-    }
-    return tokens;
-  };
-
-  const hasProviderContextAnchor = (ctx: ExtensionContext): boolean => {
-    const branch = ctx.sessionManager.getBranch();
-    let boundary = -1;
-    for (let index = branch.length - 1; index >= 0; index--) {
-      if (branch[index]?.type === "compaction") {
-        boundary = index;
-        break;
-      }
-    }
-    for (let index = branch.length - 1; index > boundary; index--) {
-      const entry = branch[index];
-      if (entry?.type !== "message" || entry.message.role !== "assistant") {
-        continue;
-      }
-      if (
-        entry.message.stopReason === "aborted" ||
-        entry.message.stopReason === "error"
-      ) {
-        continue;
-      }
-      const usage = messageUsage(entry.message);
-      if (!usage) {
-        continue;
-      }
-      const { totalTokens, input, output, cacheRead, cacheWrite } = usage;
-      const contextTokens =
-        numeric(totalTokens) ||
-        numeric(input) +
-          numeric(output) +
-          numeric(cacheRead) +
-          numeric(cacheWrite);
-      if (contextTokens > 0) {
-        return true;
-      }
-    }
-    return false;
+    disposeUi = undefined;
+    currentCtx = undefined;
+    footerData = undefined;
+    tui = undefined;
+    runMetrics = EMPTY_RUN_METRICS;
   };
 
   /**
    * Snapshots host usage and wall-clock active milliseconds without starting timers.
+   * Only absent reported tokens acquire entries; anchored totals skip prompt/tool acquisition.
    * @param theme Styling callbacks retained for segment rendering; host errors propagate.
    * @param options Per-segment display options, retained without mutation.
-   * @returns Context with 0–100 percentage units, or null before a session is available.
-   * @example With no currentCtx, buildSegmentContext(theme, {}) returns null.
+   * @returns Context with 0–100 percentage units, or undefined before a session is available.
+   * @example With no currentCtx, buildSegmentContext(theme, {}) returns undefined.
    */
   const buildSegmentContext = (
     theme: Theme,
     options: StatusLineSegmentOptions,
-  ): SegmentContext | null => {
+  ): SegmentContext | undefined => {
     if (!currentCtx) {
-      return null;
+      return undefined;
     }
     const context = currentCtx.getContextUsage();
-    const contextWindow =
-      context?.contextWindow ?? currentCtx.model?.contextWindow ?? 0;
-    const providerAnchored = hasProviderContextAnchor(currentCtx);
-    const estimatedMessages =
-      context?.tokens ?? estimateContextEntryTokens(currentCtx);
-    const contextTokens =
+    const contextWindow = context?.contextWindow;
+    const modelContextWindow =
+      contextWindow === null || contextWindow === undefined
+        ? currentCtx.model?.contextWindow
+        : undefined;
+    const providerAnchored = hasProviderContextAnchor(
+      currentCtx.sessionManager.getBranch(),
+    );
+    const reportedTokens = context?.tokens;
+    const estimatedMessageTokens =
+      reportedTokens === null || reportedTokens === undefined
+        ? estimateContextEntryTokens(
+            currentCtx.sessionManager.buildContextEntries().map((entry) =>
+              entry.type === "message"
+                ? {
+                    type: "message" as const,
+                    tokens: estimateTokens(entry.message),
+                  }
+                : entry,
+            ),
+          )
+        : 0;
+    const estimatedOverheadTokens =
       providerAnchored &&
-      context?.tokens !== null &&
-      context?.tokens !== undefined
-        ? context.tokens
-        : estimateNonMessageTokens(currentCtx) + estimatedMessages;
+      reportedTokens !== null &&
+      reportedTokens !== undefined
+        ? 0
+        : estimateContextOverhead({
+            systemPrompt: currentCtx.getSystemPrompt(),
+            activeToolNames: pi.getActiveTools(),
+            tools: pi.getAllTools(),
+          });
+    const contextUsage = calculateContextUsage({
+      reportedTokens,
+      providerAnchored,
+      estimatedMessageTokens,
+      estimatedOverheadTokens,
+      contextWindow,
+      modelContextWindow,
+    });
     const now = Date.now();
     return {
       extensionContext: currentCtx,
@@ -628,25 +608,16 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       theme,
       settings,
       options,
-      usage: aggregateUsage(currentCtx, tokensPerSecond),
-      contextTokens,
-      contextPercent:
-        contextWindow > 0
-          ? (contextTokens / contextWindow) * PERCENT_SCALE
-          : null,
-      contextWindow,
+      usage: aggregateUsage(currentCtx, runMetrics.tokensPerSecond),
+      ...contextUsage,
       autoCompactEnabled: true,
-      activeMs:
-        activeMs + (activeStartedAt === null ? 0 : now - activeStartedAt),
-      git: {
-        ...gitState,
-        branch: footerData?.getGitBranch() ?? gitState.branch,
-      },
+      activeMs: activeRunMilliseconds(runMetrics, now),
+      git: gitStatus.snapshot,
     };
   };
 
   /**
-   * Fits ANSI segments to width in terminal cells, not string length; refreshes Git nonblocking.
+   * Fits cached ANSI segments to width in terminal cells without starting Git/PR work.
    * @param width Available cells, including separators and caps.
    * Drops right segments, then shortens the path before dropping other left segments.
    * @returns Styled row or empty text without a session/positive width; host errors propagate.
@@ -656,8 +627,6 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     if (width <= 0) {
       return "";
     }
-    // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not block rendering.
-    void refreshGit();
     const preset = effectivePreset(settings);
     const segmentCtx = buildSegmentContext(theme, preset.segmentOptions);
     if (!segmentCtx) {
@@ -671,119 +640,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     const bg = transparent ? TRANSPARENT_BG : DEFAULT_STATUS_BG;
     const foreground = theme.getFgAnsi("text");
 
-    const left: string[] = [];
-    const leftIds: StatusLineSegmentId[] = [];
-    for (const id of preset.leftSegments) {
-      const rendered = renderSegment(id, segmentCtx);
-      if (rendered.visible && rendered.content) {
-        left.push(rendered.content);
-        leftIds.push(id);
-      }
-    }
-    const right: string[] = [];
-    for (const id of preset.rightSegments) {
-      const rendered = renderSegment(id, segmentCtx);
-      if (rendered.visible && rendered.content) {
-        right.push(rendered.content);
-      }
-    }
-
-    const leftSeparatorWidth = visibleWidth(separator.left);
-    const rightSeparatorWidth = visibleWidth(separator.right);
-    const endCaps = transparent ? EMPTY_END_CAPS : separator.endCaps;
-    const leftCapWidth = visibleWidth(endCaps.right);
-    const rightCapWidth = visibleWidth(endCaps.left);
-    const groupWidth = (
-      parts: string[],
-      capWidth: number,
-      separatorWidth: number,
-    ): number => {
-      if (parts.length === 0) {
-        return 0;
-      }
-      return (
-        parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
-        Math.max(0, parts.length - 1) * (separatorWidth + 2) +
-        2 +
-        capWidth
-      );
-    };
-
-    let leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-    let rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
-    const totalWidth = (): number =>
-      leftWidth + rightWidth + (left.length > 0 && right.length > 0 ? 1 : 0);
-
-    while (totalWidth() > width && right.length > 0) {
-      right.pop();
-      rightWidth = groupWidth(right, rightCapWidth, rightSeparatorWidth);
-    }
-
-    const pathIndex = leftIds.indexOf("path");
-    if (pathIndex >= 0 && totalWidth() > width) {
-      const overflow = totalWidth() - width;
-      const currentWidth = visibleWidth(left[pathIndex] ?? "");
-      const minPathWidth = 8;
-      const shrinkable = currentWidth - minPathWidth;
-      if (shrinkable > 0) {
-        const shrinkBy = Math.min(shrinkable, overflow);
-        const currentMaxLength =
-          preset.segmentOptions.path?.maxLength ?? DEFAULT_PATH_MAX_LENGTH;
-        let nextMaxLength = Math.max(
-          MIN_PATH_MAX_LENGTH,
-          Math.min(currentMaxLength, currentWidth) - shrinkBy,
-        );
-        const pathCtx = (maxLength: number): SegmentContext => ({
-          ...segmentCtx,
-          options: {
-            ...segmentCtx.options,
-            path: { ...segmentCtx.options.path, maxLength },
-          },
-        });
-        let adjusted = renderSegment("path", pathCtx(nextMaxLength));
-        if (adjusted.visible && adjusted.content) {
-          // maxLength governs path text rather than the icon prefix; converge on the requested reduction.
-          for (
-            let attempt = 0;
-            attempt < MAX_PATH_WIDTH_ADJUSTMENT_ATTEMPTS;
-            attempt++
-          ) {
-            const saved = currentWidth - visibleWidth(adjusted.content);
-            if (saved >= shrinkBy) {
-              break;
-            }
-            const correctedMaxLength = Math.max(
-              MIN_PATH_MAX_LENGTH,
-              nextMaxLength - (shrinkBy - saved),
-            );
-            if (correctedMaxLength >= nextMaxLength) {
-              break;
-            }
-            nextMaxLength = correctedMaxLength;
-            const rerendered = renderSegment("path", pathCtx(nextMaxLength));
-            if (!(rerendered.visible && rerendered.content)) {
-              break;
-            }
-            adjusted = rerendered;
-          }
-          left[pathIndex] = adjusted.content;
-          leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-        }
-      }
-    }
-
-    while (totalWidth() > width && left.length > 0) {
-      let dropIndex = leftIds.length - 1;
-      while (dropIndex >= 0 && leftIds[dropIndex] === "path") {
-        dropIndex--;
-      }
-      if (dropIndex < 0) {
-        dropIndex = left.length - 1;
-      }
-      left.splice(dropIndex, 1);
-      leftIds.splice(dropIndex, 1);
-      leftWidth = groupWidth(left, leftCapWidth, leftSeparatorWidth);
-    }
+    const { left, right, leftWidth, rightWidth, endCaps } = fitStatusSegments(
+      width,
+      preset,
+      segmentCtx,
+      separator,
+    );
 
     /**
      * Styles a segment group with its outward-facing cap, omitted when transparent.
@@ -916,8 +778,8 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       if (ctx.ui.getEditorComponent() === installedEditorFactory) {
         ctx.ui.setEditorComponent(previousEditorFactory);
       }
-      footerData = null;
-      tui = null;
+      footerData = undefined;
+      tui = undefined;
       disposed = true;
     };
     disposeUi = releaseInstalledUi;
@@ -930,27 +792,20 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
       tui = footerTui;
       footerUnsubscribe?.();
       const unsubscribe = data.onBranchChange(() => {
-        gitLastFetch = 0;
-        prBranchKey = null;
-        prController?.abort();
-        prController = null;
-        prInFlight = false;
-        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and branch notifications stay nonblocking.
-        void refreshGit(true);
+        gitStatus.invalidate("branch");
       });
       footerUnsubscribe = unsubscribe;
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and footer installation stays synchronous.
-      void refreshGit(true);
+      gitStatus.requestRefresh();
       return {
         dispose(): void {
           ownsFooterSlot = false;
           if (footerUnsubscribe === unsubscribe) {
             unsubscribe();
-            footerUnsubscribe = null;
+            footerUnsubscribe = undefined;
           }
           if (footerData === data) {
-            footerData = null;
-            tui = null;
+            footerData = undefined;
+            tui = undefined;
           }
         },
         invalidate(): void {
@@ -985,38 +840,32 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     }
   };
 
-  // Executors retain synchronous event effects and turn thrown failures into rejections.
   /**
-   * Resets session state and installs TUI chrome plus an owned one-second refresh timer.
+   * Releases the previous session before acquiring TUI chrome and owned refresh scheduling.
+   * Setup failures release newly acquired resources before rejecting with the original error.
+   * @returns Setup completion without waiting for optional Git/PR commands.
    * @example A non-TUI session_start resets counters without installing UI or a ticker.
    */
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
+    await releaseSessionResources();
     currentCtx = ctx;
     settings = readSettings(ctx.cwd, ctx.isProjectTrusted());
-    activeMs = 0;
-    activeStartedAt = null;
-    streamStartedAt = null;
-    tokensPerSecond = null;
-    gitLastFetch = 0;
-    prBranchKey = null;
-    gitState = {
-      branch: null,
-      staged: 0,
-      unstaged: 0,
-      untracked: 0,
-      pr: null,
-    };
+    runMetrics = EMPTY_RUN_METRICS;
     if (ctx.mode !== "tui") {
-      return Promise.resolve();
+      return;
     }
 
-    installUi(ctx);
-    ticker = setInterval(() => {
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay this render tick.
-      void refreshGit();
-      requestRender();
-    }, STATUS_REFRESH_INTERVAL_MS);
-    return Promise.resolve();
+    try {
+      await gitStatus.start();
+      installUi(ctx);
+      ticker = setInterval(() => {
+        gitStatus.requestRefresh();
+        requestRender();
+      }, STATUS_REFRESH_INTERVAL_MS);
+    } catch (error) {
+      await releaseSessionResources();
+      throw error;
+    }
   });
 
   // ponytail: share one context-refresh callback across these five hooks.
@@ -1045,84 +894,67 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
     requestRender();
     return Promise.resolve();
   });
+  /**
+   * Opens run metrics using one event timestamp and requests a render.
+   * @example A repeated agent_start restarts stream timing without restarting active time.
+   */
   pi.on("agent_start", (_event, ctx) => {
     currentCtx = ctx;
-    if (activeStartedAt === null) {
-      activeStartedAt = Date.now();
-    }
-    streamStartedAt = Date.now();
+    runMetrics = updateRunMetrics(runMetrics, { kind: "start" }, Date.now());
     requestRender();
     return Promise.resolve();
   });
-  // ponytail: share the identical message_update/message_end usage callback.
   /**
-   * Updates output tokens/second from wall-clock stream duration and requests a render.
-   * @example 20 output tokens over two seconds sets tokensPerSecond to 10.
+   * Applies assistant output to run metrics at the event timestamp and requests a render.
+   * @example Missing output retains the previous rate and still requests a render.
    */
   pi.on("message_update", (event, ctx) => {
     currentCtx = ctx;
-    const usage = messageUsage(event.message);
-    if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
-      const { output } = usage;
-      const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0) {
-        tokensPerSecond = outputTokens / elapsed;
-      }
-    }
+    runMetrics = updateRunMetrics(
+      runMetrics,
+      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      Date.now(),
+    );
     requestRender();
     return Promise.resolve();
   });
   /**
-   * Records final output tokens/second when positive usage and elapsed time are available.
-   * @example A final message with zero output retains the last rate and requests a render.
+   * Applies final assistant output to run metrics and requests a render.
+   * @example After agent_end, final output retains the previous rate.
    */
   pi.on("message_end", (event, ctx) => {
     currentCtx = ctx;
-    const usage = messageUsage(event.message);
-    if (usage && streamStartedAt !== null) {
-      const elapsed = (Date.now() - streamStartedAt) / MILLISECONDS_PER_SECOND;
-      const { output } = usage;
-      const outputTokens = numeric(output);
-      if (elapsed > 0 && outputTokens > 0) {
-        tokensPerSecond = outputTokens / elapsed;
-      }
-    }
+    runMetrics = updateRunMetrics(
+      runMetrics,
+      { kind: "output", output: messageUsage(event.message)?.["output"] },
+      Date.now(),
+    );
     requestRender();
     return Promise.resolve();
   });
+  /**
+   * Closes run metrics at the event timestamp and requests a render.
+   * @example A repeated agent_end retains the accumulated duration and throughput.
+   */
   pi.on("agent_end", (_event, ctx) => {
     currentCtx = ctx;
-    if (activeStartedAt !== null) {
-      activeMs += Date.now() - activeStartedAt;
-      activeStartedAt = null;
-    }
-    streamStartedAt = null;
+    runMetrics = updateRunMetrics(runMetrics, { kind: "end" }, Date.now());
     requestRender();
     return Promise.resolve();
   });
   pi.on("tool_result", (event, ctx) => {
     currentCtx = ctx;
     if (event.toolName === "write" || event.toolName === "edit") {
-      gitLastFetch = 0;
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
-      void refreshGit(true);
-      return Promise.resolve();
+      gitStatus.invalidate("working-tree");
+      return;
     }
     if (event.toolName !== "bash" || !isObjectRecord(event.input)) {
-      return Promise.resolve();
+      return;
     }
     const { command } = event.input;
     if (typeof command === "string" && GIT_BRANCH_COMMAND_RE.test(command)) {
-      gitLastFetch = 0;
-      prBranchKey = null;
-      prController?.abort();
-      prController = null;
-      prInFlight = false;
-      // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and must not delay tool-result completion.
-      void refreshGit(true);
+      gitStatus.invalidate("branch");
     }
-    return Promise.resolve();
   });
   /**
    * Coalesces Git-changing shell commands into one owned 150 ms refresh timeout.
@@ -1130,21 +962,21 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
    */
   pi.on("user_bash", (event, ctx) => {
     currentCtx = ctx;
-    if (GIT_BRANCH_COMMAND_RE.test(event.command)) {
+    if (ticker && GIT_BRANCH_COMMAND_RE.test(event.command)) {
       clearTimeout(delayedRefresh);
       delayedRefresh = setTimeout(() => {
         delayedRefresh = undefined;
-        prController?.abort();
-        prController = null;
-        prInFlight = false;
-        // biome-ignore lint/complexity/noVoid: Git refresh handles command errors and the coalescing timer stays nonblocking.
-        void refreshGit(true);
+        gitStatus.invalidate("pending-pr");
       }, GIT_REFRESH_COALESCE_DELAY_MS);
     }
     return Promise.resolve();
   });
-  pi.on("session_shutdown", () => {
-    releaseSessionResources();
-    return Promise.resolve();
+  /**
+   * Stops queued/running refresh jobs and releases the session's timers, subscriptions, and UI.
+   * @returns Completion after owned commands are aborted/joined without waiting for late exec results.
+   * @example await session_shutdown(); // A later ticker signal cannot execute optional commands.
+   */
+  pi.on("session_shutdown", async () => {
+    await releaseSessionResources();
   });
 }

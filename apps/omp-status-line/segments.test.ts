@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies need the live named-import binding.
+import * as os from "node:os";
 import { renderSegment } from "./segments.ts";
 import type {
   SegmentContext,
@@ -7,6 +9,9 @@ import type {
 } from "./types.ts";
 
 const ASCII_PATH_LABEL = "dir: ";
+const FIXED_CLOCK_MINUTE = 5;
+const FIXED_CLOCK_SECOND = 9;
+const SESSION_ID_CELL_LIMIT = 8;
 
 /**
  * Creates a status-line context with no recorded usage and plain theme effects.
@@ -17,6 +22,9 @@ const ASCII_PATH_LABEL = "dir: ";
 function createContext(options?: {
   cwd?: string;
   modelName?: string;
+  modelId?: string;
+  reasoning?: boolean;
+  thinkingLevel?: string;
   pullRequestUrl?: string;
   subscription?: boolean;
 }): SegmentContext {
@@ -24,11 +32,11 @@ function createContext(options?: {
     extensionContext: {
       cwd: options?.cwd ?? "/tmp/project",
       model: {
-        id: "test-model",
+        id: options?.modelId ?? "test-model",
         name: options?.modelName ?? "Test",
-        reasoning: false,
+        reasoning: options?.reasoning ?? false,
       },
-      thinkingLevel: "off",
+      thinkingLevel: options?.thinkingLevel ?? "off",
       modelRegistry: {
         // biome-ignore lint/style/useNamingConvention: host API method name
         isUsingOAuth: () => options?.subscription ?? false,
@@ -38,7 +46,7 @@ function createContext(options?: {
         getSessionName: () => undefined,
       },
     } as never,
-    footerData: null,
+    footerData: undefined,
     theme: {
       fg: (_color: string, text: string): string => text,
       getFgAnsi: (_color: string): string => "",
@@ -58,21 +66,21 @@ function createContext(options?: {
       cacheWrite: 0,
       premiumRequests: 0,
       cost: 0,
-      tokensPerSecond: null,
+      tokensPerSecond: undefined,
     },
     contextTokens: 0,
-    contextPercent: null,
+    contextPercent: undefined,
     contextWindow: 0,
     autoCompactEnabled: true,
     activeMs: 0,
     git: {
-      branch: null,
+      branch: undefined,
       staged: 0,
       unstaged: 0,
       untracked: 0,
       pr: options?.pullRequestUrl
         ? { number: 42, url: options.pullRequestUrl }
-        : null,
+        : undefined,
     },
   };
 }
@@ -121,6 +129,173 @@ test("should clamp paths by terminal cells", () => {
 });
 
 describe("renderSegment", () => {
+  test.each([
+    { cwd: "/work/project/src", options: {}, expected: "project/src" },
+    {
+      cwd: "/home/test/Projects/project",
+      options: {},
+      expected: "project",
+    },
+    { cwd: "/home/test", options: {}, expected: "~" },
+    { cwd: "/home/test/src", options: {}, expected: "~/src" },
+    { cwd: "/home/tester/src", options: {}, expected: "/home/tester/src" },
+    { cwd: "/workshop/src", options: {}, expected: "/workshop/src" },
+    {
+      cwd: "/work/project",
+      options: { stripWorkPrefix: false },
+      expected: "/work/project",
+    },
+    {
+      cwd: "/home/test/src",
+      options: { abbreviate: false },
+      expected: "/home/test/src",
+    },
+  ])(
+    "should display path '$expected' when cwd is '$cwd' with options $options",
+    ({ cwd, options, expected }) => {
+      spyOn(os, "homedir").mockReturnValue("/home/test");
+      const context = createContext({ cwd });
+      context.options.path = options;
+
+      const rendered = renderSegment("path", context);
+
+      expect(rendered.visible).toBe(true);
+      expect(Bun.stripANSI(rendered.content)).toBe(`dir: ${expected}`);
+    },
+  );
+
+  test.each([
+    {
+      name: "Claude Sonnet",
+      id: "test-model",
+      expected: "Sonnet",
+    },
+    {
+      name: "Friendly label",
+      id: "gpt-5.2-codex",
+      expected: "GPT-5.2-Codex",
+    },
+    { name: "\n\t", id: "fallback-model", expected: "fallback-model" },
+    { name: "", id: "", expected: "no-model" },
+  ])(
+    "should render the model label as $expected when its name is '$name' and ID is '$id'",
+    ({ name, id, expected }) => {
+      const context = createContext({ modelName: name, modelId: id });
+
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        `[M] ${expected}`,
+      );
+    },
+  );
+
+  test.each([
+    {
+      level: "off",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [off]",
+    },
+    {
+      level: "medium",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [med]",
+    },
+    {
+      level: "xhigh",
+      ascii: true,
+      compact: false,
+      expected: "[M] Test · [xhi]",
+    },
+    {
+      level: "high",
+      ascii: false,
+      compact: false,
+      expected: "⬢ Test · ◒ high",
+    },
+    {
+      level: "high",
+      ascii: false,
+      compact: true,
+      expected: "◒ Test",
+    },
+    {
+      level: "future",
+      ascii: false,
+      compact: false,
+      expected: "⬢ Test · future",
+    },
+  ])(
+    "should render reasoning as '$expected' when level is $level, ascii is $ascii, and compact is $compact",
+    ({ level, ascii, compact, expected }) => {
+      const context = createContext({ reasoning: true, thinkingLevel: level });
+      context.settings.preset = ascii ? "ascii" : "custom";
+      context.settings.compactThinkingLevel = compact;
+
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        expected,
+      );
+      context.options.model = { showThinkingLevel: false };
+      expect(Bun.stripANSI(renderSegment("model", context).content)).toBe(
+        ascii ? "[M] Test" : "⬢ Test",
+      );
+    },
+  );
+
+  test.each([
+    { hours: 0, format: "12h", seconds: false, expected: "12:05am" },
+    { hours: 13, format: "12h", seconds: true, expected: "1:05:09pm" },
+    { hours: 13, format: "24h", seconds: true, expected: "13:05:09" },
+  ] as const)(
+    "should render time as $expected when the hour is $hours in $format format with seconds $seconds",
+    ({ hours, format, seconds, expected }) => {
+      const hour = spyOn(Date.prototype, "getHours").mockReturnValue(hours);
+      const minute = spyOn(Date.prototype, "getMinutes").mockReturnValue(
+        FIXED_CLOCK_MINUTE,
+      );
+      const second = spyOn(Date.prototype, "getSeconds").mockReturnValue(
+        FIXED_CLOCK_SECOND,
+      );
+      try {
+        const context = createContext();
+        context.options.time = { format, showSeconds: seconds };
+
+        expect(renderSegment("time", context)).toEqual({
+          content: `time: ${expected}`,
+          visible: true,
+        });
+      } finally {
+        second.mockRestore();
+        minute.mockRestore();
+        hour.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    {
+      url: "https://example.com/pr/42",
+      expected: "\x1b]8;;https://example.com/pr/42\x07PR #42\x1b]8;;\x07",
+    },
+    {
+      url: "http://example.com/pr/42",
+      expected: "\x1b]8;;http://example.com/pr/42\x07PR #42\x1b]8;;\x07",
+    },
+    { url: "file:///tmp/pr/42", expected: "PR #42" },
+    { url: "not-a-url", expected: "PR #42" },
+    { url: "https://example.com/pr/42 next", expected: "PR #42" },
+  ])(
+    "should render the PR label with only a safe HTTP hyperlink when its URL is $url",
+    ({ url, expected }) => {
+      const context = createContext({ pullRequestUrl: url });
+      const rendered = renderSegment("pr", context);
+
+      expect(rendered.visible).toBe(true);
+      expect(Bun.stripANSI(rendered.content)).toBe("PR #42");
+      expect(rendered.content).toBe(expected);
+    },
+  );
+
   test("should total input, output, and cache writes without cache reads when rendering token_total", () => {
     const context = createContext();
     Object.assign(context.usage, {
@@ -386,4 +561,103 @@ describe("renderSegment", () => {
       visible: true,
     });
   });
+  test("should show the Pi label but hide pull requests when no PR is available", () => {
+    const context = createContext();
+
+    expect(renderSegment("pi", context)).toEqual({
+      content: "pi ",
+      visible: true,
+    });
+    expect(renderSegment("pr", context)).toEqual({
+      content: "",
+      visible: false,
+    });
+  });
+
+  test("should hide empty subagent status and show sanitized activity when agents report progress", () => {
+    const context = createContext();
+    const statuses = new Map([["subagents", "\n\t"]]);
+    context.footerData = {
+      getExtensionStatuses: () => statuses,
+    } as never;
+    expect(renderSegment("subagents", context)).toEqual({
+      content: "",
+      visible: false,
+    });
+
+    statuses.set("subagents", "\x1b[31m2 running\n1 done\x1b[0m");
+    expect(renderSegment("subagents", context)).toEqual({
+      content: "agents: 2 running 1 done",
+      visible: true,
+    });
+  });
+
+  test.each([
+    ["empty", "", "new"],
+    ["control-only", "\x1b[31m\n\t", "new"],
+    ["long ASCII", "abcdefghijk", "abcdefgh"],
+    ["wide Unicode", "\x1b[31m界界界界界\x1b[0m", "界界界界"],
+  ] as const)(
+    "should show a safe eight-cell session identifier when the ID is %s",
+    (_condition, sessionId, expected) => {
+      const context = createContext();
+      context.extensionContext.sessionManager.getSessionId = () => sessionId;
+
+      const rendered = renderSegment("session", context);
+
+      expect(rendered.visible).toBe(true);
+      expect(rendered.content).toBe(`session: ${expected}`);
+      expect(
+        Bun.stringWidth(rendered.content.slice("session: ".length)),
+      ).toBeLessThanOrEqual(SESSION_ID_CELL_LIMIT);
+    },
+  );
+
+  test("should show a sanitized short hostname when the host name includes a domain and controls", () => {
+    const host = spyOn(os, "hostname").mockReturnValue(
+      "\x1b[31m界work\x1b[0m.example.test\n",
+    );
+    try {
+      expect(renderSegment("hostname", createContext())).toEqual({
+        content: "host: 界work",
+        visible: true,
+      });
+    } finally {
+      host.mockRestore();
+    }
+  });
+
+  test.each([
+    ["absent", undefined],
+    ["control-only", "\x1b[31m\n\t"],
+  ] as const)(
+    "should hide the session name when it is %s",
+    (_condition, name) => {
+      const context = createContext();
+      context.extensionContext.sessionManager.getSessionName = () => name;
+      expect(renderSegment("session_name", context)).toEqual({
+        content: "",
+        visible: false,
+      });
+    },
+  );
+
+  test.each([
+    [false, "\x1b[38;2;10;20;30m"],
+    [true, "\x1b[38;2;226;101;140m"],
+  ] as const)(
+    "should style the sanitized session name and reset its foreground when session accent is %s",
+    (sessionAccent, foreground) => {
+      const context = createContext();
+      context.extensionContext.sessionManager.getSessionName = () =>
+        " \x1b[31msession-name\x1b[0m\n\t";
+      context.theme.getFgAnsi = () => "\x1b[38;2;10;20;30m";
+      context.settings.sessionAccent = sessionAccent;
+
+      expect(renderSegment("session_name", context)).toEqual({
+        content: `${foreground}session-name\x1b[39m`,
+        visible: true,
+      });
+    },
+  );
 });

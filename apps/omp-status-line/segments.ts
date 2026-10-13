@@ -117,18 +117,24 @@ export function sanitizeInlineText(text: string): string {
   return sanitized;
 }
 
-function safeHyperlinkUrl(text: string): string | null {
+/**
+ * Validates a terminal hyperlink without changing its text or acquiring resources.
+ * @param text Candidate URL from PR metadata.
+ * @returns The original HTTP(S) URL, or undefined if invalid or unsafe.
+ * @example safeHyperlinkUrl("file:///tmp") === undefined
+ */
+function safeHyperlinkUrl(text: string): string | undefined {
   const sanitized = sanitizeInlineText(text).trim();
   if (sanitized !== text || WHITESPACE_RE.test(sanitized)) {
-    return null;
+    return undefined;
   }
   try {
     const url = new URL(sanitized);
     return url.protocol === "http:" || url.protocol === "https:"
       ? sanitized
-      : null;
+      : undefined;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -347,7 +353,7 @@ function renderContext(ctx: SegmentContext): RenderedSegment {
   const icons = getIcons(ctx.settings.preset === "ascii");
   const usage =
     ctx.contextWindow > 0
-      ? `${ctx.contextPercent === null ? "?" : `${ctx.contextPercent.toFixed(1)}%`}/${formatNumber(ctx.contextWindow)}`
+      ? `${ctx.contextPercent === undefined ? "?" : `${ctx.contextPercent.toFixed(1)}%`}/${formatNumber(ctx.contextWindow)}`
       : `${formatNumber(ctx.contextTokens)}/?`;
   const auto = ctx.autoCompactEnabled && icons.auto ? ` ${icons.auto}` : "";
   return {
@@ -380,6 +386,38 @@ function renderTime(ctx: SegmentContext): RenderedSegment {
     value += `:${now.getSeconds().toString().padStart(2, "0")}`;
   }
   return { content: withIcon(icons.time, `${value}${suffix}`), visible: true };
+}
+
+/**
+ * Renders monetary cost, rounded premium requests, and subscription status.
+ * @param ctx Usage and model registry; the registry determines OAuth billing.
+ * @returns A styled segment, hidden when no charges or subscription apply.
+ * @example With cost 1.5 and no premium/subscription, content contains "$1.50".
+ */
+function renderCost(ctx: SegmentContext): RenderedSegment {
+  const subscription = ctx.extensionContext.model
+    ? ctx.extensionContext.modelRegistry.isUsingOAuth(
+        ctx.extensionContext.model,
+      )
+    : false;
+  const premium =
+    Math.round(
+      (ctx.usage.premiumRequests + Number.EPSILON) *
+        PREMIUM_REQUEST_DECIMAL_FACTOR,
+    ) / PREMIUM_REQUEST_DECIMAL_FACTOR;
+  const parts: string[] = [];
+  if (ctx.usage.cost > 0) {
+    parts.push(`$${ctx.usage.cost.toFixed(2)}`);
+  }
+  if (premium > 0) {
+    parts.push(`★ ${formatNumber(premium)}`);
+  }
+  if (subscription) {
+    parts.push("(sub)");
+  }
+  return parts.length > 0
+    ? { content: color(statusColor.cost, parts.join(" ")), visible: true }
+    : { content: "", visible: false };
 }
 
 /**
@@ -486,31 +524,8 @@ export function renderSegment(
             visible: true,
           }
         : { content: "", visible: false };
-    case "cost": {
-      const subscription = ctx.extensionContext.model
-        ? ctx.extensionContext.modelRegistry.isUsingOAuth(
-            ctx.extensionContext.model,
-          )
-        : false;
-      const premium =
-        Math.round(
-          (ctx.usage.premiumRequests + Number.EPSILON) *
-            PREMIUM_REQUEST_DECIMAL_FACTOR,
-        ) / PREMIUM_REQUEST_DECIMAL_FACTOR;
-      const parts: string[] = [];
-      if (ctx.usage.cost > 0) {
-        parts.push(`$${ctx.usage.cost.toFixed(2)}`);
-      }
-      if (premium > 0) {
-        parts.push(`★ ${formatNumber(premium)}`);
-      }
-      if (subscription) {
-        parts.push("(sub)");
-      }
-      return parts.length > 0
-        ? { content: color(statusColor.cost, parts.join(" ")), visible: true }
-        : { content: "", visible: false };
-    }
+    case "cost":
+      return renderCost(ctx);
     case "context_pct":
       return renderContext(ctx);
     case "context_total":

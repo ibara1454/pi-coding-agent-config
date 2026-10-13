@@ -2,6 +2,8 @@ name: Check
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -43,7 +45,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p coverage
-          bun run test:coverage --log-order=grouped --continue=always 2>&1 | tee coverage/report.txt
+          bun run test --log-order=grouped --continue=always 2>&1 | tee coverage/report.txt
 
       - name: Publish coverage summary
         if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
@@ -51,7 +53,7 @@ jobs:
         run: |
           {
             printf '## Test coverage\n\n'
-            printf 'Bun enforces coverage thresholds; Codecov reports per-package coverage changes in PR comments.\n\n'
+            printf 'Bun enforces per-file coverage floors; Codecov requires 95%% changed-line coverage and reports per-package changes in PR comments.\n\n'
             printf '```text\n'
             cat coverage/report.txt
             printf '\n```\n'

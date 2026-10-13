@@ -16,10 +16,6 @@
       "cache": false
     },
     "test": {
-      "cache": true,
-      "outputs": []
-    },
-    "test:coverage": {
       "cache": false,
       "outputs": ["coverage/**"]
     },

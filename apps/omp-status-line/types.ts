@@ -84,11 +84,11 @@ export interface PresetDef {
 }
 
 export interface GitState {
-  branch: string | null;
+  branch: string | undefined;
   staged: number;
   unstaged: number;
   untracked: number;
-  pr: { number: number; url: string } | null;
+  pr: { number: number; url: string } | undefined;
 }
 
 export interface UsageStats {
@@ -98,18 +98,18 @@ export interface UsageStats {
   cacheWrite: number;
   premiumRequests: number;
   cost: number;
-  tokensPerSecond: number | null;
+  tokensPerSecond: number | undefined;
 }
 
 export interface SegmentContext {
   extensionContext: ExtensionContext;
-  footerData: ReadonlyFooterDataProvider | null;
+  footerData: ReadonlyFooterDataProvider | undefined;
   theme: Theme;
   settings: StatusLineSettings;
   options: StatusLineSegmentOptions;
   usage: UsageStats;
   contextTokens: number;
-  contextPercent: number | null;
+  contextPercent: number | undefined;
   contextWindow: number;
   autoCompactEnabled: boolean;
   activeMs: number;

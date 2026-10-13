@@ -7,6 +7,7 @@ main();
  * Runs one local GritQL rule against TypeScript source using Biome's WASM API.
  * Each call uses an isolated in-memory workspace that is disposed before
  * returning or throwing; no input file or Biome CLI subprocess is created.
+ * Preserves the rule filename so named plugin suppressions behave as in the CLI.
  *
  * @param rule - Rule filename beside this helper, without the `.grit` suffix.
  * @param source - Complete TypeScript source text to lint.
@@ -35,7 +36,7 @@ main();
 export function lintRule(rule: string, source: string) {
   using files = new MemoryFileSystem();
   files.insert(
-    "/project/rule.grit",
+    `/project/${rule}.grit`,
     readFileSync(new URL(`${rule}.grit`, import.meta.url)),
   );
   using workspace = Workspace.withFileSystem(files);
@@ -46,7 +47,7 @@ export function lintRule(rule: string, source: string) {
   const settings = workspace.updateSettings({
     projectKey,
     workspaceDirectory: "/project",
-    configuration: { plugins: ["./rule.grit"] },
+    configuration: { plugins: [`./${rule}.grit`] },
   });
   if (settings.diagnostics.length > 0) {
     throw new Error(JSON.stringify(settings.diagnostics));

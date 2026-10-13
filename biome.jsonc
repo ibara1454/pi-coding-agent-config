@@ -8,6 +8,7 @@
     },
     "./packages/biome-rules/src/no-double-type-assertion.grit",
     "./packages/biome-rules/src/no-private-methods.grit",
+    "./packages/biome-rules/src/use-undefined.grit",
     {
       "path": "./packages/biome-rules/src/use-should-test-title.grit",
       "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
@@ -35,7 +36,7 @@
         // Initial rollout ceilings cover existing code; lower as owners simplify it.
         "noExcessiveCognitiveComplexity": {
           "level": "error",
-          "options": { "maxAllowedComplexity": 80 }
+          "options": { "maxAllowedComplexity": 40 }
         },
         // Includes cohesive extension setup and test-suite callbacks.
         "noExcessiveLinesPerFunction": {

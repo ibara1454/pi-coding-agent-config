@@ -625,6 +625,39 @@ function packageResourceParticipation(
   return matchesAutoloadDisabledPattern(resource.path, patterns, packageRoot);
 }
 /**
+ * Computes duplicate winners and stable ordering slots without resolving packages.
+ * Project identities use their last entry; global identities use their first.
+ * @returns New maps keyed by scope-aware package identity; invalid entries are skipped.
+ * @example Two aliases for one project package have winner index 1 and slot 0.
+ */
+function packagePrecedence(
+  entries: readonly unknown[],
+  scope: ResourceScope,
+  cwd: string,
+  agentDir: string,
+): {
+  readonly winningIndexByIdentity: ReadonlyMap<string, number>;
+  readonly precedenceSlotByIdentity: ReadonlyMap<string, number>;
+} {
+  const winningIndexByIdentity = new Map<string, number>();
+  const precedenceSlotByIdentity = new Map<string, number>();
+  for (const [index, entry] of entries.entries()) {
+    const source = packageSource(entry);
+    if (source === undefined) {
+      continue;
+    }
+    const identity = packageIdentity(source, scope, cwd, agentDir);
+    if (!precedenceSlotByIdentity.has(identity)) {
+      precedenceSlotByIdentity.set(identity, index);
+    }
+    if (scope === "project" || !winningIndexByIdentity.has(identity)) {
+      winningIndexByIdentity.set(identity, index);
+    }
+  }
+  return { winningIndexByIdentity, precedenceSlotByIdentity };
+}
+
+/**
  * Discovers installed package resources with scope and duplicate precedence.
  * @param context - Resolution directories and the shared diagnostic sink.
  * @param globalDocument - Global package aliases available to project entries.
@@ -662,21 +695,8 @@ async function discoverPackageScope(
   const globalPackages = Array.isArray(globalDocument?.value.packages)
     ? globalDocument.value.packages
     : [];
-  const winningIndexByIdentity = new Map<string, number>();
-  const precedenceSlotByIdentity = new Map<string, number>();
-  for (const [index, entry] of packageEntries.entries()) {
-    const source = packageSource(entry);
-    if (source === undefined) {
-      continue;
-    }
-    const identity = packageIdentity(source, scope, cwd, agentDir);
-    if (!precedenceSlotByIdentity.has(identity)) {
-      precedenceSlotByIdentity.set(identity, index);
-    }
-    if (scope === "project" || !winningIndexByIdentity.has(identity)) {
-      winningIndexByIdentity.set(identity, index);
-    }
-  }
+  const { winningIndexByIdentity, precedenceSlotByIdentity } =
+    packagePrecedence(packageEntries, scope, cwd, agentDir);
 
   for (const [index, entry] of packageEntries.entries()) {
     const source = packageSource(entry);
@@ -735,8 +755,7 @@ async function discoverPackageScope(
         ? dirname(installedPath)
         : installedPath;
       for (const field of RESOURCE_FIELDS) {
-        const resolvedResources =
-          field === "extensions" ? resolved.extensions : resolved.skills;
+        const resolvedResources = resolved[field];
         const allPaths = packageResourcePaths(
           packageRoot,
           field,
@@ -1005,6 +1024,63 @@ function resolutionOrder(draft: ResourceDraft, draftIndex: number): number {
 }
 
 /**
+ * Builds a persistence target with the draft's stable ID and resource ownership.
+ * @param allPathsByTargetGroup - Discovered paths for each scope/package occurrence.
+ * @returns A new target; input drafts and grouped paths remain unchanged.
+ * @example A top-level draft retains its occurrence paths, not other entries' paths.
+ */
+function materializeTarget(
+  draft: ResourceDraft,
+  allPathsByTargetGroup: ReadonlyMap<string, readonly string[]>,
+): ToggleTarget {
+  const field = fieldForKind(draft.kind);
+  const filterPath = resourceFilterPath(
+    draft.resolvedPath,
+    draft.kind,
+    draft.target.type === "top-level"
+      ? draft.baseDir
+      : draft.target.packageRoot,
+  );
+  if (draft.target.type === "top-level") {
+    return {
+      id: `top:${draft.scope}:${draft.kind}:${draft.canonicalPath}`,
+      type: "top-level",
+      scope: draft.scope,
+      kind: draft.kind,
+      field,
+      canonicalPath: draft.canonicalPath,
+      resolvedPath: draft.resolvedPath,
+      filterPath,
+      allPaths: draft.target.occurrencePaths,
+      baseDir: draft.baseDir,
+      occurrencePaths: draft.target.occurrencePaths,
+    };
+  }
+  const group = `package:${draft.scope}:${draft.target.locator.source}:${draft.target.locator.occurrence}:${draft.kind}`;
+  return {
+    id: `${group}:${filterPath}`,
+    type: "package",
+    scope: draft.scope,
+    kind: draft.kind,
+    field,
+    canonicalPath: draft.canonicalPath,
+    resolvedPath: draft.resolvedPath,
+    filterPath,
+    allPaths: allPathsByTargetGroup.get(group) ?? [draft.resolvedPath],
+    packageRoot: draft.target.packageRoot,
+    canonicalPackageRoot: canonicalizeResourcePath(draft.target.packageRoot),
+    packageSourcePath: draft.target.packageSourcePath,
+    package: draft.target.locator,
+    hadFilterField: draft.target.hadFilterField,
+    autoloadDelta: draft.target.autoloadDelta,
+    participates: draft.target.participates,
+    participatesWhenEnabled: draft.target.participatesWhenEnabled,
+    participatesWhenDisabled: draft.target.participatesWhenDisabled,
+    packageIdentity: draft.target.packageIdentity,
+  };
+}
+
+/**
  * Materializes drafts into sorted rows and persistence targets without writes.
  * @param context - Directories for skill metadata and its diagnostic sink.
  * @param projectRegularPackages - Project winners that shadow global packages.
@@ -1037,64 +1113,8 @@ function materializeCatalog(
   const rows: CatalogRow[] = [];
   const targets = new Map<string, ToggleTarget>();
   for (const [draftIndex, draft] of drafts.entries()) {
-    const field = fieldForKind(draft.kind);
-    const filterPath = resourceFilterPath(
-      draft.resolvedPath,
-      draft.kind,
-      draft.target.type === "top-level"
-        ? draft.baseDir
-        : draft.target.packageRoot,
-    );
-    const id =
-      draft.target.type === "top-level"
-        ? `top:${draft.scope}:${draft.kind}:${draft.canonicalPath}`
-        : `package:${draft.scope}:${draft.target.locator.source}:${draft.target.locator.occurrence}:${draft.kind}:${filterPath}`;
-    const group =
-      draft.target.type === "top-level"
-        ? `top:${draft.scope}:${draft.kind}`
-        : `package:${draft.scope}:${draft.target.locator.source}:${draft.target.locator.occurrence}:${draft.kind}`;
-    const allPaths =
-      draft.target.type === "top-level"
-        ? draft.target.occurrencePaths
-        : (allPathsByTargetGroup.get(group) ?? [draft.resolvedPath]);
-    const target: ToggleTarget =
-      draft.target.type === "top-level"
-        ? {
-            id,
-            type: "top-level",
-            scope: draft.scope,
-            kind: draft.kind,
-            field,
-            canonicalPath: draft.canonicalPath,
-            resolvedPath: draft.resolvedPath,
-            filterPath,
-            allPaths,
-            baseDir: draft.baseDir,
-            occurrencePaths: draft.target.occurrencePaths,
-          }
-        : {
-            id,
-            type: "package",
-            scope: draft.scope,
-            kind: draft.kind,
-            field,
-            canonicalPath: draft.canonicalPath,
-            resolvedPath: draft.resolvedPath,
-            filterPath,
-            allPaths,
-            packageRoot: draft.target.packageRoot,
-            canonicalPackageRoot: canonicalizeResourcePath(
-              draft.target.packageRoot,
-            ),
-            packageSourcePath: draft.target.packageSourcePath,
-            package: draft.target.locator,
-            hadFilterField: draft.target.hadFilterField,
-            autoloadDelta: draft.target.autoloadDelta,
-            participates: draft.target.participates,
-            participatesWhenEnabled: draft.target.participatesWhenEnabled,
-            participatesWhenDisabled: draft.target.participatesWhenDisabled,
-            packageIdentity: draft.target.packageIdentity,
-          };
+    const target = materializeTarget(draft, allPathsByTargetGroup);
+    const { id } = target;
     targets.set(id, target);
 
     const skill = skills.get(draft.canonicalPath);
