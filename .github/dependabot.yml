@@ -10,6 +10,6 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      pi:
+      dependencies:
         patterns:
-          - "@earendil-works/pi-*"
+          - "*"

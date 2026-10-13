@@ -178,9 +178,6 @@ Each workspace writes `coverage/lcov.info`.
 CI uploads LCOV to Codecov for per-package PR reports. The required
 `codecov/patch` check enforces **95% coverage of changed, instrumented lines**.
 
-Uploads use GitHub OIDC with `id-token: write`, including Dependabot PRs, without
-an upload secret. Codecov upload errors fail CI.
-
 ### Stress mode
 
 Stress mode re-runs every suite in isolated processes, in randomized order, five times
