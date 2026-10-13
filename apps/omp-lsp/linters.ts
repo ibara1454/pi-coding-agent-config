@@ -189,6 +189,74 @@ function severity(value: unknown, source: string): DiagnosticSeverity {
   }
 }
 
+/**
+ * Validates one Biome diagnostic, retaining only the requested file.
+ * @param item - Untrusted reporter entry; location and message are checked before filtering.
+ * @param server - Linter configuration whose root is the CLI cwd used to resolve reporter paths.
+ * @param file - Already-resolved absolute target path; compared against reporter paths resolved from server.root.
+ * @param lines - Target-file source snapshot in line order; validates one-based scalar columns and converts them to zero-based UTF-16 positions.
+ * @returns A validated diagnostic, or undefined for another file; inputs remain unchanged and no I/O is performed.
+ * @throws For malformed entries, positions, ranges, categories, or severities.
+ * @example An entry for "other.ts" returns undefined without validating its range.
+ */
+function biomeDiagnostic(
+  item: unknown,
+  server: ServerConfig,
+  file: string,
+  lines: readonly string[],
+): Diagnostic | undefined {
+  if (!record(item)) {
+    throw new Error(
+      "Biome JSON reporter returned diagnostic without a message",
+    );
+  }
+  const { message, location } = item;
+  if (typeof message !== "string" || !message) {
+    throw new Error(
+      "Biome JSON reporter returned a diagnostic without a message",
+    );
+  }
+  if (!record(location)) {
+    throw new Error(`Biome could not locate diagnostic: ${message}`);
+  }
+  const { path: diagnosticPath, start: rawStart, end: rawEnd } = location;
+  if (typeof diagnosticPath !== "string" || !diagnosticPath) {
+    throw new Error(`Biome could not locate diagnostic: ${message}`);
+  }
+  if (path.resolve(server.root, diagnosticPath) !== file) {
+    return;
+  }
+  const start = position(rawStart, "start", lines);
+  const end = rawEnd === undefined ? start : position(rawEnd, "end", lines);
+  if (
+    end.line < start.line ||
+    (end.line === start.line && end.character < start.character)
+  ) {
+    throw new Error("Biome returned a reversed diagnostic range");
+  }
+  const { category, severity: diagnosticSeverity } = item;
+  if (category !== undefined && typeof category !== "string") {
+    throw new Error("Biome returned an invalid diagnostic category");
+  }
+  return {
+    range: { start, end },
+    severity: severity(diagnosticSeverity, "Biome"),
+    message,
+    source: "biome",
+    ...(typeof category === "string" ? { code: category } : {}),
+  };
+}
+
+/**
+ * Validates a complete Biome report and collects target-file diagnostics in report order.
+ * @param value - Untrusted parsed JSON report; diagnostics retain reporter order and summary may report omitted diagnostics.
+ * @param server - Linter configuration whose root is the CLI cwd used to resolve reporter paths.
+ * @param file - Already-resolved absolute target path selecting diagnostics from the report.
+ * @param lines - Target-file source snapshot in line order, used to validate and convert one-based scalar columns to zero-based UTF-16 positions.
+ * @returns Diagnostics without changing the report or source lines and without I/O.
+ * @throws For malformed, oversized, or incomplete reports and invalid target entries.
+ * @example A report with diagnostics: [] and no omitted diagnostics returns [].
+ */
 function biomeDiagnostics(
   value: unknown,
   server: ServerConfig,
@@ -209,46 +277,10 @@ function biomeDiagnostics(
   }
   const diagnostics: Diagnostic[] = [];
   for (const item of rawDiagnostics) {
-    if (!record(item)) {
-      throw new Error(
-        "Biome JSON reporter returned diagnostic without a message",
-      );
+    const diagnostic = biomeDiagnostic(item, server, file, lines);
+    if (diagnostic) {
+      diagnostics.push(diagnostic);
     }
-    const { message, location } = item;
-    if (typeof message !== "string" || !message) {
-      throw new Error(
-        "Biome JSON reporter returned a diagnostic without a message",
-      );
-    }
-    if (!record(location)) {
-      throw new Error(`Biome could not locate diagnostic: ${message}`);
-    }
-    const { path: diagnosticPath, start: rawStart, end: rawEnd } = location;
-    if (typeof diagnosticPath !== "string" || !diagnosticPath) {
-      throw new Error(`Biome could not locate diagnostic: ${message}`);
-    }
-    if (path.resolve(server.root, diagnosticPath) !== file) {
-      continue;
-    }
-    const start = position(rawStart, "start", lines);
-    const end = rawEnd === undefined ? start : position(rawEnd, "end", lines);
-    if (
-      end.line < start.line ||
-      (end.line === start.line && end.character < start.character)
-    ) {
-      throw new Error("Biome returned a reversed diagnostic range");
-    }
-    const { category, severity: diagnosticSeverity } = item;
-    if (category !== undefined && typeof category !== "string") {
-      throw new Error("Biome returned an invalid diagnostic category");
-    }
-    diagnostics.push({
-      range: { start, end },
-      severity: severity(diagnosticSeverity, "Biome"),
-      message,
-      source: "biome",
-      ...(typeof category === "string" ? { code: category } : {}),
-    });
   }
   if (record(summary)) {
     const { diagnosticsNotPrinted } = summary;

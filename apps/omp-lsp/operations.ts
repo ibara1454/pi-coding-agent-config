@@ -533,6 +533,48 @@ async function readEditorConfigAncestors(
 }
 
 /**
+ * Reads matching section properties in file order without merging ancestor state.
+ * @param content - One EditorConfig file's contents.
+ * @param relative - Target path relative to that configuration, using forward slashes.
+ * @param basename - Target name used for section patterns without slashes.
+ * @returns Lowercase key/value pairs, including unset for the merge owner to remove.
+ * @throws For invalid or oversized section globs when the iterator is consumed.
+ * @example "[*.ts]\nindent_size=unset" yields ["indent_size", "unset"] for a.ts.
+ */
+function* matchingEditorConfigProperties(
+  content: string,
+  relative: string,
+  basename: string,
+): Generator<[string, string]> {
+  let applies = false;
+  for (const raw of content.split(CONFIG_LINE_BREAK)) {
+    const line = raw.trim();
+    if (!line || CONFIG_COMMENT.test(line)) {
+      continue;
+    }
+    const section = line.match(CONFIG_SECTION)?.[1];
+    if (section !== undefined) {
+      const pattern = section.startsWith("/") ? section.slice(1) : section;
+      applies = globMatcher(pattern).match(
+        pattern.includes("/") ? relative : basename,
+      );
+    } else if (applies) {
+      const separator = line.indexOf("=");
+      if (separator < 0) {
+        continue;
+      }
+      yield [
+        line.slice(0, separator).trim().toLowerCase(),
+        line
+          .slice(separator + 1)
+          .trim()
+          .toLowerCase(),
+      ];
+    }
+  }
+}
+
+/**
  * Reads matching EditorConfig settings from ancestors, applying nearer files last.
  * @param file - Target path for section matching and ancestor lookup.
  * @param cwd - Lookup boundary, also bounded by root=true and 64 directories.
@@ -547,37 +589,19 @@ async function readEditorConfigSettings(
   const configs = await readEditorConfigAncestors(file, cwd);
   const settings: Partial<Record<string, string>> = {};
   for (const config of configs) {
-    let applies = false;
     const relative = path
       .relative(config.directory, file)
       .split(path.sep)
       .join("/");
-    for (const raw of config.content.split(CONFIG_LINE_BREAK)) {
-      const line = raw.trim();
-      if (!line || CONFIG_COMMENT.test(line)) {
-        continue;
-      }
-      const section = line.match(CONFIG_SECTION)?.[1];
-      if (section !== undefined) {
-        const pattern = section.startsWith("/") ? section.slice(1) : section;
-        applies = globMatcher(pattern).match(
-          pattern.includes("/") ? relative : path.basename(file),
-        );
-      } else if (applies) {
-        const separator = line.indexOf("=");
-        if (separator < 0) {
-          continue;
-        }
-        const key = line.slice(0, separator).trim().toLowerCase();
-        const value = line
-          .slice(separator + 1)
-          .trim()
-          .toLowerCase();
-        if (value === "unset") {
-          delete settings[key];
-        } else {
-          settings[key] = value;
-        }
+    for (const [key, value] of matchingEditorConfigProperties(
+      config.content,
+      relative,
+      path.basename(file),
+    )) {
+      if (value === "unset") {
+        delete settings[key];
+      } else {
+        settings[key] = value;
       }
     }
   }

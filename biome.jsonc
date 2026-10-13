@@ -36,7 +36,7 @@
         // Initial rollout ceilings cover existing code; lower as owners simplify it.
         "noExcessiveCognitiveComplexity": {
           "level": "error",
-          "options": { "maxAllowedComplexity": 40 }
+          "options": { "maxAllowedComplexity": 25 }
         },
         // Includes cohesive extension setup and test-suite callbacks.
         "noExcessiveLinesPerFunction": {

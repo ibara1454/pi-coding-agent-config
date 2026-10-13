@@ -41,6 +41,25 @@ function emptyGitState(): GitSnapshot {
 }
 
 /**
+ * Calculates failed Git publication without changing the current cache.
+ * @param current Owner's snapshot after PR cancellation effects have finished.
+ * @param branch Latest host branch, including undefined when unavailable.
+ * @param completed Whether Git returned a nonzero exit rather than rejecting.
+ * @returns Fresh snapshot with PR cleared; rejected commands preserve counts.
+ * @example gitSnapshotAfterFailure(emptyGitState(), "main", false); // Branch main, zero counts, no PR.
+ */
+function gitSnapshotAfterFailure(
+  current: GitSnapshot,
+  branch: string | undefined,
+  completed: boolean,
+): GitSnapshot {
+  if (completed) {
+    return { ...emptyGitState(), branch };
+  }
+  return { ...current, branch, pr: undefined };
+}
+
+/**
  * Counts porcelain-v1 index, working-tree, and untracked entries independently.
  * @param output Git status stdout; short/empty lines are ignored.
  * @returns Counts only, without changing state or performing effects.
@@ -69,6 +88,30 @@ function parseGitChanges(
     }
   }
   return { staged, unstaged, untracked };
+}
+
+/**
+ * Reads optional gh output without letting malformed JSON hide Git status.
+ * @param result Completed command, or undefined after rejection/cancellation.
+ * @returns Number/URL fields when both have the expected types; otherwise undefined.
+ * @example parsePullRequest({ code: 0, stdout: '{"number":42,"url":"https://example.com/42"}' }); // PR 42.
+ */
+function parsePullRequest(
+  result: { code: number; stdout: string } | undefined,
+): GitSnapshot["pr"] {
+  try {
+    const parsed: unknown =
+      result?.code === 0 ? JSON.parse(result.stdout) : undefined;
+    if (!isObjectRecord(parsed)) {
+      return undefined;
+    }
+    const { number, url } = parsed;
+    return typeof number === "number" && typeof url === "string"
+      ? { number, url }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -218,10 +261,13 @@ export function createGitStatus(effects: GitEffects) {
   }
 
   /**
-   * Waits for a command or cancellation and consumes even a late rejection.
-   * @param command External executable; args and context select its request.
-   * @param controller Job-owned cancellation, with listeners released here.
-   * @returns Undefined for rejection/cancellation; the job owns cache policy.
+   * Runs a host command with a two-second timeout, racing completion against cancellation.
+   * @param command External executable run through the host's command provider.
+   * @param args Command arguments, passed unchanged to the provider.
+   * @param context Captured host identity and cwd selecting the command directory.
+   * @param controller Job-owned cancellation; only this operation's abort listener is released here.
+   * @returns Completed exit code/stdout, or undefined for rejection/cancellation;
+   * late rejections are consumed and the job owns cache policy.
    * @example await execute("git", args, context, controller);
    */
   async function execute(
@@ -292,10 +338,108 @@ export function createGitStatus(effects: GitEffects) {
   }
 
   /**
-   * Handles one Git request; forced arrivals remain queued for a separate job.
-   * Records joinable ownership before host reads, commands, or notifications.
-   * @param state Active session delivered by its private native event emitter.
-   * @returns This operation's completion; failures follow existing cache policy.
+   * Reads job ownership with cancellation checks around the host context callback.
+   * @param state Session owning the in-flight command; only read here.
+   * @param context Command's captured host identity and working directory.
+   * @param controller Job-owned cancellation checked before and after the host read.
+   * @returns Undefined when cancelled, otherwise whether the context still matches.
+   * @example readJobOwnership(state, context, controller); // False for a replaced host.
+   */
+  function readJobOwnership(
+    state: Readonly<Session>,
+    context: GitContext,
+    controller: AbortController,
+  ): boolean | undefined {
+    if (!state.active || controller.signal.aborted) {
+      return undefined;
+    }
+    const owned = ownsContext(context);
+    if (!state.active || controller.signal.aborted) {
+      return undefined;
+    }
+    return owned;
+  }
+
+  /**
+   * Reads host ownership and calculates Git publication policy without changing state.
+   * Host reads may reenter the owner; cancellation is checked around those effects.
+   * @param state Session whose activity is read, never changed.
+   * @param context Command's captured host identity and working directory.
+   * @param controller Job-owned cancellation, read before and after host callbacks.
+   * @param result Command outcome; rejection retains counts, while nonzero exits clear them.
+   * @returns Undefined after cancellation; otherwise the owner's publication decision.
+   * Clear decisions contain no snapshot: the owner must use its current cache after PR abort effects.
+   * Unexpected calculation errors propagate to the owning job.
+   * @example readGitPublication(state, context, controller, undefined); // Retains counts for an unchanged branch.
+   */
+  function readGitPublication(
+    state: Readonly<Session>,
+    context: GitContext,
+    controller: AbortController,
+    result: { code: number; stdout: string } | undefined,
+  ):
+    | { kind: "unowned" }
+    | {
+        kind: "refresh-pr";
+        branch: string | undefined;
+        changes: Pick<GitState, "staged" | "unstaged" | "untracked">;
+      }
+    | { kind: "clear-pr" | "retain"; branch: string | undefined }
+    | undefined {
+    const owned = readJobOwnership(state, context, controller);
+    if (owned === undefined) {
+      return undefined;
+    }
+    if (!owned) {
+      return { kind: "unowned" };
+    }
+    const branch = readBranch();
+    if (!state.active || controller.signal.aborted) {
+      return undefined;
+    }
+    if (result?.code === 0) {
+      return {
+        kind: "refresh-pr",
+        branch,
+        changes: parseGitChanges(result.stdout),
+      };
+    }
+    return {
+      kind: result || branch !== snapshot.branch ? "clear-pr" : "retain",
+      branch,
+    };
+  }
+
+  /**
+   * Reads the context eligible for a consumed Git request without changing state.
+   * Host reads may reenter the owner; activity is checked after the callback.
+   * @param state Job-owning session; activity and last-fetch timestamp are read only.
+   * @param force Captured request flag that bypasses the one-second cache TTL.
+   * @returns Current host context, or undefined when stopped, unavailable, or throttled.
+   * Host context failures are treated as unavailable; no command is launched here.
+   * @example readGitRequestContext(state, true); // Current context even within the TTL.
+   */
+  function readGitRequestContext(
+    state: Readonly<Session>,
+    force: boolean,
+  ): GitContext | undefined {
+    const context = readContext();
+    if (
+      !(state.active && context) ||
+      (!force && Date.now() - state.lastFetch < GIT_TTL_MS)
+    ) {
+      return undefined;
+    }
+    return context;
+  }
+
+  /**
+   * Owns one Git request's consumption, publication, PR invalidation, and cleanup.
+   * Registers joinable work before host effects; forced arrivals stay queued.
+   * @param state Active session delivered by its private emitter; this job owns
+   * its request flags, command/controller, retry timestamp, and published cache updates.
+   * @returns Completion after the one-second TTL skip or publication, followed by
+   * controller/job release and rescheduling. Unexpected failures cancel the session.
    * @example state.events.emit("git", state); // At most one Git command.
    */
   async function runGit(state: Session): Promise<void> {
@@ -310,11 +454,8 @@ export function createGitStatus(effects: GitEffects) {
       const force = state.forced;
       state.requested = false;
       state.forced = false;
-      const context = readContext();
-      if (
-        !(state.active && context) ||
-        (!force && Date.now() - state.lastFetch < GIT_TTL_MS)
-      ) {
+      const context = readGitRequestContext(state, force);
+      if (!context) {
         return;
       }
       const result = await execute(
@@ -323,30 +464,28 @@ export function createGitStatus(effects: GitEffects) {
         context,
         controller,
       );
-      if (!state.active || controller.signal.aborted) {
+      const publication = readGitPublication(
+        state,
+        context,
+        controller,
+        result,
+      );
+      if (!publication) {
         return;
       }
-      const owned = ownsContext(context);
-      if (!state.active || controller.signal.aborted) {
-        return;
-      }
-      if (!owned) {
-        // Rejected Git retains retry throttling even after a context replacement.
+      if (publication.kind === "unowned") {
+        // Rejected Git retains retry throttling after a context replacement.
         if (!result) {
           state.lastFetch = Date.now();
         }
         notifyChanged();
         return;
       }
-      const branch = readBranch();
-      if (!state.active || controller.signal.aborted) {
-        return;
-      }
-      if (result?.code === 0) {
-        snapshot = { ...snapshot, branch, ...parseGitChanges(result.stdout) };
+      const { branch } = publication;
+      if (publication.kind === "refresh-pr") {
+        snapshot = { ...snapshot, branch, ...publication.changes };
         requestPr(state, context, branch);
-      } else if (result || branch !== snapshot.branch) {
-        // Nonzero Git clears counts; rejected Git retains them and clears stale PR.
+      } else if (publication.kind === "clear-pr") {
         state.prController?.abort();
         state.prRequest = undefined;
         clearImmediate(state.prImmediate);
@@ -356,9 +495,12 @@ export function createGitStatus(effects: GitEffects) {
         if (!state.active) {
           return;
         }
-        snapshot = result
-          ? { ...emptyGitState(), branch }
-          : { ...snapshot, branch, pr: undefined };
+        // Read the current cache only after potentially reentrant abort effects.
+        snapshot = gitSnapshotAfterFailure(
+          snapshot,
+          branch,
+          result !== undefined,
+        );
       }
       state.lastFetch = Date.now();
       if (state.active && !controller.signal.aborted) {
@@ -399,27 +541,12 @@ export function createGitStatus(effects: GitEffects) {
         context,
         controller,
       );
-      if (!state.active || controller.signal.aborted) {
-        return;
-      }
-      const owned = ownsContext(context);
-      if (!state.active || controller.signal.aborted) {
+      const owned = readJobOwnership(state, context, controller);
+      if (owned === undefined) {
         return;
       }
       if (owned && state.prKey === key) {
-        let pr: GitSnapshot["pr"];
-        try {
-          const parsed: unknown =
-            result?.code === 0 ? JSON.parse(result.stdout) : undefined;
-          if (isObjectRecord(parsed)) {
-            const { number, url } = parsed;
-            if (typeof number === "number" && typeof url === "string") {
-              pr = { number, url };
-            }
-          }
-        } catch {
-          // Optional gh output may be malformed; Git remains usable.
-        }
+        const pr = parsePullRequest(result);
         snapshot = { ...snapshot, pr };
       }
       notifyChanged();

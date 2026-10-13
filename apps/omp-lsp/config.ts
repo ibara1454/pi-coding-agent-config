@@ -237,6 +237,66 @@ function duration(value: unknown, name: string): number {
 }
 
 /**
+ * Validates optional language, enablement, and protocol payload fields.
+ * @param value - Untrusted merged server fields; initializationOptions aliases initOptions.
+ * @returns Validated optional fields without modifying the input.
+ * @throws For invalid language identifiers, flags, or object/JSON payloads.
+ * @example { initializationOptions: {} } returns { initOptions: {} }.
+ */
+function normalizeServerProtocolOptions(
+  value: Record<string, unknown>,
+): Pick<
+  ServerConfig,
+  | "languageId"
+  | "disabled"
+  | "isLinter"
+  | "initOptions"
+  | "settings"
+  | "capabilities"
+> {
+  const result: Pick<
+    ServerConfig,
+    | "languageId"
+    | "disabled"
+    | "isLinter"
+    | "initOptions"
+    | "settings"
+    | "capabilities"
+  > = {};
+  const { languageId, initializationOptions } = value;
+  if (languageId !== undefined) {
+    if (typeof languageId !== "string" || !languageId.trim()) {
+      throw new Error("languageId must be a non-empty string");
+    }
+    result.languageId = languageId;
+  }
+  for (const key of ["disabled", "isLinter"] as const) {
+    if (value[key] === undefined) {
+      continue;
+    }
+    if (typeof value[key] !== "boolean") {
+      throw new Error(`${key} must be a boolean`);
+    }
+    result[key] = value[key];
+  }
+  for (const key of ["initOptions", "settings", "capabilities"] as const) {
+    const item =
+      key === "initOptions" && value[key] === undefined
+        ? initializationOptions
+        : value[key];
+    if (item === undefined) {
+      continue;
+    }
+    if (!record(item)) {
+      throw new Error(`${key} must be an object`);
+    }
+    validateJsonPayload(item);
+    result[key] = item;
+  }
+  return result;
+}
+
+/**
  * Validates a merged server definition and normalizes file matching and launch options.
  * @param value - Untrusted fields from bundled defaults or one configuration layer.
  * @param cwd - Project root retained on the validated server; no paths are accessed.
@@ -255,8 +315,6 @@ function normalizeServer(
     fileTypes: rawFileTypes,
     rootMarkers: rawRootMarkers,
     args = [],
-    languageId,
-    initializationOptions,
     env,
     warmupTimeoutMs,
     workspaceReadyTimings,
@@ -304,35 +362,7 @@ function normalizeServer(
   if (extensionToLanguage) {
     result.extensionToLanguage = extensionToLanguage;
   }
-  if (languageId !== undefined) {
-    if (typeof languageId !== "string" || !languageId.trim()) {
-      throw new Error("languageId must be a non-empty string");
-    }
-    result.languageId = languageId;
-  }
-  for (const key of ["disabled", "isLinter"] as const) {
-    if (value[key] === undefined) {
-      continue;
-    }
-    if (typeof value[key] !== "boolean") {
-      throw new Error(`${key} must be a boolean`);
-    }
-    result[key] = value[key];
-  }
-  for (const key of ["initOptions", "settings", "capabilities"] as const) {
-    const item =
-      key === "initOptions" && value[key] === undefined
-        ? initializationOptions
-        : value[key];
-    if (item === undefined) {
-      continue;
-    }
-    if (!record(item)) {
-      throw new Error(`${key} must be an object`);
-    }
-    validateJsonPayload(item);
-    result[key] = item;
-  }
+  Object.assign(result, normalizeServerProtocolOptions(value));
   if (env !== undefined) {
     result.env = stringMap(env, "env");
     if (Object.keys(result.env).some((key) => key.includes("="))) {
@@ -654,22 +684,68 @@ async function readServerConfigLayer(
 }
 
 /**
- * Loads bundled and agent configuration, plus project configuration only when trusted.
- * Later valid layers override earlier values; invalid user configuration adds warnings.
- * @param projectDirectory - Project path, resolved without changing the caller's input.
- * @param agentDir - Agent configuration directory.
- * @param trusted - Permits reading project configuration and resolving project executables.
- * @returns Effective servers, settings, and configuration warnings.
- * Settings are constructed from the permitted layers without modifying earlier values.
- * @throws If bundled configuration is invalid or cannot be read.
- * @example loadLspConfig("/project", "/agent", false) does not read /project/.pi.
+ * Selects the bundled TypeScript implementation unless either launcher was customized.
+ * @param servers - Discovered servers, retained in their existing order and never modified.
+ * @param customizedLaunchers - Names with an explicit command or args override.
+ * @returns The selected servers and any native-probe warning.
+ * @example A native executable that fails the LSP probe retains typescript-language-server.
  */
-export async function loadLspConfig(
-  projectDirectory: string,
+async function selectTypeScriptServers(
+  servers: ServerConfig[],
+  customizedLaunchers: ReadonlySet<string>,
+): Promise<{ servers: ServerConfig[]; warnings: string[] }> {
+  const native = servers.find((server) => server.name === "typescript-native");
+  if (
+    customizedLaunchers.has("typescript-native") ||
+    customizedLaunchers.has("typescript-language-server")
+  ) {
+    return { servers, warnings: [] };
+  }
+  try {
+    const nativeCommand = native?.resolvedCommand;
+    const useNative =
+      native !== undefined &&
+      nativeCommand !== undefined &&
+      !native.disabled &&
+      (await typescriptSpeaksLsp(nativeCommand));
+    return {
+      servers: servers.filter(
+        (server) =>
+          server.name !==
+          (useNative ? "typescript-language-server" : "typescript-native"),
+      ),
+      warnings: [],
+    };
+  } catch (error) {
+    return {
+      servers: servers.filter((server) => server.name !== "typescript-native"),
+      warnings: [
+        `TypeScript server selection: ${message(error)}; native support could not be verified`,
+      ],
+    };
+  }
+}
+
+/**
+ * Reads bundled defaults and permitted user layers before executable discovery.
+ * @param cwd - Resolved project directory used to normalize server definitions.
+ * @param agentDir - Agent configuration directory, loaded before project overrides.
+ * @param trusted - Permits reading project configuration; agent layers are always read.
+ * @returns Owned server definitions, launcher overrides, settings, and ordered warnings.
+ * Caller owns subsequent executable discovery and final server selection.
+ * @throws If bundled defaults cannot be read or contain an invalid server definition.
+ * @example With trusted false, only bundled defaults and agent configuration are read.
+ */
+async function readLspConfigLayers(
+  cwd: string,
   agentDir: string,
   trusted: boolean,
-): Promise<LspConfig> {
-  const cwd = path.resolve(projectDirectory);
+): Promise<{
+  result: Omit<LspConfig, "settings">;
+  settings: LspSettings;
+  merged: Map<string, ServerConfig>;
+  customizedLaunchers: Set<string>;
+}> {
   const result: Omit<LspConfig, "settings"> = {
     servers: [],
     warnings: [],
@@ -718,6 +794,28 @@ export async function loadLspConfig(
     }
   }
   const settings = Object.assign({}, SETTING_DEFAULTS, ...settingsOverrides);
+  return { result, settings, merged, customizedLaunchers };
+}
+
+/**
+ * Loads bundled and agent configuration, plus project configuration only when trusted.
+ * Later valid layers override earlier values; invalid user configuration adds warnings.
+ * @param projectDirectory - Project path, resolved without changing the caller's input.
+ * @param agentDir - Agent configuration directory.
+ * @param trusted - Permits reading project configuration and resolving project executables.
+ * @returns Effective servers, settings, and configuration warnings.
+ * Settings are constructed from the permitted layers without modifying earlier values.
+ * @throws If bundled configuration is invalid or cannot be read.
+ * @example loadLspConfig("/project", "/agent", false) does not read /project/.pi.
+ */
+export async function loadLspConfig(
+  projectDirectory: string,
+  agentDir: string,
+  trusted: boolean,
+): Promise<LspConfig> {
+  const cwd = path.resolve(projectDirectory);
+  const { result, settings, merged, customizedLaunchers } =
+    await readLspConfigLayers(cwd, agentDir, trusted);
   if (!trusted) {
     result.warnings.push(
       "Project is not trusted: project LSP configuration, executable discovery, and language servers are disabled.",
@@ -746,36 +844,12 @@ export async function loadLspConfig(
       result.servers.push(server);
     }
   }
-  const native = result.servers.find(
-    (server) => server.name === "typescript-native",
+  const selected = await selectTypeScriptServers(
+    result.servers,
+    customizedLaunchers,
   );
-  if (
-    !(
-      customizedLaunchers.has("typescript-native") ||
-      customizedLaunchers.has("typescript-language-server")
-    )
-  ) {
-    try {
-      const nativeCommand = native?.resolvedCommand;
-      const useNative =
-        native !== undefined &&
-        nativeCommand !== undefined &&
-        !native.disabled &&
-        (await typescriptSpeaksLsp(nativeCommand));
-      result.servers = result.servers.filter(
-        (server) =>
-          server.name !==
-          (useNative ? "typescript-language-server" : "typescript-native"),
-      );
-    } catch (error) {
-      result.warnings.push(
-        `TypeScript server selection: ${message(error)}; native support could not be verified`,
-      );
-      result.servers = result.servers.filter(
-        (server) => server.name !== "typescript-native",
-      );
-    }
-  }
+  result.servers = selected.servers;
+  result.warnings.push(...selected.warnings);
   return { ...result, settings };
 }
 

@@ -333,6 +333,113 @@ function resourceKey(
 }
 
 /**
+ * Inspects configured entries, then autoload resources, for one validated kind field.
+ * @param scope - Selects global or project resources and their resolution base.
+ * @param document - Scope's settings snapshot; its path labels settings origins and is the autoload label fallback.
+ * @param selection - Validated resource field and ordered entries; declaration indices are retained and "!", "+", "-" overrides apply to each declaration and autoload.
+ * @param context - Resolution directories: agentDir is the global base, cwd/.pi the project base; cwd also anchors the resolver.
+ * @returns Ordered resource origins and recoverable resolution diagnostics; inputs stay read-only and no settings are written.
+ * @example Two declarations of "./skills/review" retain two settings origin labels.
+ */
+async function inspectTopLevelOrigins(
+  scope: ResourceScope,
+  document: SettingsDocument,
+  selection: {
+    readonly field: ResourceField;
+    readonly entries: readonly string[];
+  },
+  context: Pick<DiscoveryContext, "cwd" | "agentDir">,
+): Promise<{
+  readonly occurrences: readonly {
+    readonly key: string;
+    readonly resource: ResolvedResource;
+    readonly origin: ResourceOrigin;
+  }[];
+  readonly diagnostics: readonly CatalogDiagnostic[];
+}> {
+  const { cwd, agentDir } = context;
+  const { field, entries } = selection;
+  const occurrences: Array<{
+    readonly key: string;
+    readonly resource: ResolvedResource;
+    readonly origin: ResourceOrigin;
+  }> = [];
+  const diagnostics: CatalogDiagnostic[] = [];
+  const overrides = entries.filter(
+    (entry) =>
+      entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-"),
+  );
+  for (const [index, entry] of entries.entries()) {
+    if (
+      entry.startsWith("!") ||
+      entry.startsWith("+") ||
+      entry.startsWith("-")
+    ) {
+      continue;
+    }
+    const isolated: JsonObject = {
+      packages: [],
+      [field]: [entry, ...overrides],
+    };
+    try {
+      const resolved = await resolveTopLevelSettings(
+        scope,
+        isolated,
+        cwd,
+        agentDir,
+      );
+      for (const resource of scopeResources(resolved, scope, field)) {
+        if (resource.metadata.source !== "local") {
+          continue;
+        }
+        occurrences.push({
+          key: resourceKey(scope, kindForField(field), resource.path),
+          resource,
+          origin: {
+            label: `${document.path}#${field}[${index}]`,
+            source: "settings",
+          },
+        });
+      }
+    } catch (error) {
+      diagnostics.push({
+        scope,
+        message: `Could not inspect ${field}[${index}]: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
+  const autoOnly: JsonObject = { packages: [], [field]: overrides };
+  try {
+    const resolved = await resolveTopLevelSettings(
+      scope,
+      autoOnly,
+      cwd,
+      agentDir,
+    );
+    for (const resource of scopeResources(resolved, scope, field)) {
+      if (resource.metadata.source !== "auto") {
+        continue;
+      }
+      occurrences.push({
+        key: resourceKey(scope, kindForField(field), resource.path),
+        resource,
+        origin: {
+          label: `${resource.metadata.baseDir ?? document.path}/${field} (auto)`,
+          source: "auto",
+        },
+      });
+    }
+  } catch (error) {
+    diagnostics.push({
+      scope,
+      message: `Could not inspect auto-discovered ${field}: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  return { occurrences, diagnostics };
+}
+
+/**
  * Discovers top-level resources and their settings origins for one scope.
  * @param context - Resolution directories and the shared diagnostic sink.
  * @returns Drafts recovered from successful resolutions; individual failures
@@ -377,76 +484,17 @@ async function discoverTopLevelScope(
     const entries = Array.isArray(settings[field])
       ? (settings[field] as string[])
       : [];
-    const overrides = entries.filter(
-      (entry) =>
-        entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-"),
+    const inspected = await inspectTopLevelOrigins(
+      scope,
+      document,
+      { field, entries },
+      context,
     );
-    for (const [index, entry] of entries.entries()) {
-      if (
-        entry.startsWith("!") ||
-        entry.startsWith("+") ||
-        entry.startsWith("-")
-      ) {
-        continue;
-      }
-      const isolated: JsonObject = {
-        packages: [],
-        [field]: [entry, ...overrides],
-      };
-      try {
-        const resolved = await resolveTopLevelSettings(
-          scope,
-          isolated,
-          cwd,
-          agentDir,
-        );
-        const kind = kindForField(field);
-        for (const resource of scopeResources(resolved, scope, field)) {
-          if (resource.metadata.source !== "local") {
-            continue;
-          }
-          const key = resourceKey(scope, kind, resource.path);
-          setPreferredResource(candidates, key, resource);
-          appendOccurrencePath(occurrencePaths, key, resource.path);
-          appendOrigin(origins, key, {
-            label: `${document.path}#${field}[${index}]`,
-            source: "settings",
-          });
-        }
-      } catch (error) {
-        diagnostics.push({
-          scope,
-          message: `Could not inspect ${field}[${index}]: ${error instanceof Error ? error.message : String(error)}`,
-        });
-      }
-    }
-
-    const autoOnly: JsonObject = { packages: [], [field]: overrides };
-    try {
-      const resolved = await resolveTopLevelSettings(
-        scope,
-        autoOnly,
-        cwd,
-        agentDir,
-      );
-      const kind = kindForField(field);
-      for (const resource of scopeResources(resolved, scope, field)) {
-        if (resource.metadata.source !== "auto") {
-          continue;
-        }
-        const key = resourceKey(scope, kind, resource.path);
-        setPreferredResource(candidates, key, resource);
-        appendOccurrencePath(occurrencePaths, key, resource.path);
-        appendOrigin(origins, key, {
-          label: `${resource.metadata.baseDir ?? document.path}/${field} (auto)`,
-          source: "auto",
-        });
-      }
-    } catch (error) {
-      diagnostics.push({
-        scope,
-        message: `Could not inspect auto-discovered ${field}: ${error instanceof Error ? error.message : String(error)}`,
-      });
+    diagnostics.push(...inspected.diagnostics);
+    for (const { key, resource, origin } of inspected.occurrences) {
+      setPreferredResource(candidates, key, resource);
+      appendOccurrencePath(occurrencePaths, key, resource.path);
+      appendOrigin(origins, key, origin);
     }
   }
 
@@ -658,6 +706,149 @@ function packagePrecedence(
 }
 
 /**
+ * Resolves one installed package and inventories both kinds without installing or writing.
+ * @param packageManager - Caller-configured resolver for the scope; used to inspect resources at the already installed path.
+ * @param entry - Original settings package declaration, supplying per-kind filters and the autoload opt-out.
+ * @param origin - Package scope and settings path used for resource attribution.
+ * @param packageTarget - Installed directory or entry-file path and caller-computed attribution: source/duplicate locator, zero-based settings index, autoload opt-out/delta flag, package identity, duplicate winner, and first-occurrence precedence slot.
+ * @returns Drafts and recoverable inspection diagnostics, retaining earlier resources if later inspection fails; supplied entries and attribution stay read-only.
+ * @example An unreadable skills directory retains already discovered extension drafts.
+ */
+async function inspectPackageResources(
+  packageManager: DefaultPackageManager,
+  entry: unknown,
+  origin: {
+    readonly scope: ResourceScope;
+    readonly settingsPath: string;
+  },
+  packageTarget: Pick<
+    Extract<ResourceDraft["target"], { readonly type: "package" }>,
+    | "packageSourcePath"
+    | "locator"
+    | "settingsIndex"
+    | "autoloadDelta"
+    | "packageIdentity"
+    | "precedenceWinner"
+    | "precedenceSlot"
+  >,
+): Promise<{
+  readonly drafts: readonly ResourceDraft[];
+  readonly diagnostics: readonly CatalogDiagnostic[];
+}> {
+  const { scope, settingsPath } = origin;
+  const {
+    packageSourcePath: installedPath,
+    locator,
+    settingsIndex: index,
+    autoloadDelta,
+    packageIdentity: identity,
+    precedenceWinner,
+    precedenceSlot,
+  } = packageTarget;
+  const { source } = locator;
+  const drafts: ResourceDraft[] = [];
+  const diagnostics: CatalogDiagnostic[] = [];
+  try {
+    const resolved = await packageManager.resolveExtensionSources(
+      [installedPath],
+      { local: scope === "project" },
+    );
+    const packageRoot = statSync(installedPath).isFile()
+      ? dirname(installedPath)
+      : installedPath;
+    for (const field of RESOURCE_FIELDS) {
+      const resolvedResources = resolved[field];
+      const allPaths = packageResourcePaths(
+        packageRoot,
+        field,
+        resolvedResources.map((resource) => resource.path),
+      );
+      const fallbackMetadata: ResolvedResource["metadata"] = {
+        source,
+        scope: scope === "global" ? "user" : "project",
+        origin: "package",
+        baseDir: packageRoot,
+      };
+      const resources = allPaths.map(
+        (path): ResolvedResource =>
+          resolvedResources.find((resource) => resource.path === path) ?? {
+            path,
+            enabled: true,
+            metadata: fallbackMetadata,
+          },
+      );
+      const filter = packagePatterns(entry, field, diagnostics, {
+        scope,
+        source,
+      });
+      const kind = kindForField(field);
+      const projection = { allPaths, packageRoot, kind, filter };
+      for (const resource of resources) {
+        const configured = packageResourceEnabled(
+          resource,
+          allPaths,
+          packageRoot,
+          filter,
+        );
+        const participates = packageResourceParticipation(resource, projection);
+        drafts.push({
+          configured,
+          kind,
+          scope,
+          canonicalPath: canonicalizeResourcePath(resource.path),
+          resolvedPath: resource.path,
+          baseDir: packageRoot,
+          source,
+          sourceType: "package",
+          filters: filter.patterns ?? [],
+          configurationReason: packageConfigurationReason(
+            resource,
+            packageRoot,
+            filter,
+          ),
+          origins: [
+            {
+              label: `${settingsPath}#packages[${index}]`,
+              source: "package",
+            },
+          ],
+          target: {
+            type: "package",
+            packageRoot,
+            packageSourcePath: installedPath,
+            locator,
+            settingsIndex: index,
+            autoloadDelta,
+            participates,
+            participatesWhenEnabled: packageResourceParticipation(
+              resource,
+              projection,
+              true,
+            ),
+            participatesWhenDisabled: packageResourceParticipation(
+              resource,
+              projection,
+              false,
+            ),
+            hadFilterField: filter.patterns !== undefined,
+            packageIdentity: identity,
+            precedenceWinner,
+            precedenceSlot,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    diagnostics.push({
+      scope,
+      source,
+      message: `Could not inspect ${source}: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  return { drafts, diagnostics };
+}
+
+/**
  * Discovers installed package resources with scope and duplicate precedence.
  * @param context - Resolution directories and the shared diagnostic sink.
  * @param globalDocument - Global package aliases available to project entries.
@@ -746,106 +937,22 @@ async function discoverPackageScope(
       continue;
     }
 
-    try {
-      const resolved = await packageManager.resolveExtensionSources(
-        [installedPath],
-        { local: scope === "project" },
-      );
-      const packageRoot = statSync(installedPath).isFile()
-        ? dirname(installedPath)
-        : installedPath;
-      for (const field of RESOURCE_FIELDS) {
-        const resolvedResources = resolved[field];
-        const allPaths = packageResourcePaths(
-          packageRoot,
-          field,
-          resolvedResources.map((resource) => resource.path),
-        );
-        const fallbackMetadata: ResolvedResource["metadata"] = {
-          source,
-          scope: scope === "global" ? "user" : "project",
-          origin: "package",
-          baseDir: packageRoot,
-        };
-        const resources = allPaths.map(
-          (path): ResolvedResource =>
-            resolvedResources.find((resource) => resource.path === path) ?? {
-              path,
-              enabled: true,
-              metadata: fallbackMetadata,
-            },
-        );
-        const filter = packagePatterns(entry, field, diagnostics, {
-          scope,
-          source,
-        });
-        const kind = kindForField(field);
-        const projection = { allPaths, packageRoot, kind, filter };
-        for (const resource of resources) {
-          const configured = packageResourceEnabled(
-            resource,
-            allPaths,
-            packageRoot,
-            filter,
-          );
-          const participates = packageResourceParticipation(
-            resource,
-            projection,
-          );
-          drafts.push({
-            configured,
-            kind,
-            scope,
-            canonicalPath: canonicalizeResourcePath(resource.path),
-            resolvedPath: resource.path,
-            baseDir: packageRoot,
-            source,
-            sourceType: "package",
-            filters: filter.patterns ?? [],
-            configurationReason: packageConfigurationReason(
-              resource,
-              packageRoot,
-              filter,
-            ),
-            origins: [
-              {
-                label: `${document.path}#packages[${index}]`,
-                source: "package",
-              },
-            ],
-            target: {
-              type: "package",
-              packageRoot,
-              packageSourcePath: installedPath,
-              locator,
-              settingsIndex: index,
-              autoloadDelta,
-              participates,
-              participatesWhenEnabled: packageResourceParticipation(
-                resource,
-                projection,
-                true,
-              ),
-              participatesWhenDisabled: packageResourceParticipation(
-                resource,
-                projection,
-                false,
-              ),
-              hadFilterField: filter.patterns !== undefined,
-              packageIdentity: identity,
-              precedenceWinner,
-              precedenceSlot,
-            },
-          });
-        }
-      }
-    } catch (error) {
-      diagnostics.push({
-        scope,
-        source,
-        message: `Could not inspect ${source}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
+    const inspected = await inspectPackageResources(
+      packageManager,
+      entry,
+      { scope, settingsPath: document.path },
+      {
+        packageSourcePath: installedPath,
+        locator,
+        settingsIndex: index,
+        autoloadDelta,
+        packageIdentity: identity,
+        precedenceWinner,
+        precedenceSlot,
+      },
+    );
+    drafts.push(...inspected.drafts);
+    diagnostics.push(...inspected.diagnostics);
   }
 
   return drafts;
@@ -1081,6 +1188,57 @@ function materializeTarget(
 }
 
 /**
+ * Computes reload participation and shadow labels using package and canonical precedence.
+ * @param draft - Row's scope, source attribution, owned paths, and package precedence facts to compare; paths are resolved against process cwd.
+ * @param canonicalWinner - Aggregate resolver winner for the draft's kind and canonical path, or undefined when absent; its raw path and metadata identify participation and shadow attribution.
+ * @param projectRegularPackages - Trusted regular project winners keyed by package identity, with source labels as values; matching identities shadow global package entries.
+ * @returns Resolution flags and an optional shadow label without changing drafts or winners.
+ * @example A global package matching a project winner is labeled "Project package npm:kit".
+ */
+function resourceResolutionState(
+  draft: ResourceDraft,
+  canonicalWinner: ResolvedResource | undefined,
+  projectRegularPackages: ReadonlyMap<string, string>,
+): {
+  readonly resolutionParticipant: boolean;
+  readonly resolutionCandidate: boolean;
+  readonly shadowedBy: string | undefined;
+} {
+  const ownedPaths =
+    draft.target.type === "top-level"
+      ? draft.target.occurrencePaths
+      : [draft.resolvedPath];
+  const duplicatePackageOccurrence =
+    draft.target.type === "package" && !draft.target.precedenceWinner;
+  const projectPackageWinner =
+    draft.scope === "global" && draft.target.type === "package"
+      ? projectRegularPackages.get(draft.target.packageIdentity)
+      : undefined;
+  const resolutionParticipant =
+    !duplicatePackageOccurrence &&
+    projectPackageWinner === undefined &&
+    canonicalWinner !== undefined &&
+    ownedPaths.some(
+      (path) => resolve(path) === resolve(canonicalWinner.path),
+    ) &&
+    draftMatchesWinner(draft, canonicalWinner);
+  const resolutionCandidate =
+    !duplicatePackageOccurrence && projectPackageWinner === undefined;
+  let shadowedBy: string | undefined;
+  if (duplicatePackageOccurrence) {
+    const scopeLabel = draft.scope === "project" ? "Project" : "Global";
+    shadowedBy = `${scopeLabel} package ${draft.source} occurrence 1`;
+  } else if (projectPackageWinner !== undefined) {
+    shadowedBy = `Project package ${projectPackageWinner}`;
+  } else if (!resolutionParticipant && canonicalWinner !== undefined) {
+    shadowedBy = winnerLabel(canonicalWinner);
+  } else if (!resolutionParticipant && draft.target.type === "package") {
+    shadowedBy = "Package precedence";
+  }
+  return { resolutionParticipant, resolutionCandidate, shadowedBy };
+}
+
+/**
  * Materializes drafts into sorted rows and persistence targets without writes.
  * @param context - Directories for skill metadata and its diagnostic sink.
  * @param projectRegularPackages - Project winners that shadow global packages.
@@ -1121,42 +1279,13 @@ function materializeCatalog(
     const canonicalWinner = resolvedByCanonical.get(
       `${draft.kind}:${draft.canonicalPath}`,
     );
-    const ownedPaths =
-      draft.target.type === "top-level"
-        ? draft.target.occurrencePaths
-        : [draft.resolvedPath];
-    const duplicatePackageOccurrence =
-      draft.target.type === "package" && !draft.target.precedenceWinner;
-    const projectPackageWinner =
-      draft.scope === "global" && draft.target.type === "package"
-        ? projectRegularPackages.get(draft.target.packageIdentity)
-        : undefined;
-    const resolutionParticipant =
-      !duplicatePackageOccurrence &&
-      projectPackageWinner === undefined &&
-      canonicalWinner !== undefined &&
-      ownedPaths.some(
-        (path) => resolve(path) === resolve(canonicalWinner.path),
-      ) &&
-      draftMatchesWinner(draft, canonicalWinner);
-    const resolutionCandidate =
-      !duplicatePackageOccurrence && projectPackageWinner === undefined;
+    const { resolutionParticipant, resolutionCandidate, shadowedBy } =
+      resourceResolutionState(draft, canonicalWinner, projectRegularPackages);
     const name = skill?.name ?? rowName(draft.resolvedPath, draft.kind);
     const preview =
       draft.kind === "skill"
         ? readBoundedSkillPreview(draft.canonicalPath)
         : undefined;
-    let shadowedBy: string | undefined;
-    if (duplicatePackageOccurrence) {
-      const scopeLabel = draft.scope === "project" ? "Project" : "Global";
-      shadowedBy = `${scopeLabel} package ${draft.source} occurrence 1`;
-    } else if (projectPackageWinner !== undefined) {
-      shadowedBy = `Project package ${projectPackageWinner}`;
-    } else if (!resolutionParticipant && canonicalWinner !== undefined) {
-      shadowedBy = winnerLabel(canonicalWinner);
-    } else if (!resolutionParticipant && draft.target.type === "package") {
-      shadowedBy = "Package precedence";
-    }
     rows.push({
       id,
       kind: draft.kind,
