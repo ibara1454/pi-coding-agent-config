@@ -1,14 +1,17 @@
 import { warn } from "node:console";
 import process from "node:process";
 import type {
+  AnyModel,
   Api,
   Model,
   Provider,
   ProviderRequestOptions,
 } from "@earendil-works/pi-ai";
+import { isModelType } from "@earendil-works/pi-ai";
 import type {
-  ExtensionAPI,
+  ExtensionContext,
   ModelRegistry,
+  SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider URLs must reject ASCII control bytes.
@@ -34,6 +37,20 @@ interface ProviderRoutes {
 type NonNullRecord<T extends Record<string, unknown>> = {
   [K in keyof T as K extends string ? K : never]?: NonNullable<T[K]>;
 };
+
+interface ProviderOverrideApi {
+  on: (
+    event: "session_start",
+    handler: (
+      event: SessionStartEvent,
+      context: {
+        modelRegistry: Pick<ModelRegistry, "getAll" | "getProvider">;
+        ui: Pick<ExtensionContext["ui"], "notify">;
+      },
+    ) => void,
+  ) => () => void;
+  registerProvider: (provider: Provider) => void;
+}
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
@@ -144,6 +161,19 @@ function routeModels<ApiType extends Api>(
   return routedModels;
 }
 
+/**
+ * Route chat entries in a mixed provider catalog; other operations retain their endpoints.
+ * @example routeAllModels([chatModel, imageModel], routes)[1] === imageModel // true
+ */
+function routeAllModels(
+  models: readonly AnyModel[],
+  routes: ProviderRoutes,
+): readonly AnyModel[] {
+  return models.map((model) =>
+    isModelType(model, "chat") ? routeModel(model, routes) : model,
+  );
+}
+
 function routeTransportOptions<OptionsType extends ProviderRequestOptions>(
   api: Api,
   routedModelBaseUrl: string,
@@ -190,6 +220,11 @@ function routeRequest<
   };
 }
 
+/**
+ * Preserve provider capabilities and receivers while routing only supported chat APIs.
+ * The wrapper owns no resources; original method failures propagate unchanged.
+ * @example wrapProvider(provider, routes).getModels()[0]?.baseUrl // routed chat URL
+ */
 function wrapProvider(
   provider: Provider<Api>,
   routes: ProviderRoutes,
@@ -261,6 +296,30 @@ function wrapProvider(
       }
     : undefined;
 
+  const { getAllModels, filterAllModels, generateImages, classify } = provider;
+  const wrappedGetAllModels: Provider["getAllModels"] = getAllModels
+    ? () => routeAllModels(getAllModels.call(provider), routes)
+    : undefined;
+  const wrappedFilterAllModels: Provider["filterAllModels"] = filterAllModels
+    ? (models, credential) =>
+        routeAllModels(
+          filterAllModels.call(
+            provider,
+            routeAllModels(models, routes),
+            credential,
+          ),
+          routes,
+        )
+    : undefined;
+  const wrappedGenerateImages: Provider["generateImages"] = generateImages
+    ? (model, context, options) =>
+        generateImages.call(provider, model, context, options)
+    : undefined;
+  const wrappedClassify: Provider["classify"] = classify
+    ? (model, context, options) =>
+        classify.call(provider, model, context, options)
+    : undefined;
+
   return {
     id: provider.id,
     name: provider.name,
@@ -277,13 +336,22 @@ function wrapProvider(
       filterModels: wrappedFilterModels,
       fetchDeferred: wrappedFetchDeferred,
       cancelDeferred: wrappedCancelDeferred,
+      getAllModels: wrappedGetAllModels,
+      filterAllModels: wrappedFilterAllModels,
+      generateImages: wrappedGenerateImages,
+      classify: wrappedClassify,
     }),
   };
 }
 
+/**
+ * Register routed snapshots for chat providers known at startup.
+ * Registration failures warn per provider; registry read failures propagate.
+ * @example installProviderOverrides(pi, registry, routes, warn) // installs provider wrappers
+ */
 function installProviderOverrides(
-  pi: ExtensionAPI,
-  registry: ModelRegistry,
+  pi: ProviderOverrideApi,
+  registry: Pick<ModelRegistry, "getAll" | "getProvider">,
   routes: ProviderRoutes,
   reportWarning: (message: string) => void,
 ): void {
@@ -306,7 +374,14 @@ function installProviderOverrides(
   }
 }
 
-export default function providerBaseUrlOverrides(pi: ExtensionAPI): void {
+/**
+ * Register startup routing for Pi providers when PROVIDER_BASE_URL is configured.
+ * Invalid URLs warn without installing a handler; the host owns the subscription.
+ * @example providerBaseUrlOverrides(pi) // routes configured providers on session_start
+ */
+export default function providerBaseUrlOverrides(
+  pi: ProviderOverrideApi,
+): void {
   const providerBaseUrl = readProviderBaseUrl();
   if (!providerBaseUrl) {
     return;

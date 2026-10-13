@@ -50,7 +50,7 @@ describe("installResourceInventoryOverride", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     const mode = new InteractiveMode();
@@ -74,7 +74,7 @@ describe("installResourceInventoryOverride", () => {
   test("should retain explicit forced and verbose listings", () => {
     const forced = host();
     const forcedOverride = installResourceInventoryOverride(
-      "0.84.1",
+      "0.99.2",
       forced.InteractiveMode,
     );
     new forced.InteractiveMode().showLoadedResources({
@@ -90,7 +90,7 @@ describe("installResourceInventoryOverride", () => {
     const mode = new verbose.InteractiveMode();
     mode.options.verbose = true;
     const verboseOverride = installResourceInventoryOverride(
-      "0.84.1",
+      "0.99.2",
       verbose.InteractiveMode,
     );
     mode.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
@@ -103,9 +103,9 @@ describe("installResourceInventoryOverride", () => {
   test("should be reference-counted across extension reloads", () => {
     const { InteractiveMode, calls } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
-    const first = installResourceInventoryOverride("0.84.1", InteractiveMode);
+    const first = installResourceInventoryOverride("0.99.2", InteractiveMode);
     const wrapper = InteractiveMode.prototype.showLoadedResources;
-    const second = installResourceInventoryOverride("0.84.2", InteractiveMode);
+    const second = installResourceInventoryOverride("0.99.2", InteractiveMode);
 
     expect(first.supported).toBe(true);
     expect(second.supported).toBe(true);
@@ -122,12 +122,27 @@ describe("installResourceInventoryOverride", () => {
     expect(InteractiveMode.prototype.showLoadedResources).toBe(original);
   });
 
+  test.each(["0.84.2", "0.99.1", "0.99.3", "1.0.0"])(
+    "should retain the native renderer when host version %s is unreviewed",
+    (version) => {
+      const { InteractiveMode } = host();
+      const original = InteractiveMode.prototype.showLoadedResources;
+      const override = installResourceInventoryOverride(
+        version,
+        InteractiveMode,
+      );
+      expect(override.supported).toBe(false);
+      expect(InteractiveMode.prototype.showLoadedResources).toBe(original);
+      override.release();
+    },
+  );
+
   test("should fail open for unsupported versions and changed method structure", () => {
     const unsupportedVersion = host();
     const original =
       unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
     const versionResult = installResourceInventoryOverride(
-      "0.86.0",
+      "0.99.3",
       unsupportedVersion.InteractiveMode,
     );
     expect(versionResult.supported).toBe(false);
@@ -141,7 +156,7 @@ describe("installResourceInventoryOverride", () => {
       }
     }
     const structureResult = installResourceInventoryOverride(
-      "0.84.1",
+      "0.99.2",
       ChangedHost,
     );
     expect(structureResult.supported).toBe(false);
@@ -167,7 +182,7 @@ describe("installResourceInventoryOverride", () => {
       declare settingsManager: { getQuietStartup: () => boolean };
     }
 
-    const override = installResourceInventoryOverride("0.84.1", MissingManager);
+    const override = installResourceInventoryOverride("0.99.2", MissingManager);
     expect(override.supported).toBe(true);
     expect(() =>
       new MissingManager().showLoadedResources({
@@ -180,13 +195,13 @@ describe("installResourceInventoryOverride", () => {
   test("should retain a replacement method when a patch owner releases after another extension changes the host", () => {
     const { InteractiveMode } = host();
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     const replacement = mock();
     InteractiveMode.prototype.showLoadedResources = replacement;
     const rejected = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
 
@@ -205,7 +220,7 @@ describe("installResourceInventoryOverride", () => {
   ])(
     "should fail open when the resource method is %s",
     (_condition, prototype) => {
-      const override = installResourceInventoryOverride("0.85.1", {
+      const override = installResourceInventoryOverride("0.99.2", {
         prototype,
       });
       expect(override.supported).toBe(false);
@@ -225,7 +240,7 @@ describe("installResourceInventoryOverride", () => {
       configurable: false,
     });
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     try {
@@ -246,7 +261,7 @@ describe("installResourceInventoryOverride", () => {
       "getQuietStartup",
     );
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     const mode = new InteractiveMode();
@@ -270,7 +285,7 @@ describe("installResourceInventoryOverride", () => {
       writable: false,
     });
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     expect(override.supported).toBe(false);
@@ -286,7 +301,7 @@ describe("installResourceInventoryOverride", () => {
     const mode = new InteractiveMode();
     mode.settingsManager = inheritedManager;
     const override = installResourceInventoryOverride(
-      "0.85.1",
+      "0.99.2",
       InteractiveMode,
     );
     try {

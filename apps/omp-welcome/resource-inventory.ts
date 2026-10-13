@@ -1,6 +1,7 @@
 import { satisfies } from "semver";
 
-const SUPPORTED_PI_RANGE = ">=0.84.0 <0.86.0";
+// The private renderer's listing and diagnostics branches were reviewed at 0.99.2.
+const SUPPORTED_PI_RANGE = "=0.99.2";
 const PATCH_REGISTRY = Symbol.for(
   "pi-agent.extensions.omp-welcome.resource-inventory-patches",
 );

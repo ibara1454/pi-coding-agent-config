@@ -42,8 +42,8 @@ Pi's native extension context initially reports message usage only. Before the f
 To match oh-my-pi, this extension:
 
 1. Uses provider-reported context tokens after a valid assistant response.
-2. Before a provider anchor exists, estimates the system prompt, active tool schemas, and context entries.
-3. Uses oh-my-pi's fallback token formula: UTF-8 byte length divided by four.
+2. Before a provider anchor exists, estimates the system prompt, active tool schemas, and context messages.
+3. Uses Pi's message estimator on the canonical session projection, so append-only context omissions and replacements are reflected. Prompt and tool overhead uses UTF-8 byte length divided by four.
 4. Re-estimates the active context after compaction until a new provider-reported value is available.
 
 ## Configuration

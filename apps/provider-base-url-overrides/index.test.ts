@@ -4,12 +4,20 @@ import * as console from "node:console";
 import process from "node:process";
 import type {
   Api,
+  AssistantImages,
   AssistantMessageEventStream,
+  ClassifierApi,
+  ClassifierModel,
+  ClassifierResult,
+  ImageApi,
+  ImageModel,
   Model,
   Provider,
 } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createAssistantMessageEventStream,
+  normalizeContext,
+} from "@earendil-works/pi-ai";
 import providerBaseUrlOverrides from "./index.ts";
 
 const ENVIRONMENT_VARIABLES = [
@@ -70,20 +78,9 @@ interface ProviderResults {
   fetchDeferred: AssistantMessageEventStream;
 }
 
-interface TestModelRegistry {
-  getAll: () => readonly TestModel[];
-  getProvider: (id: string) => Provider | undefined;
-}
-
-type SessionHandler = (
-  event: { type: "session_start"; reason: "startup" },
-  context: {
-    modelRegistry: TestModelRegistry;
-    ui: {
-      notify: (message: string, level: "warning") => void;
-    };
-  },
-) => void | Promise<void>;
+type OverrideApi = Parameters<typeof providerBaseUrlOverrides>[0];
+type SessionHandler = Parameters<OverrideApi["on"]>[1];
+type TestModelRegistry = Parameters<SessionHandler>[1]["modelRegistry"];
 
 interface HarnessBehavior {
   registerProvider?: (provider: Provider) => void;
@@ -91,7 +88,7 @@ interface HarnessBehavior {
 
 interface HarnessNotification {
   message: string;
-  level: "warning";
+  level: "info" | "warning" | "error" | undefined;
 }
 
 interface ExtensionHarness {
@@ -224,8 +221,12 @@ function makeProvider(
   return { provider, calls, results };
 }
 
+/**
+ * Record the host operations this extension consumes without casting a partial API.
+ * @example makeHarness().state.registrations // []
+ */
 function makeHarness(behavior: HarnessBehavior = {}): {
-  pi: ExtensionAPI;
+  pi: OverrideApi;
   state: ExtensionHarness;
 } {
   const state: ExtensionHarness = {
@@ -234,15 +235,16 @@ function makeHarness(behavior: HarnessBehavior = {}): {
     notifications: [],
     warnings: [],
   };
-  const pi = {
+  const pi: OverrideApi = {
     on(event: string, handler: SessionHandler) {
       state.handlers.push({ event, handler });
+      return () => undefined;
     },
     registerProvider(provider: Provider) {
       behavior.registerProvider?.(provider);
       state.registrations.push(provider);
     },
-  } as ExtensionAPI;
+  };
   return { pi, state };
 }
 
@@ -531,7 +533,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.id).toBe("snapshot-provider");
     expect(wrapped.stream(model, context)).toBe(results.stream);
     expect(required(calls.stream[0]).model.baseUrl).toBe(
@@ -626,7 +628,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.stream(accessorModel, context)).toBe(results.stream);
     const delegatedModel = required(calls.stream[0]).model;
     expect(delegatedModel.api).toBe("openai-responses");
@@ -660,7 +662,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     let thrown: unknown;
     try {
       wrapped.stream(model, context);
@@ -829,6 +831,109 @@ describe("providerBaseUrlOverrides", () => {
     expect(wrapped.filterModels).toBeUndefined();
     expect(wrapped.fetchDeferred).toBeUndefined();
     expect(wrapped.cancelDeferred).toBeUndefined();
+    expect(wrapped.getAllModels).toBeUndefined();
+    expect(wrapped.filterAllModels).toBeUndefined();
+    expect(wrapped.generateImages).toBeUndefined();
+    expect(wrapped.classify).toBeUndefined();
+  });
+});
+
+describe("providerBaseUrlOverrides", () => {
+  test("should preserve mixed catalogs and non-chat operations when providers support images and classifiers", async () => {
+    const model = makeModel(
+      "mixed",
+      "chat",
+      "https://origin.test/chat",
+      "openai-responses",
+    );
+    const image: ImageModel<ImageApi> = {
+      ...model,
+      id: "image",
+      type: "image",
+      api: "openrouter-images",
+      output: ["image"],
+    };
+    const classifier: ClassifierModel<ClassifierApi> = {
+      ...model,
+      id: "classifier",
+      type: "classifier",
+      api: "typesafe-system-one",
+    };
+    const catalog = [model, image, classifier];
+    const { provider, calls } = makeProvider("mixed", [model]);
+    const imageResult: AssistantImages = {
+      api: image.api,
+      provider: image.provider,
+      model: image.id,
+      output: [],
+      stopReason: "stop",
+      timestamp: 0,
+    };
+    const classifierResult: ClassifierResult = {
+      api: classifier.api,
+      provider: classifier.provider,
+      model: classifier.id,
+      answers: {},
+      stopReason: "stop",
+      timestamp: 0,
+    };
+    const imageContext = { input: [] };
+    const classifierContext = { state: {}, questions: {} };
+    const options = { apiKey: "key" };
+    const imageCalls: unknown[][] = [];
+    const classifierCalls: unknown[][] = [];
+    const filterCalls: unknown[][] = [];
+    provider.getAllModels = function (this: Provider) {
+      calls.receivers.push(this);
+      return catalog;
+    };
+    provider.filterAllModels = function (this: Provider, models, auth) {
+      calls.receivers.push(this);
+      filterCalls.push([models, auth]);
+      return models;
+    };
+    provider.generateImages = function (this: Provider, ...args) {
+      calls.receivers.push(this);
+      imageCalls.push(args);
+      return Promise.resolve(imageResult);
+    };
+    provider.classify = function (this: Provider, ...args) {
+      calls.receivers.push(this);
+      classifierCalls.push(args);
+      return Promise.resolve(classifierResult);
+    };
+    const harness = runExtension({
+      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+      PROVIDER_BASE_URL: "https://proxy.test",
+    });
+    const { registry } = makeRegistry([model], { mixed: provider });
+    await triggerSessionStart(harness, registry);
+    const wrapped = required(harness.registrations[0]);
+    const expectedModels = [
+      { ...model, baseUrl: "https://proxy.test/v1" },
+      image,
+      classifier,
+    ];
+    const allModels = wrapped.getAllModels?.();
+    expect(allModels).toEqual(expectedModels);
+    expect(allModels?.[0]).not.toBe(model);
+    expect(allModels?.[1]).toBe(image);
+    expect(allModels?.[2]).toBe(classifier);
+    const credential = { type: "api_key", key: "secret" } as const;
+    expect(wrapped.filterAllModels?.(catalog, credential)).toEqual(
+      expectedModels,
+    );
+    expect(filterCalls).toEqual([[expectedModels, credential]]);
+    expect(await wrapped.generateImages?.(image, imageContext, options)).toBe(
+      imageResult,
+    );
+    expect(
+      await wrapped.classify?.(classifier, classifierContext, options),
+    ).toBe(classifierResult);
+    expect(imageCalls).toEqual([[image, imageContext, options]]);
+    expect(classifierCalls).toEqual([[classifier, classifierContext, options]]);
+    expect(calls.receivers).toEqual([provider, provider, provider, provider]);
+    expect(model.baseUrl).toBe("https://origin.test/chat");
   });
 
   test("should delegate stream methods with routed models and unchanged options when API is not Azure", async () => {
@@ -850,7 +955,10 @@ describe("providerBaseUrlOverrides", () => {
     const { registry } = makeRegistry([originalModel], { transport: provider });
     await triggerSessionStart(harness, registry);
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({
+      systemPrompt: "Keep the normalized transcript intact.",
+      messages: [],
+    });
     const streamOptions = { temperature: 0.2 };
     const simpleOptions = {
       reasoning: "high",
@@ -1043,7 +1151,7 @@ describe("providerBaseUrlOverrides", () => {
     const { registry } = makeRegistry([originalModel], { azure: provider });
     await triggerSessionStart(harness, registry);
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     const handle: Parameters<FetchDeferred>[1] = {
       provider: "azure",
       modelId: originalModel.id,
@@ -1170,7 +1278,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.stream(model, context, callerOptions)).toBe(results.stream);
     expect(required(calls.stream[0]).options).toEqual({
       apiKey: "key",
