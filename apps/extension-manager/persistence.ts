@@ -130,6 +130,83 @@ function scopeFailure(scope: ResourceScope, error: unknown): ScopeCommitResult {
   };
 }
 
+interface PreparedSettings {
+  readonly content: string | undefined;
+  readonly next: JsonObject;
+  readonly path: string;
+  readonly previous: JsonObject;
+}
+
+/**
+ * Reads and validates every selected scope while its caller holds all locks.
+ * Parse errors and conflicts skip identity checks; failed scopes do not stop later checks.
+ * @param request - Staged scope snapshots supplying settings paths and conflict baselines; grouped mutations, not request.mutations, select changes here.
+ * @param grouped - Mutations per scope, in application and target-validation order; each selected scope must have an entry.
+ * @param scopes - Explicit validation order (global then project at the caller); each selected scope must have a snapshot and an already-held lock.
+ * @param io - Caller-supplied read and identity-validation effects under caller-owned locks; their errors become per-scope failures.
+ * @returns New prepared values, conflicts, and failures without changing inputs, writing settings, or acquiring/releasing locks.
+ * @example A project conflict leaves global prepared but prevents the caller's write phase.
+ */
+async function prepareCommit(
+  request: CommitRequest,
+  grouped: ReadonlyMap<ResourceScope, readonly SettingsMutation[]>,
+  scopes: readonly ResourceScope[],
+  io: PersistenceIo,
+): Promise<{
+  readonly prepared: ReadonlyMap<ResourceScope, PreparedSettings>;
+  readonly conflicts: ReadonlySet<ResourceScope>;
+  readonly validationFailures: ReadonlyMap<ResourceScope, string>;
+}> {
+  const prepared = new Map<ResourceScope, PreparedSettings>();
+  const conflicts = new Set<ResourceScope>();
+  const validationFailures = new Map<ResourceScope, string>();
+  for (const scope of scopes) {
+    const document = request.documents.get(scope);
+    const mutations = grouped.get(scope);
+    if (document === undefined || mutations === undefined) {
+      validationFailures.set(scope, "Missing commit input");
+      continue;
+    }
+    if (document.error !== undefined) {
+      validationFailures.set(scope, `Snapshot is invalid: ${document.error}`);
+      continue;
+    }
+
+    try {
+      const content = await io.read(document.path);
+      const current = parseSettingsDocument(scope, document.path, content);
+      if (current.error !== undefined) {
+        validationFailures.set(
+          scope,
+          `Current settings are invalid: ${current.error}`,
+        );
+        continue;
+      }
+
+      if (hasSettingsConflict(document.value, current.value, mutations)) {
+        conflicts.add(scope);
+        continue;
+      }
+
+      for (const mutation of mutations) {
+        await io.validateTarget(mutation.target);
+      }
+      prepared.set(scope, {
+        content,
+        next: applySettingsMutations(current.value, mutations),
+        path: document.path,
+        previous: current.value,
+      });
+    } catch (error) {
+      validationFailures.set(
+        scope,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+  return { prepared, conflicts, validationFailures };
+}
+
 /**
  * Validates staged settings and target identities under all selected locks,
  * then writes changed scopes without rolling back successful earlier writes.
@@ -185,62 +262,12 @@ export async function commitSettings(
       }
     }
 
-    const prepared = new Map<
-      ResourceScope,
-      {
-        readonly content: string | undefined;
-        readonly next: JsonObject;
-        readonly path: string;
-        readonly previous: JsonObject;
-      }
-    >();
-    const conflicts = new Set<ResourceScope>();
-    const validationFailures = new Map<ResourceScope, string>();
-
-    for (const scope of scopes) {
-      const document = request.documents.get(scope);
-      const mutations = grouped.get(scope);
-      if (document === undefined || mutations === undefined) {
-        validationFailures.set(scope, "Missing commit input");
-        continue;
-      }
-      if (document.error !== undefined) {
-        validationFailures.set(scope, `Snapshot is invalid: ${document.error}`);
-        continue;
-      }
-
-      try {
-        const content = await io.read(document.path);
-        const current = parseSettingsDocument(scope, document.path, content);
-        if (current.error !== undefined) {
-          validationFailures.set(
-            scope,
-            `Current settings are invalid: ${current.error}`,
-          );
-          continue;
-        }
-
-        if (hasSettingsConflict(document.value, current.value, mutations)) {
-          conflicts.add(scope);
-          continue;
-        }
-
-        for (const mutation of mutations) {
-          await io.validateTarget(mutation.target);
-        }
-        prepared.set(scope, {
-          content,
-          next: applySettingsMutations(current.value, mutations),
-          path: document.path,
-          previous: current.value,
-        });
-      } catch (error) {
-        validationFailures.set(
-          scope,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
+    const { prepared, conflicts, validationFailures } = await prepareCommit(
+      request,
+      grouped,
+      scopes,
+      io,
+    );
 
     if (validationFailures.size > 0 || conflicts.size > 0) {
       return {

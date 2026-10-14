@@ -421,6 +421,50 @@ function renderCost(ctx: SegmentContext): RenderedSegment {
 }
 
 /**
+ * Renders a positive usage count with its icon inside the segment color.
+ * @param value Count before compact number formatting; zero/negative/NaN stays hidden.
+ * @param icon Configured prefix, included inside the segment foreground.
+ * @param ansi Segment foreground escape sequence.
+ * @returns Styled visible count or an empty hidden segment; no effects.
+ * @example renderUsageCount(1500, "in:", statusColor.spend); // Visible "in: 1.5k".
+ */
+function renderUsageCount(
+  value: number,
+  icon: string,
+  ansi: string,
+): RenderedSegment {
+  if (!(value > 0)) {
+    return { content: "", visible: false };
+  }
+  return {
+    content: color(ansi, withIcon(icon, formatNumber(value))),
+    visible: true,
+  };
+}
+
+/**
+ * Renders a cached PR label, linking only safe HTTP(S) URLs.
+ * @param ctx Cached PR and host theme; no requests or state changes occur.
+ * @param icon Preset PR prefix, included in the accent-colored label.
+ * @returns Hidden when no PR exists; unsafe URLs retain the unlinked label.
+ * @example With PR 42 and an unsafe URL, renderPullRequest(ctx, "PR") shows "PR #42".
+ */
+function renderPullRequest(ctx: SegmentContext, icon: string): RenderedSegment {
+  if (!ctx.git.pr) {
+    return { content: "", visible: false };
+  }
+  const label = withIcon(icon, `#${ctx.git.pr.number}`);
+  const url = safeHyperlinkUrl(ctx.git.pr.url);
+  return {
+    content: ctx.theme.fg(
+      "accent",
+      url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label,
+    ),
+    visible: true,
+  };
+}
+
+/**
  * Renders one configured segment with its visibility and terminal styling.
  * @param id Segment selected by the active preset.
  * @param ctx Current settings, usage, and host state; nothing is mutated.
@@ -455,20 +499,8 @@ export function renderSegment(
       return renderPath(ctx);
     case "git":
       return renderGit(ctx);
-    case "pr": {
-      if (!ctx.git.pr) {
-        return { content: "", visible: false };
-      }
-      const label = withIcon(icons.pr, `#${ctx.git.pr.number}`);
-      const url = safeHyperlinkUrl(ctx.git.pr.url);
-      return {
-        content: ctx.theme.fg(
-          "accent",
-          url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label,
-        ),
-        visible: true,
-      };
-    }
+    case "pr":
+      return renderPullRequest(ctx, icons.pr);
     case "subagents":
       return extensionStatus
         ? {
@@ -480,36 +512,16 @@ export function renderSegment(
           }
         : { content: "", visible: false };
     case "token_in":
-      return ctx.usage.input > 0
-        ? {
-            content: color(
-              statusColor.spend,
-              withIcon(icons.input, formatNumber(ctx.usage.input)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(ctx.usage.input, icons.input, statusColor.spend);
     case "token_out":
-      return ctx.usage.output > 0
-        ? {
-            content: color(
-              statusColor.output,
-              withIcon(icons.output, formatNumber(ctx.usage.output)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(
+        ctx.usage.output,
+        icons.output,
+        statusColor.output,
+      );
     case "token_total": {
       const total = ctx.usage.input + ctx.usage.output + ctx.usage.cacheWrite;
-      return total > 0
-        ? {
-            content: color(
-              statusColor.spend,
-              withIcon(icons.tokens, formatNumber(total)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(total, icons.tokens, statusColor.spend);
     }
     case "token_rate":
       return ctx.usage.tokensPerSecond
@@ -529,15 +541,11 @@ export function renderSegment(
     case "context_pct":
       return renderContext(ctx);
     case "context_total":
-      return ctx.contextWindow > 0
-        ? {
-            content: color(
-              statusColor.context,
-              withIcon(icons.context, formatNumber(ctx.contextWindow)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(
+        ctx.contextWindow,
+        icons.context,
+        statusColor.context,
+      );
     case "time_spent":
       return ctx.activeMs >= MINIMUM_ACTIVE_TIME_MS
         ? {
@@ -567,25 +575,17 @@ export function renderSegment(
       };
     }
     case "cache_read":
-      return ctx.usage.cacheRead > 0
-        ? {
-            content: color(
-              statusColor.spend,
-              withIcon(icons.cache, formatNumber(ctx.usage.cacheRead)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(
+        ctx.usage.cacheRead,
+        icons.cache,
+        statusColor.spend,
+      );
     case "cache_write":
-      return ctx.usage.cacheWrite > 0
-        ? {
-            content: color(
-              statusColor.output,
-              withIcon(icons.cache, formatNumber(ctx.usage.cacheWrite)),
-            ),
-            visible: true,
-          }
-        : { content: "", visible: false };
+      return renderUsageCount(
+        ctx.usage.cacheWrite,
+        icons.cache,
+        statusColor.output,
+      );
     case "cache_hit": {
       const total =
         ctx.usage.cacheRead + ctx.usage.cacheWrite + ctx.usage.input;

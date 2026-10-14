@@ -574,7 +574,7 @@ async function serverCapabilities(
  * position-based operations.
  * Status, capabilities, raw requests, reloads, file renames, and diagnostics
  * return before document setup; concrete-file actions are narrowed to document
- * operations before dispatch.
+ * operations before dispatch. Each successful open is tracked before validation or requests.
  * The fallback rejects unsupported runtime values instead of bypassing required
  * prerequisites.
  * @param state - Session-owned configuration, document tracking, server lifetime.
@@ -618,7 +618,32 @@ async function dispatchAction(
     }
     return workspaceSymbols(state, params, signal);
   }
-  const action:
+  const file = path.resolve(state.options.cwd, params.file);
+  const server = await languageServerFor(state, file, signal);
+  const content = await openDocument(server, file, signal);
+  state.knownFiles.add(file);
+  return await documentAction(state, params, params.action, {
+    file,
+    server,
+    content,
+    signal,
+  });
+}
+
+/**
+ * Routes position-based requests and edits after the owner opens and tracks the document.
+ * @param state - Read-only access to configuration, snapshots, and effect-owning edit operations.
+ * @param params - Original request used for position selection and output.
+ * @param action - Document action narrowed after workspace-only routes.
+ * @param operation - Absolute path, synchronized server and content, and request cancellation.
+ * @returns The requested navigation, inspection, or edit result without changing document tracking.
+ * @throws On position validation, peer, or edit failures.
+ * @example A symbols action requests symbols from an already opened document without resolving a position.
+ */
+async function documentAction(
+  state: WorkspaceState,
+  params: LspParams,
+  action:
     | "definition"
     | "type_definition"
     | "implementation"
@@ -626,11 +651,15 @@ async function dispatchAction(
     | "hover"
     | "symbols"
     | "rename"
-    | "code_actions" = params.action;
-  const file = path.resolve(state.options.cwd, params.file);
-  const server = await languageServerFor(state, file, signal);
-  const content = await openDocument(server, file, signal);
-  state.knownFiles.add(file);
+    | "code_actions",
+  operation: {
+    file: string;
+    server: LanguageServer;
+    content: string;
+    signal: AbortSignal;
+  },
+): Promise<LspResult> {
+  const { file, server, content, signal } = operation;
   const uri = fileToUri(file);
   if (
     !server.config.isLinter &&
@@ -651,52 +680,13 @@ async function dispatchAction(
     case "definition":
     case "type_definition":
     case "implementation":
-    case "references": {
-      const methods = {
-        definition: "textDocument/definition",
-        typeDefinition: "textDocument/typeDefinition",
-        implementation: "textDocument/implementation",
-        references: "textDocument/references",
-      };
-      const method =
-        action === "type_definition" ? methods.typeDefinition : methods[action];
-      const request = {
-        ...target,
-        ...(action === "references"
-          ? { context: { includeDeclaration: true } }
-          : {}),
-      };
-      const found = await navigationLocations(
-        server,
-        method,
-        { file, request },
+    case "references":
+      return navigationResult(state.options.cwd, params, server, {
+        action,
+        file,
+        target,
         signal,
-      );
-      const label = action === "type_definition" ? "type definition" : action;
-      if (found.length === 0) {
-        return workspaceResult(
-          params,
-          `No ${label} found`,
-          true,
-          server.config.name,
-        );
-      }
-      const limit =
-        action === "references"
-          ? MAX_REFERENCE_RESULTS
-          : MAX_NAVIGATION_RESULTS;
-      const lines = await navigationContextLines(
-        state.options.cwd,
-        found.slice(0, limit),
-        signal,
-      );
-      return workspaceResult(
-        params,
-        `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
-        true,
-        server.config.name,
-      );
-    }
+      });
     case "hover": {
       const text = hoverText(
         await server.request("textDocument/hover", target, signal),
@@ -762,6 +752,72 @@ async function dispatchAction(
     default:
       throw new Error(`Unsupported LSP action: ${String(action)}`);
   }
+}
+
+/**
+ * Requests navigation locations and formats bounded context without changing peer order.
+ * @param cwd - Workspace root used to render location paths and context.
+ * @param params - Original action used for result metadata.
+ * @param server - Already synchronized document's server.
+ * @param options - Navigation kind, document, protocol target, and request cancellation.
+ * @returns Empty-success output or ordered locations with the original total count.
+ * @throws On request, invalid location, context-read, or cancellation failures.
+ * @example A references result includes declarations and renders at most 50 locations.
+ */
+async function navigationResult(
+  cwd: string,
+  params: LspParams,
+  server: LanguageServer,
+  options: {
+    action: "definition" | "type_definition" | "implementation" | "references";
+    file: string;
+    target: { textDocument: { uri: string }; position: Position };
+    signal: AbortSignal;
+  },
+): Promise<LspResult> {
+  const { action } = options;
+  const methods = {
+    definition: "textDocument/definition",
+    typeDefinition: "textDocument/typeDefinition",
+    implementation: "textDocument/implementation",
+    references: "textDocument/references",
+  };
+  const method =
+    action === "type_definition" ? methods.typeDefinition : methods[action];
+  const request = {
+    ...options.target,
+    ...(action === "references"
+      ? { context: { includeDeclaration: true } }
+      : {}),
+  };
+  const found = await navigationLocations(
+    server,
+    method,
+    { file: options.file, request },
+    options.signal,
+  );
+  const label = action === "type_definition" ? "type definition" : action;
+  if (found.length === 0) {
+    return workspaceResult(
+      params,
+      `No ${label} found`,
+      true,
+      server.config.name,
+    );
+  }
+  const limit =
+    action === "references" ? MAX_REFERENCE_RESULTS : MAX_NAVIGATION_RESULTS;
+  const lines = await navigationContextLines(
+    cwd,
+    found.slice(0, limit),
+    options.signal,
+  );
+  return workspaceResult(
+    params,
+    `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
+    true,
+    server.config.name,
+  );
 }
 
 /**
@@ -1457,6 +1513,36 @@ function editResult(
 }
 
 /**
+ * Follows committed rename chains for documents observed by one server.
+ * @param server - Observer whose open source documents select reopening.
+ * @param renamed - URI pairs in commit order, left unchanged.
+ * @param deleted - Final removed paths that must not be reopened.
+ * @returns Final absolute destination paths to reopen, without changing server state.
+ * @example An open a.ts renamed to b.ts then c.ts selects c.ts unless it was deleted.
+ */
+function renamedOpenFiles(
+  server: LanguageServer,
+  renamed: readonly { oldUri: string; newUri: string }[],
+  deleted: ReadonlySet<string>,
+): Set<string> {
+  const reopen = new Set<string>();
+  for (const pair of renamed) {
+    if (server.document(uriToFile(pair.oldUri))) {
+      let final = pair.newUri;
+      for (const next of renamed) {
+        if (next.oldUri === final) {
+          final = next.newUri;
+        }
+      }
+      if (!deleted.has(uriToFile(final))) {
+        reopen.add(uriToFile(final));
+      }
+    }
+  }
+  return reopen;
+}
+
+/**
  * Synchronizes committed changes across live servers and invalidates deleted-path feedback.
  * @param state - Workspace-owned documents, hooks, fingerprints, pool, and lifetime.
  * @param changes - Executed filesystem changes in commit order, including partial results.
@@ -1512,20 +1598,7 @@ async function reconcileChanges(
     if (!server.isAlive) {
       return;
     }
-    const reopen = new Set<string>();
-    for (const pair of renamed) {
-      if (server.document(uriToFile(pair.oldUri))) {
-        let final = pair.newUri;
-        for (const next of renamed) {
-          if (next.oldUri === final) {
-            final = next.newUri;
-          }
-        }
-        if (!deleted.has(uriToFile(final))) {
-          reopen.add(uriToFile(final));
-        }
-      }
-    }
+    const reopen = renamedOpenFiles(server, renamed, deleted);
     try {
       for (const file of deleted) {
         await server.closeFile(file);
@@ -1641,6 +1714,259 @@ function assertSnapshotContentMatches(
 }
 
 /**
+ * Synchronizes selected rename sources, yielding each successful open before starting another.
+ * The consumer owns tracking and must record each yielded path before resuming this generator.
+ * @param config - Read-only workspace configuration selecting files for the peer.
+ * @param server - Peer whose selected documents are synchronized.
+ * @param files - Absolute source paths in discovery order.
+ * @param signal - Cancellation for file reads and synchronization.
+ * @returns Successful absolute paths in open order; no tracking or snapshots are changed.
+ * @throws On failed opens or cancellation after any earlier successful paths have been yielded.
+ * @example If b.ts fails after a.ts, the consumer has already received and tracked a.ts.
+ */
+async function* openRenameDocuments(
+  config: LspConfig,
+  server: LanguageServer,
+  files: readonly string[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void> {
+  for (const file of files) {
+    if (
+      selectedServers(config, file).some(
+        (candidate) => candidate.name === server.config.name,
+      )
+    ) {
+      await openDocument(server, file, signal);
+      yield file;
+    }
+  }
+}
+
+/**
+ * Requests and preview-validates one server's rename edits without committing files.
+ * @param cwd - Workspace root for edit validation.
+ * @param server - Synchronized peer contributing rename references.
+ * @param options - URI pairs, pre-request snapshots, and cancellation.
+ * @returns The validated peer edit, or protocol null when there are no edits.
+ * @throws On peer failures or invalid edits, preserving the existing validation message.
+ * @example A valid willRenameFiles edit is returned while its preview leaves files unchanged.
+ */
+async function validatedRenameEdit(
+  cwd: string,
+  server: LanguageServer,
+  options: {
+    pairs: readonly { oldUri: string; newUri: string }[];
+    documents: ReadonlyMap<string, DocumentSnapshot>;
+    signal: AbortSignal;
+  },
+  // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+): Promise<WorkspaceEdit | null> {
+  // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+  const response = await server.request<WorkspaceEdit | null>(
+    "workspace/willRenameFiles",
+    { files: options.pairs },
+    options.signal,
+  );
+  if (response === null) {
+    return response;
+  }
+  const validated = await applyWorkspaceEdit(response, {
+    cwd,
+    documents: options.documents,
+    document: (file) => server.document(file),
+    signal: options.signal,
+    preview: true,
+  });
+  if (!validated.applied) {
+    throw new Error(
+      validated.failureReason ?? "Invalid willRenameFiles workspace edit",
+    );
+  }
+  return response;
+}
+
+/**
+ * Collects validated server contributions in semantic-first order without committing files.
+ * Owns its edit buckets, annotations, snapshots, and notes; resource edits flush earlier text edits.
+ * Each successful open is yielded for the owner to track before another open or peer request.
+ * @param state - Read-only configuration, tracking for snapshots, and effect-owning server pool.
+ * @param preparation - Ordered absolute source files, URI pairs, and selected server configurations.
+ * @param signal - Cancellation for acquisition, synchronization, and peer requests.
+ * @returns Yields opened paths; returns ordered changes, annotations, snapshots, notes, and request failures.
+ * @throws On cancellation; unavailable servers and unsupported methods become notes, other peer failures are returned.
+ * @example Two servers replacing the same range retain the earlier semantic server's edit.
+ */
+async function* collectFileRenameEdits(
+  state: WorkspaceState,
+  preparation: {
+    files: readonly string[];
+    pairs: readonly { oldUri: string; newUri: string }[];
+    configs: ReadonlyMap<string, ServerConfig>;
+  },
+  signal: AbortSignal,
+): AsyncGenerator<
+  string,
+  {
+    documentChanges: NonNullable<WorkspaceEdit["documentChanges"]>;
+    annotations: NonNullable<WorkspaceEdit["changeAnnotations"]>;
+    snapshots: Map<string, DocumentSnapshot>;
+    notes: string[];
+    failures: string[];
+  }
+> {
+  const { files, pairs, configs } = preparation;
+  const buckets = new Map<string, Array<{ edit: TextEdit; server: string }>>();
+  const documentChanges: NonNullable<WorkspaceEdit["documentChanges"]> = [];
+  const annotations: NonNullable<WorkspaceEdit["changeAnnotations"]> = {};
+  const snapshots = new Map<string, DocumentSnapshot>();
+  const notes: string[] = [];
+  const failures: string[] = [];
+  /**
+   * Reads this collector's pending buckets in insertion order without consuming them.
+   * @returns Unversioned text changes; the collector owns appending them and clearing buckets.
+   * @example A bucket for a.ts yields one TextDocumentEdit preceding a later resource rename.
+   */
+  function* pendingTextChanges(): Generator<
+    NonNullable<WorkspaceEdit["documentChanges"]>[number],
+    void
+  > {
+    for (const [uri, values] of buckets) {
+      yield {
+        // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+        textDocument: { uri, version: null },
+        edits: values.map((value) => value.edit),
+      };
+    }
+  }
+  // Semantic servers precede linters. Preserve nonoverlapping contributions, but never apply two servers' conflicting replacements.
+  const selected = [...configs.values()].sort(
+    (a, b) => Number(Boolean(a.isLinter)) - Number(Boolean(b.isLinter)),
+  );
+  for (const config of selected) {
+    signal.throwIfAborted();
+    let server: LanguageServer;
+    try {
+      server = await state.pool.get(config, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      notes.push(`${config.name}: failed to start: ${errorText(error)}`);
+      continue;
+    }
+    try {
+      yield* openRenameDocuments(state.config, server, files, signal);
+      const serverSnapshots = documentSnapshots(state.knownFiles, server);
+      for (const [file, document] of serverSnapshots) {
+        assertSnapshotContentMatches(file, document, snapshots.get(file));
+        snapshots.set(file, document);
+      }
+      const response = await validatedRenameEdit(state.options.cwd, server, {
+        pairs,
+        documents: serverSnapshots,
+        signal,
+      });
+      if (response === null) {
+        continue;
+      }
+      for (const [id, annotation] of Object.entries(
+        response.changeAnnotations ?? {},
+      )) {
+        annotations[`${config.name}:${id}`] = annotation;
+      }
+      /**
+       * Namespaces annotation references using this contribution's server without changing the input.
+       * @param value - Protocol text edit or resource operation, with an optional annotationId.
+       * @returns The original value without an annotation, otherwise a namespaced copy.
+       * @example Server "ts" changes annotationId "fix" into "ts:fix".
+       */
+      const annotate = <T extends object>(value: T): T =>
+        "annotationId" in value
+          ? {
+              ...value,
+              annotationId: `${config.name}:${String(value.annotationId)}`,
+            }
+          : value;
+      /**
+       * Selects reference edits against read-only buckets, giving earlier servers precedence.
+       * @param uri - Document URI receiving the edits.
+       * @param incoming - Ordered edits from this contribution's server; inputs remain unchanged.
+       * @returns Accepted namespaced edits and discard notes for the collector to apply.
+       * @example A duplicate from a later server returns no accepted edit and one discard note.
+       */
+      const referenceEdits = (uri: string, incoming: readonly TextEdit[]) => {
+        const previous = buckets.get(uri) ?? [];
+        const accepted: Array<{ edit: TextEdit; server: string }> = [];
+        let discarded = 0;
+        for (const raw of incoming) {
+          const edit = annotate(raw);
+          /**
+           * Compares LSP zero-based positions without changing either input.
+           * @param a - First line/UTF-16 character position.
+           * @param b - Second line/UTF-16 character position.
+           * @returns Negative, zero, or positive for before, equal, or after.
+           * @example (0, 2) sorts before (1, 0).
+           */
+          const compare = (a: Position, b: Position): number =>
+            a.line - b.line || a.character - b.character;
+          const conflict = previous.find(
+            (value) =>
+              value.server !== config.name &&
+              ((compare(value.edit.range.start, edit.range.end) < 0 &&
+                compare(edit.range.start, value.edit.range.end) < 0) ||
+                (JSON.stringify(value.edit.range) ===
+                  JSON.stringify(edit.range) &&
+                  value.edit.newText === edit.newText)),
+          );
+          if (conflict) {
+            discarded++;
+          } else {
+            accepted.push({ edit, server: config.name });
+          }
+        }
+        return {
+          edits: accepted,
+          notes:
+            discarded > 0
+              ? [
+                  `${config.name}: discarded ${discarded} overlapping/duplicate reference edit(s) for ${uriToFile(uri)}; earlier semantic server takes precedence`,
+                ]
+              : [],
+        };
+      };
+      const changes =
+        response.documentChanges ??
+        Object.entries(response.changes ?? {}).map(([uri, edits]) => ({
+          // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+          textDocument: { uri, version: null },
+          edits,
+        }));
+      for (const change of changes) {
+        if ("textDocument" in change) {
+          const { uri } = change.textDocument;
+          const contribution = referenceEdits(uri, change.edits as TextEdit[]);
+          const bucket = buckets.get(uri) ?? [];
+          bucket.push(...contribution.edits);
+          buckets.set(uri, bucket);
+          notes.push(...contribution.notes);
+        } else {
+          documentChanges.push(...pendingTextChanges());
+          buckets.clear();
+          documentChanges.push(annotate(change));
+        }
+      }
+    } catch (error) {
+      signal.throwIfAborted();
+      if (methodNotFound(error)) {
+        notes.push(`${config.name}: willRenameFiles is not supported`);
+        continue;
+      }
+      failures.push(`${config.name}: ${errorText(error)}`);
+    }
+  }
+  documentChanges.push(...pendingTextChanges());
+  return { documentChanges, annotations, snapshots, notes, failures };
+}
+
+/**
  * Coordinates server rename edits before committing a file or directory move.
  * Records each successful open immediately, retaining tracking when a later open fails.
  * @param state - Session root, available servers, observed documents, and edit lifetime.
@@ -1657,143 +1983,18 @@ async function renameFile(
 ): Promise<LspResult> {
   const { source, destination, sourceStat, files, pairs, configs } =
     await prepareFileRename(state, params, signal);
-  const buckets = new Map<string, Array<{ edit: TextEdit; server: string }>>();
-  const documentChanges: NonNullable<WorkspaceEdit["documentChanges"]> = [];
-  const annotations: NonNullable<WorkspaceEdit["changeAnnotations"]> = {};
-  const snapshots = new Map<string, DocumentSnapshot>();
-  const notes: string[] = [];
-  const failures: string[] = [];
-  const flush = (): void => {
-    for (const [uri, values] of buckets) {
-      documentChanges.push({
-        // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
-        textDocument: { uri, version: null },
-        edits: values.map((value) => value.edit),
-      });
-    }
-    buckets.clear();
-  };
-  // Semantic servers precede linters. Preserve nonoverlapping contributions, but never apply two servers' conflicting replacements.
-  const selected = [...configs.values()].sort(
-    (a, b) => Number(Boolean(a.isLinter)) - Number(Boolean(b.isLinter)),
+  const contributions = collectFileRenameEdits(
+    state,
+    { files, pairs, configs },
+    signal,
   );
-  for (const config of selected) {
-    signal.throwIfAborted();
-    let server: LanguageServer;
-    try {
-      server = await state.pool.get(config, signal);
-    } catch (error) {
-      signal.throwIfAborted();
-      notes.push(`${config.name}: failed to start: ${errorText(error)}`);
-      continue;
-    }
-    try {
-      for (const file of files) {
-        if (
-          selectedServers(state.config, file).some(
-            (candidate) => candidate.name === server.config.name,
-          )
-        ) {
-          await openDocument(server, file, signal);
-          state.knownFiles.add(file);
-        }
-      }
-      const serverSnapshots = documentSnapshots(state.knownFiles, server);
-      for (const [file, document] of serverSnapshots) {
-        assertSnapshotContentMatches(file, document, snapshots.get(file));
-        snapshots.set(file, document);
-      }
-      // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
-      const response = await server.request<WorkspaceEdit | null>(
-        "workspace/willRenameFiles",
-        { files: pairs },
-        signal,
-      );
-      if (response === null) {
-        continue;
-      }
-      const validated = await applyWorkspaceEdit(response, {
-        cwd: state.options.cwd,
-        documents: serverSnapshots,
-        document: (file) => server.document(file),
-        signal,
-        preview: true,
-      });
-      if (!validated.applied) {
-        throw new Error(
-          validated.failureReason ?? "Invalid willRenameFiles workspace edit",
-        );
-      }
-      for (const [id, annotation] of Object.entries(
-        response.changeAnnotations ?? {},
-      )) {
-        annotations[`${config.name}:${id}`] = annotation;
-      }
-      const annotate = <T extends object>(value: T): T =>
-        "annotationId" in value
-          ? {
-              ...value,
-              annotationId: `${config.name}:${String(value.annotationId)}`,
-            }
-          : value;
-      /**
-       * Collects a document's edits, giving earlier servers conflict precedence.
-       * @param uri - Document URI receiving the edits.
-       * @param incoming - Edits from the current server.
-       * @example A duplicate from a later server is discarded and reported.
-       */
-      const add = (uri: string, incoming: readonly TextEdit[]): void => {
-        const previous = buckets.get(uri) ?? [];
-        let discarded = 0;
-        for (const raw of incoming) {
-          const edit = annotate(raw);
-          const compare = (a: Position, b: Position): number =>
-            a.line - b.line || a.character - b.character;
-          const conflict = previous.find(
-            (value) =>
-              value.server !== config.name &&
-              ((compare(value.edit.range.start, edit.range.end) < 0 &&
-                compare(edit.range.start, value.edit.range.end) < 0) ||
-                (JSON.stringify(value.edit.range) ===
-                  JSON.stringify(edit.range) &&
-                  value.edit.newText === edit.newText)),
-          );
-          if (conflict) {
-            discarded++;
-          } else {
-            previous.push({ edit, server: config.name });
-          }
-        }
-        if (discarded > 0) {
-          notes.push(
-            `${config.name}: discarded ${discarded} overlapping/duplicate reference edit(s) for ${uriToFile(uri)}; earlier semantic server takes precedence`,
-          );
-        }
-        buckets.set(uri, previous);
-      };
-      if (response.documentChanges === undefined) {
-        for (const [uri, edits] of Object.entries(response.changes ?? {})) {
-          add(uri, edits);
-        }
-        continue;
-      }
-      for (const change of response.documentChanges) {
-        if ("textDocument" in change) {
-          add(change.textDocument.uri, change.edits as TextEdit[]);
-        } else {
-          flush();
-          documentChanges.push(annotate(change));
-        }
-      }
-    } catch (error) {
-      signal.throwIfAborted();
-      if (methodNotFound(error)) {
-        notes.push(`${config.name}: willRenameFiles is not supported`);
-        continue;
-      }
-      failures.push(`${config.name}: ${errorText(error)}`);
-    }
+  let contribution = await contributions.next();
+  while (!contribution.done) {
+    state.knownFiles.add(contribution.value);
+    contribution = await contributions.next();
   }
+  const { documentChanges, annotations, snapshots, notes, failures } =
+    contribution.value;
   signal.throwIfAborted();
   if (failures.length > 0) {
     return workspaceResult(
@@ -1811,7 +2012,6 @@ async function renameFile(
       "Directory contents changed while computing rename references; no files moved",
     );
   }
-  flush();
   documentChanges.push({
     kind: "rename",
     oldUri: fileToUri(source),
@@ -1960,7 +2160,73 @@ async function reloadWorkspace(
 }
 
 /**
+ * Detects feedback invalidated by a newer file hook or cancellation of its caller or session.
+ * @param state - Owner of current hook identity and session lifetime.
+ * @param file - Absolute path whose hook owns the feedback.
+ * @param controller - Hook identity; its own timeout remains reportable rather than suppressed.
+ * @param callerSignal - Optional cancellation of the host feedback request.
+ * @returns Whether output must be discarded instead of reported to the successful host operation.
+ * @example A newer write replacing the file's controller suppresses both notes and caught failures.
+ */
+function mutationFeedbackSuperseded(
+  state: WorkspaceState,
+  file: string,
+  controller: AbortController,
+  callerSignal?: AbortSignal,
+): boolean {
+  return (
+    state.hooks.get(file) !== controller ||
+    state.lifetime.signal.aborted ||
+    callerSignal?.aborted === true
+  );
+}
+
+/**
+ * Inspects a host-mutated path without reading content or changing workspace state.
+ * @param file - Absolute path to stat; symbolic links are followed by the filesystem.
+ * @returns "file" for any regular file, including empty files; "missing" for ENOENT;
+ * "non-file" for directories and other non-regular targets. The caller owns reconciliation and tracking.
+ * @throws All stat failures other than those recognized by missing(), including ENOTDIR.
+ * @example An empty a.ts selects "file"; an absent a.ts selects "missing"; a directory selects "non-file".
+ */
+async function inspectMutationFeedbackTarget(
+  file: string,
+): Promise<"file" | "missing" | "non-file"> {
+  try {
+    const stat = await fs.stat(file);
+    return stat.isFile() ? "file" : "non-file";
+  } catch (error) {
+    if (!missing(error)) {
+      throw error;
+    }
+    return "missing";
+  }
+}
+
+/**
+ * Formats optional feedback failure without changing signals, hooks, or workspace state.
+ * @param displayPath - Failed file's path already made relative to the workspace root.
+ * @param source - Host operation that already succeeded and must not be reversed.
+ * @param signal - Combined feedback cancellation; an aborted signal's reason takes precedence.
+ * @param error - Caught failure used only when the signal is not aborted.
+ * @returns Failure text for the owner to report after checking whether feedback was superseded.
+ * @throws If the selected failure value cannot be converted to text.
+ * @example A timeout reason replaces a caught stat error while still stating that the host write succeeded.
+ */
+function mutationFeedbackFailureText(
+  displayPath: string,
+  source: "write" | "edit",
+  signal: AbortSignal,
+  error: unknown,
+): string {
+  return `${displayPath}: LSP feedback unavailable (${errorText(signal.aborted ? signal.reason : error)}). The host ${source} already succeeded.`;
+}
+
+/**
  * Supersedes older per-file feedback while unrelated files run with bounded concurrency.
+ * Owns hook/timer cleanup, missing-file reconciliation, file tracking, and diagnostic fingerprints.
+ * Regular files, including empty ones, are processed; non-files are skipped and ENOENT reconciles deletion.
+ * Other stat and document failures become feedback, with hook timeout reasons taking precedence.
  * @param state - Session-owned hooks, diagnostics history, documents, and pool.
  * @param paths - Host-mutated paths resolved relative to the workspace root.
  * @param source - Successful host operation; only "write" permits formatting.
@@ -2003,47 +2269,28 @@ async function mutationFeedback(
     ]);
     try {
       signal.throwIfAborted();
-      const notes: string[] = [];
-      let exists = true;
-      try {
-        const stat = await fs.stat(file);
-        if (!stat.isFile()) {
+      switch (await inspectMutationFeedbackTarget(file)) {
+        case "non-file":
           return "";
+        case "missing": {
+          const failures = await reconcileChanges(state, [
+            { kind: "delete", file, files: [file] },
+          ]);
+          return failures.join("\n");
         }
-      } catch (error) {
-        if (missing(error)) {
-          exists = false;
-        } else {
-          throw error;
-        }
-      }
-      if (!exists) {
-        const failures = await reconcileChanges(state, [
-          { kind: "delete", file, files: [file] },
-        ]);
-        return failures.length > 0 ? failures.join("\n") : "";
+        case "file":
+          break;
+        default:
+          throw new Error("Invalid mutation feedback target");
       }
       state.knownFiles.add(file);
-      const relevant = serversForFile(state.config, file).length > 0;
-      notes.push(...(await synchronizeMutationDocuments(state, file, signal)));
-      if (
-        relevant &&
-        source === "write" &&
-        state.config.settings.formatOnWrite
-      ) {
-        try {
-          notes.push(...(await formatDocument(state, file, signal)));
-        } catch (error) {
-          notes.push(`Formatting failed: ${errorText(error)}`);
-        }
-      }
-      if (
-        relevant &&
-        (source === "write"
-          ? state.config.settings.diagnosticsOnWrite
-          : state.config.settings.diagnosticsOnEdit)
-      ) {
-        const report = await collectDiagnostics(state, file, signal);
+      const { notes, report } = await gatherMutationDocumentFeedback(
+        state,
+        file,
+        source,
+        signal,
+      );
+      if (report) {
         if (state.hooks.get(file) !== controller) {
           return "";
         }
@@ -2061,23 +2308,20 @@ async function mutationFeedback(
           );
         }
       }
-      if (
-        state.hooks.get(file) !== controller ||
-        state.lifetime.signal.aborted ||
-        callerSignal?.aborted
-      ) {
+      if (mutationFeedbackSuperseded(state, file, controller, callerSignal)) {
         return "";
       }
       return notes.join("\n");
     } catch (error) {
-      if (
-        state.hooks.get(file) !== controller ||
-        state.lifetime.signal.aborted ||
-        callerSignal?.aborted
-      ) {
+      if (mutationFeedbackSuperseded(state, file, controller, callerSignal)) {
         return "";
       }
-      return `${path.relative(state.options.cwd, file)}: LSP feedback unavailable (${errorText(signal.aborted ? signal.reason : error)}). The host ${source} already succeeded.`;
+      return mutationFeedbackFailureText(
+        path.relative(state.options.cwd, file),
+        source,
+        signal,
+        error,
+      );
     } finally {
       clearTimeout(timer);
       if (state.hooks.get(file) === controller) {
@@ -2095,6 +2339,44 @@ async function mutationFeedback(
         details: { action: "afterMutation", source },
       }
     : undefined;
+}
+
+/**
+ * Synchronizes a surviving host-mutated document, optionally formats it, and gathers diagnostics.
+ * The caller tracks the file before entry and owns hook freshness checks and diagnostic history.
+ * @param state - Read-only configuration and access to effect-owning synchronization, formatting, and diagnostics.
+ * @param file - Existing absolute document path already tracked by the owner.
+ * @param source - Successful host operation; only writes may trigger configured formatting.
+ * @param signal - Combined hook, caller, and session cancellation for document effects.
+ * @returns Synchronization/formatting notes and an optional diagnostic report, without changing fingerprints.
+ * @throws On synchronization setup, diagnostic, or cancellation failures; formatting failures become notes.
+ * @example An edit gathers configured diagnostics without format-on-write; the owner deduplicates its report.
+ */
+async function gatherMutationDocumentFeedback(
+  state: WorkspaceState,
+  file: string,
+  source: "write" | "edit",
+  signal: AbortSignal,
+): Promise<{ notes: string[]; report?: DiagnosticReport }> {
+  const notes: string[] = [];
+  const relevant = serversForFile(state.config, file).length > 0;
+  notes.push(...(await synchronizeMutationDocuments(state, file, signal)));
+  if (relevant && source === "write" && state.config.settings.formatOnWrite) {
+    try {
+      notes.push(...(await formatDocument(state, file, signal)));
+    } catch (error) {
+      notes.push(`Formatting failed: ${errorText(error)}`);
+    }
+  }
+  if (
+    relevant &&
+    (source === "write"
+      ? state.config.settings.diagnosticsOnWrite
+      : state.config.settings.diagnosticsOnEdit)
+  ) {
+    return { notes, report: await collectDiagnostics(state, file, signal) };
+  }
+  return { notes };
 }
 
 /**
@@ -2425,8 +2707,11 @@ export class LspWorkspace {
 
 /**
  * Computes diagnostic feedback and its next deduplication fingerprint without updating history.
- * The caller records the fingerprint only when a source responded and the hook is current.
- * @example A clean response after earlier findings emits a clearing diagnostic message.
+ * @param state - Read-only workspace root, deduplication setting, and previous diagnostic fingerprints.
+ * @param file - Absolute document path selecting history and rendering workspace-relative output.
+ * @param report - Collected findings, freshness sources, failures, and successful responder count.
+ * @returns Notes and a candidate fingerprint; the current hook's owner records it only if a source responded.
+ * @example A clean response after earlier findings emits a clearing diagnostic message and hadFindings: false.
  */
 function mutationDiagnosticFeedback(
   state: WorkspaceState,

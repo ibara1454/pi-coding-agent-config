@@ -905,6 +905,83 @@ describe("createGitStatus.invalidate", () => {
 });
 
 describe("createGitStatus.stop", () => {
+  test.each(["context", "branch"] as const)(
+    "should keep cancelled Git unpublished when the %s provider synchronously stops during publication",
+    async (provider) => {
+      spyOn(Date, "now").mockReturnValue(START_MS);
+      const started = Promise.withResolvers<void>();
+      const command = Promise.withResolvers<CommandResult>();
+      const stopped = Promise.withResolvers<void>();
+      const context = { owner: Symbol("session"), cwd: "/repo" };
+      const armedProviders = new Set<"context" | "branch">();
+      let commands = 0;
+      let changes = 0;
+      const status = createGitStatus({
+        readContext: () => {
+          if (armedProviders.delete("context")) {
+            status.stop().then(stopped.resolve, stopped.reject);
+          }
+          return context;
+        },
+        readBranch: () => {
+          if (armedProviders.delete("branch")) {
+            status.stop().then(stopped.resolve, stopped.reject);
+          }
+          return "main";
+        },
+        exec: () => {
+          commands++;
+          started.resolve();
+          return command.promise;
+        },
+        changed: () => {
+          changes++;
+        },
+      });
+      owners.push(status);
+      await status.start();
+      status.requestRefresh();
+      await started.promise;
+      armedProviders.add(provider);
+      command.resolve({ code: 0, stdout: "M  staged\n" });
+      await stopped.promise;
+      expect(status.snapshot).toEqual(EMPTY_SNAPSHOT);
+      expect(commands).toBe(1);
+      expect(changes).toBe(0);
+    },
+  );
+
+  test("should retain the previous snapshot when a PR abort listener synchronously stops rejected Git publication", async () => {
+    const fixture = createStatus();
+    await fixture.status.start();
+    fixture.status.requestRefresh();
+    await finishGit(fixture);
+    const pr = await fixture.command("gh");
+    const previous = fixture.status.snapshot;
+    const { changes } = fixture.input;
+    fixture.input.branch = "feature";
+    fixture.status.invalidate("working-tree");
+    const git = await fixture.command("git", 2);
+    const stopped = Promise.withResolvers<void>();
+    pr.options.signal.addEventListener(
+      "abort",
+      () => {
+        fixture.status.stop().then(stopped.resolve, stopped.reject);
+      },
+      { once: true },
+    );
+    git.reject(new Error("Git unavailable"));
+    await stopped.promise;
+    expect(fixture.status.snapshot).toBe(previous);
+    expect(fixture.status.snapshot.branch).toBe("main");
+    expect(fixture.input.changes).toBe(changes);
+    expect(fixture.calls.map((call) => call.command)).toEqual([
+      "git",
+      "gh",
+      "git",
+    ]);
+  });
+
   test("should stop idempotently and ignore requests when the owner is stopped", async () => {
     const fixture = createStatus();
     fixture.status.requestRefresh();

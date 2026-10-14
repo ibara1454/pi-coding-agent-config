@@ -211,9 +211,41 @@ export function visibleWidth(value: string): number {
 }
 
 /**
+ * Clips plain terminal text to complete graphemes, discarding escape sequences.
+ * @param value Text whose terminal controls are omitted from the result.
+ * @param width Maximum terminal cells, using the same estimate as visibleWidth.
+ * @returns Plain prefix and its cell width, without exceeding the budget.
+ * @example clipPlainTerminalText("\x1b[31m界…", 2); // { text: "界", cells: 2 }
+ */
+function clipPlainTerminalText(
+  value: string,
+  width: number,
+): { text: string; cells: number } {
+  let text = "";
+  let cells = 0;
+  for (const token of terminalTokens(value)) {
+    if (!token.grapheme) {
+      continue;
+    }
+    const graphemeCells = graphemeWidth(token.grapheme);
+    if (cells + graphemeCells > width) {
+      break;
+    }
+    text += token.grapheme;
+    cells += graphemeCells;
+  }
+  return { text, cells };
+}
+
+/**
  * Preserve complete terminal sequences and grapheme clusters while truncating.
  * A reset and any open OSC 8 hyperlink closure precede the ellipsis, so color
  * and hyperlink state cannot leak into the rest of the terminal frame.
+ * @param value Terminal text, returned unchanged when it already fits.
+ * @param width Maximum terminal cells; nonpositive budgets return an empty string.
+ * @param ellipsis Plain suffix, clipped to the budget with any terminal sequences removed.
+ * @returns Bounded text with hyperlink closure before color reset and ellipsis.
+ * @example truncateToWidth("\x1b[31mabcdef", 3); // "\x1b[31mab\x1b[0m…\x1b[0m"
  */
 export function truncateToWidth(
   value: string,
@@ -227,20 +259,8 @@ export function truncateToWidth(
     return value;
   }
 
-  let clippedEllipsis = "";
-  let ellipsisWidth = 0;
-  for (const token of terminalTokens(ellipsis)) {
-    if (!token.grapheme) {
-      continue;
-    }
-    const cells = graphemeWidth(token.grapheme);
-    if (ellipsisWidth + cells > width) {
-      break;
-    }
-    clippedEllipsis += token.grapheme;
-    ellipsisWidth += cells;
-  }
-  const contentWidth = Math.max(0, width - ellipsisWidth);
+  const clippedEllipsis = clipPlainTerminalText(ellipsis, width);
+  const contentWidth = Math.max(0, width - clippedEllipsis.cells);
   let result = "";
   let pendingAnsi = "";
   let cells = 0;
@@ -281,8 +301,8 @@ export function truncateToWidth(
     result += "\x1b[0m";
   }
   return hasSgr
-    ? `${result}${clippedEllipsis}\x1b[0m`
-    : `${result}${clippedEllipsis}`;
+    ? `${result}${clippedEllipsis.text}\x1b[0m`
+    : `${result}${clippedEllipsis.text}`;
 }
 
 /** Wrap plain welcome-tip text by terminal cells. ANSI-aware truncation handles long words. */

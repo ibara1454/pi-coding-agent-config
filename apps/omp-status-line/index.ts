@@ -689,6 +689,60 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
   };
 
   /**
+   * Frames editor content and trailing completion rows with this owner's status chrome.
+   * @param lines Original editor rows; the last detected border separates completion rows.
+   * @param contentWidth Inner cell budget, used for padding without truncating editor text.
+   * @param chromeWidth Trailing completion-row left indent in cells.
+   * @param ctx Host supplies the border theme without transferring lifecycle ownership.
+   * @returns Fresh framed rows using the current session's status; inputs remain unchanged
+   * and host/render errors propagate. No resources are acquired.
+   * @example Three editor rows at contentWidth 14 produce a top status and bottom content frame.
+   */
+  function renderStatusEditorFrame(
+    lines: readonly string[],
+    contentWidth: number,
+    chromeWidth: number,
+    ctx: ExtensionContext,
+  ): string[] {
+    let bottomBorderIndex = lines.length - 1;
+    for (let index = lines.length - 1; index >= 1; index--) {
+      if (EDITOR_BORDER_RE.test(stripVTControlCharacters(lines[index] ?? ""))) {
+        bottomBorderIndex = index;
+        break;
+      }
+    }
+
+    const { theme } = ctx.ui;
+    const border = theme.getFgAnsi("border");
+    const paintBorder = (text: string): string => `${border}${text}\x1b[39m`;
+    const status = buildStatusLine(contentWidth, theme);
+    const statusFill = Math.max(0, contentWidth - visibleWidth(status));
+    const result: string[] = [
+      `${paintBorder("╭──")}${status}${paintBorder(`${"─".repeat(statusFill)}──╮`)}`,
+    ];
+    const contentLines = lines.slice(1, bottomBorderIndex);
+    for (let index = 0; index < contentLines.length; index++) {
+      const line = contentLines[index] ?? "";
+      const lineFill = " ".repeat(
+        Math.max(0, contentWidth - visibleWidth(line)),
+      );
+      if (index === contentLines.length - 1) {
+        result.push(
+          `${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`,
+        );
+      } else {
+        result.push(
+          `${paintBorder("│ ")}${line}${lineFill}${paintBorder(" │")}`,
+        );
+      }
+    }
+    for (const line of lines.slice(bottomBorderIndex + 1)) {
+      result.push(`${" ".repeat(chromeWidth)}${line}`);
+    }
+    return result;
+  }
+
+  /**
    * Wraps the host editor and replaces the footer; teardown restores only still-owned slots.
    * @param ctx TUI host; UI callback errors propagate and teardown owns branch unsubscription.
    * @example installUi(ctx) installs status chrome; releaseSessionResources() removes it.
@@ -721,45 +775,12 @@ export default function ompStatusLine(pi: ExtensionAPI): void {
           return lines;
         }
 
-        let bottomBorderIndex = lines.length - 1;
-        for (let index = lines.length - 1; index >= 1; index--) {
-          if (
-            EDITOR_BORDER_RE.test(stripVTControlCharacters(lines[index] ?? ""))
-          ) {
-            bottomBorderIndex = index;
-            break;
-          }
-        }
-
-        const { theme } = currentCtx.ui;
-        const border = theme.getFgAnsi("border");
-        const paintBorder = (text: string): string =>
-          `${border}${text}\x1b[39m`;
-        const status = buildStatusLine(contentWidth, theme);
-        const statusFill = Math.max(0, contentWidth - visibleWidth(status));
-        const result: string[] = [
-          `${paintBorder("╭──")}${status}${paintBorder(`${"─".repeat(statusFill)}──╮`)}`,
-        ];
-        const contentLines = lines.slice(1, bottomBorderIndex);
-        for (let index = 0; index < contentLines.length; index++) {
-          const line = contentLines[index] ?? "";
-          const lineFill = " ".repeat(
-            Math.max(0, contentWidth - visibleWidth(line)),
-          );
-          if (index === contentLines.length - 1) {
-            result.push(
-              `${paintBorder("╰─ ")}${line}${lineFill}${paintBorder(" ─╯")}`,
-            );
-          } else {
-            result.push(
-              `${paintBorder("│ ")}${line}${lineFill}${paintBorder(" │")}`,
-            );
-          }
-        }
-        for (const line of lines.slice(bottomBorderIndex + 1)) {
-          result.push(`${" ".repeat(chromeWidth)}${line}`);
-        }
-        return result;
+        return renderStatusEditorFrame(
+          lines,
+          contentWidth,
+          chromeWidth,
+          currentCtx,
+        );
       };
       return editor;
     };

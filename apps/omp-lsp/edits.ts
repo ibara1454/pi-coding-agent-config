@@ -548,8 +548,11 @@ export async function directoryFiles(
 
 /**
  * Resolves a text target without changing its operation or the planner's alias map.
+ * @param op - Validated text edits whose file is the requested document path.
  * @param existing - Virtual entry, permitting newly created paths without a disk realpath.
+ * @param canonicalNames - Read-only canonical-file to requested-alias map for prior operations.
  * @returns Canonical operation retaining the requested document alias.
+ * Reads filesystem realpaths; the caller owns applying the returned canonical alias.
  * @throws On filesystem errors or conflicting aliases for one canonical file.
  * @example A request for a symlink returns its target as file and the link as documentFile.
  */
@@ -578,7 +581,11 @@ async function canonicalTextOperation(
 
 /**
  * Checks resource-operation source policy before descendants or destinations are loaded.
+ * @param op - Validated create/delete/rename options and source/destination paths.
+ * @param before - Current virtual source entry, including prior planned resource changes.
+ * @param label - Workspace-relative source path used in policy diagnostics.
  * @returns False for explicitly ignored create/delete operations; otherwise true.
+ * Reads inputs only; the caller owns snapshot acquisition and all virtual state changes.
  * @throws For invalid existing entry kinds, missing sources, or nested rename paths.
  * @example Creating an existing file with ignore enabled and overwrite disabled returns false.
  */
@@ -646,6 +653,7 @@ async function plan(
    * @param file - Path used as the snapshot/cache key.
    * @returns The current virtual entry or undefined for a missing/deleted path.
    * @throws On entry-read failures or when accumulated UTF-8 snapshot bytes exceed 64 MiB.
+   * This plan-owned acquisition operation updates originals, virtual, and the snapshot byte count.
    * @example Loading a missing path records undefined in originals and virtual without creating it.
    */
   const load = async (file: string): Promise<Entry | undefined> => {
@@ -665,6 +673,14 @@ async function plan(
     virtual.set(file, value);
     return value;
   };
+  /**
+   * Acquires original descendants and selects the current virtual subtree for this plan.
+   * @param file - Root path, including empty directories and paths created by earlier operations.
+   * @returns Present virtual paths at or below the root, or an empty array for an absent root.
+   * Owns snapshot acquisition through load; preserves earlier virtual changes and never writes disk.
+   * @throws On snapshot/read failures, cancellation, or exceeding traversal bounds.
+   * @example A disk directory /a containing empty /a/b returns both paths for locking/deletion.
+   */
   const tree = async (file: string): Promise<string[]> => {
     const value = await load(file);
     if (value?.kind !== "directory") {
@@ -678,6 +694,7 @@ async function plan(
        * Snapshots descendants, including empty directories, for resource-operation planning.
        * @param directory - Directory whose iterator owns and closes its handle.
        * @throws On cancellation, entry-read failure, or exceeding 10000 entries/1000 nondirectories.
+       * This plan-owned traversal acquires snapshots through load and updates its traversal counters.
        * @example Visiting a directory with an empty child records that child for subtree locking.
        */
       const visit = async (directory: string): Promise<void> => {
@@ -706,6 +723,14 @@ async function plan(
       .filter(([candidate, item]) => item && within(candidate, file))
       .map(([candidate]) => candidate);
   };
+  /**
+   * Acquires parent snapshots and records missing parent directories in this plan's virtual state.
+   * @param file - Planned create/rename destination whose ancestors must permit directory creation.
+   * @returns Resolves after all missing ancestors have been recorded; creates nothing on disk.
+   * Owns its snapshot acquisitions and virtual parent entries, retaining prior operation state.
+   * @throws On snapshot/read failures or an existing parent that is neither a directory nor a link.
+   * @example For missing /a/b.ts under an existing root, records /a as a created virtual directory.
+   */
   const parents = async (file: string): Promise<void> => {
     let parent = path.dirname(file);
     const absent: string[] = [];
@@ -773,6 +798,93 @@ async function plan(
       },
     };
   };
+  /**
+   * Checks whether a rename's already acquired destination makes the operation ignored.
+   * @param op - Validated deletion or rename; deletion has no destination policy.
+   * @param target - Current virtual destination entry, acquired by the owning plan.
+   * @returns True only for an occupied rename destination with ignore enabled and overwrite disabled.
+   * Reads inputs without acquiring snapshots or changing caller-owned state.
+   * @throws When a rename destination exists with neither overwrite nor ignore enabled.
+   * @example An occupied destination with overwrite false and ignore true returns true.
+   */
+  const ignoreResourceDestination = (
+    op: Extract<Operation, { kind: "delete" | "rename" }>,
+    target: Entry | undefined,
+  ): boolean => {
+    if (op.kind === "rename" && target && !op.overwrite) {
+      if (op.ignore) {
+        return true;
+      }
+      throw new Error(`Rename destination already exists: ${op.newFile}`);
+    }
+    return false;
+  };
+  /**
+   * Calculates a delete/rename change from subtrees already acquired by the owning plan.
+   * @param op - Resource operation whose source and destination policies were already validated.
+   * @param before - Current virtual source entry used to enforce nonrecursive deletion.
+   * @param label - Workspace-relative source path used in diagnostics and summaries.
+   * @param trees - Present source/destination paths, including empty directories; deletion has no target.
+   * @returns Change containing nondirectory source and overwritten destination paths.
+   * Reads captured virtual entries and workspace root without acquiring snapshots or mutating state.
+   * @throws For nonrecursive deletion of a nonempty directory.
+   * @example Deleting /a with only an empty child /a/b rejects unless recursive is enabled.
+   */
+  const planResourceRemoval = (
+    op: Extract<Operation, { kind: "delete" | "rename" }>,
+    before: Entry | undefined,
+    label: string,
+    trees: { sourceTree: readonly string[]; targetTree: readonly string[] },
+  ): PlannedChange => {
+    if (
+      op.kind === "delete" &&
+      before?.kind === "directory" &&
+      !op.recursive &&
+      trees.sourceTree.length > 1
+    ) {
+      throw new Error(`Delete target is a nonempty directory: ${label}`);
+    }
+    const files = trees.sourceTree.filter(
+      (file) => virtual.get(file)?.kind !== "directory",
+    );
+    if (op.kind === "delete") {
+      return { op, files, summary: `Deleted ${label}` };
+    }
+    return {
+      op,
+      files,
+      removedFiles: trees.targetTree.filter(
+        (file) => virtual.get(file)?.kind !== "directory",
+      ),
+      summary: `Renamed ${label} → ${path.relative(options.cwd, op.newFile) || op.newFile}`,
+    };
+  };
+  /**
+   * Yields the ordered virtual entry replacements for a deletion or rename.
+   * @param op - Validated resource operation with non-nested rename source and destination.
+   * @param trees - Acquired source/destination subtrees; deletion has an empty target subtree.
+   * @returns Lazy iterator of paths and replacement entries; undefined removes a virtual path.
+   * Reads captured virtual entries lazily without changing them. The owner acquires snapshots
+   * and applies each replacement before resuming, clearing targets before moving each source.
+   * @example Renaming /a to /b yields /b's source entry followed by removal of /a.
+   */
+  function* resourceStateUpdates(
+    op: Extract<Operation, { kind: "delete" | "rename" }>,
+    trees: { sourceTree: readonly string[]; targetTree: readonly string[] },
+  ): Generator<{ file: string; entry: Entry | undefined }> {
+    for (const file of trees.targetTree) {
+      yield { file, entry: undefined };
+    }
+    for (const file of trees.sourceTree) {
+      if (op.kind === "rename") {
+        yield {
+          file: path.join(op.newFile, path.relative(op.file, file)),
+          entry: virtual.get(file),
+        };
+      }
+      yield { file, entry: undefined };
+    }
+  }
   const canonicalNames = new Map<string, string>();
   for (let op of operations(edit)) {
     options.signal?.throwIfAborted();
@@ -787,67 +899,39 @@ async function plan(
     }
     const before = await load(op.file);
     const label = path.relative(options.cwd, op.file) || op.file;
-    if (op.kind !== "text" && !validateResourceSource(op, before, label)) {
-      continue;
-    }
     if (op.kind === "text") {
       const planned = planTextEdit(op, before, label);
       if (planned) {
         virtual.set(op.file, planned.entry);
         changes.push(planned.change);
       }
-    } else if (op.kind === "create") {
+      continue;
+    }
+    if (!validateResourceSource(op, before, label)) {
+      continue;
+    }
+    if (op.kind === "create") {
       await parents(op.file);
       virtual.set(op.file, { kind: "file", signature: "created", content: "" });
       changes.push({ op, files: [op.file], summary: `Created ${label}` });
-    } else if (op.kind === "delete") {
-      const subtree = await tree(op.file);
-      if (before?.kind === "directory" && !op.recursive && subtree.length > 1) {
-        throw new Error(`Delete target is a nonempty directory: ${label}`);
-      }
-      const files = subtree.filter(
-        (file) => virtual.get(file)?.kind !== "directory",
-      );
-      for (const file of subtree) {
-        virtual.set(file, undefined);
-      }
-      changes.push({ op, files, summary: `Deleted ${label}` });
-    } else {
-      const target = await load(op.newFile);
-      if (target && !op.overwrite) {
-        if (op.ignore) {
-          continue;
-        }
-        throw new Error(`Rename destination already exists: ${op.newFile}`);
-      }
-      const sourceTree = await tree(op.file);
-      const files = sourceTree.filter(
-        (file) => virtual.get(file)?.kind !== "directory",
-      );
-      const targetTree = await tree(op.newFile);
-      const removedFiles = targetTree.filter(
-        (file) => virtual.get(file)?.kind !== "directory",
-      );
-      await parents(op.newFile);
-      for (const candidate of targetTree) {
-        virtual.set(candidate, undefined);
-      }
-      for (const candidate of sourceTree) {
-        const destination = path.join(
-          op.newFile,
-          path.relative(op.file, candidate),
-        );
-        await load(destination);
-        virtual.set(destination, virtual.get(candidate));
-        virtual.set(candidate, undefined);
-      }
-      changes.push({
-        op,
-        files,
-        removedFiles,
-        summary: `Renamed ${label} → ${path.relative(options.cwd, op.newFile) || op.newFile}`,
-      });
+      continue;
     }
+    const target = await load(op.kind === "rename" ? op.newFile : op.file);
+    if (ignoreResourceDestination(op, target)) {
+      continue;
+    }
+    const sourceTree = await tree(op.file);
+    const targetTree = op.kind === "rename" ? await tree(op.newFile) : [];
+    const trees = { sourceTree, targetTree };
+    const change = planResourceRemoval(op, before, label, trees);
+    if (op.kind === "rename") {
+      await parents(op.newFile);
+    }
+    for (const update of resourceStateUpdates(op, trees)) {
+      await load(update.file);
+      virtual.set(update.file, update.entry);
+    }
+    changes.push(change);
   }
   return { changes, originals };
 }
@@ -1077,6 +1161,67 @@ async function assertOriginalsUnchanged(
 }
 
 /**
+ * Recovers or reports a failed rename while the caller retains all mutation locks.
+ * @param op - Failed rename's source and destination paths, inspected to determine whether it moved.
+ * @param change - Planned rename's affected/overwritten paths and summary, reported if it moved.
+ * @param committedPrefix - Plan and explicit committed prefix length selected by the caller.
+ * @param rollbackEligible - True when rollback is enabled and every committed change is text;
+ * false or undefined disables restoration.
+ * @returns Whether reference edits were fully restored, plus changes and summaries to apply.
+ * Never changes the caller's plan or report; restores only the selected committed text prefix.
+ * @throws If inspecting source/destination state fails; restoration failures are returned in summaries.
+ * @example With one committed text edit and an intact rename source, successful restoration
+ * returns rolledBack: true and the reference-rollback summary.
+ */
+async function recoverFailedRename(
+  op: Extract<Operation, { kind: "rename" }>,
+  change: PlannedChange,
+  committedPrefix: {
+    plannedChanges: readonly PlannedChange[];
+    committedCount: number;
+  },
+  rollbackEligible: boolean | undefined,
+): Promise<{
+  rolledBack: boolean;
+  changes: ExecutedChange[];
+  summary: string[];
+}> {
+  if (rollbackEligible && (await entry(op.file))) {
+    const failures = await restoreTextEdits(
+      committedPrefix.plannedChanges.slice(0, committedPrefix.committedCount),
+    );
+    if (failures.length === 0) {
+      return {
+        rolledBack: true,
+        changes: [],
+        summary: ["Reference edits rolled back after rename failure."],
+      };
+    }
+    return {
+      rolledBack: false,
+      changes: [],
+      summary: [`Rollback failures: ${failures.join("; ")}`],
+    };
+  }
+  if (!(await entry(op.file)) && (await entry(op.newFile))) {
+    return {
+      rolledBack: false,
+      changes: [
+        {
+          kind: "rename",
+          file: op.file,
+          newFile: op.newFile,
+          files: change.files,
+          ...(change.removedFiles ? { removedFiles: change.removedFiles } : {}),
+        },
+      ],
+      summary: [change.summary],
+    };
+  }
+  return { rolledBack: false, changes: [], summary: [] };
+}
+
+/**
  * Validates a raw workspace edit before mutation, then rechecks under Pi's shared file locks.
  * Preview and validation failures never write. A later failure can include committed changes;
  * callers must reconcile those changes even when applied is false.
@@ -1121,37 +1266,22 @@ export async function applyWorkspaceEdit(
             try {
               await renameWithRestore(op.file, op.newFile, op.overwrite);
             } catch (error) {
-              if (
+              const recovery = await recoverFailedRename(
+                op,
+                change,
+                {
+                  plannedChanges: planned.changes,
+                  committedCount: result.changes.length,
+                },
                 options.rollbackTextOnRenameFailure &&
-                result.changes.every((previous) => previous.kind === "edit") &&
-                (await entry(op.file))
-              ) {
-                const committedChanges = planned.changes.slice(
-                  0,
-                  result.changes.length,
-                );
-                const failures = await restoreTextEdits(committedChanges);
-                if (failures.length === 0) {
-                  result.changes = [];
-                  result.summary = [
-                    "Reference edits rolled back after rename failure.",
-                  ];
-                } else {
-                  result.summary.push(
-                    `Rollback failures: ${failures.join("; ")}`,
-                  );
-                }
-              } else if (!(await entry(op.file)) && (await entry(op.newFile))) {
-                result.changes.push({
-                  kind: "rename",
-                  file: op.file,
-                  newFile: op.newFile,
-                  files: change.files,
-                  ...(change.removedFiles
-                    ? { removedFiles: change.removedFiles }
-                    : {}),
-                });
-                result.summary.push(change.summary);
+                  result.changes.every((previous) => previous.kind === "edit"),
+              );
+              if (recovery.rolledBack) {
+                result.changes = recovery.changes;
+                result.summary = recovery.summary;
+              } else {
+                result.changes.push(...recovery.changes);
+                result.summary.push(...recovery.summary);
               }
               throw error;
             }

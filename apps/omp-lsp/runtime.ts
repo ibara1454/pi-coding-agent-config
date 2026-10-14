@@ -1006,26 +1006,11 @@ class StdioLanguageServer implements LanguageServer {
         };
       } = { text };
       if (sync.change === 2) {
-        let line = 0;
-        let lineStart = 0;
-        for (let index = 0; index < prior.content.length; index++) {
-          const char = prior.content.charCodeAt(index);
-          if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
-            if (
-              char === CARRIAGE_RETURN_CODE &&
-              prior.content.charCodeAt(index + 1) === LINE_FEED_CODE
-            ) {
-              index++;
-            }
-            line++;
-            lineStart = index + 1;
-          }
-        }
         change = {
           text,
           range: {
             start: { line: 0, character: 0 },
-            end: { line, character: prior.content.length - lineStart },
+            end: documentEnd(prior.content),
           },
         };
       }
@@ -1177,39 +1162,11 @@ class StdioLanguageServer implements LanguageServer {
         }
         return { items: diagnosticItems(items), freshness: "pull" };
       }
-      while (Date.now() < deadline) {
-        check(operationSignal);
-        assertAlive(this, this.state.failure);
-        if (this.state.documents.get(key) !== snapshot) {
-          throw new Error(`LSP diagnostics superseded by changes to ${file}`);
-        }
-        const error = this.state.diagnosticErrors.get(key);
-        if (error) {
-          throw error;
-        }
-        const published = this.state.publications.get(key);
-        if (
-          published?.version === snapshot.version &&
-          (published.versioned ||
-            Date.now() - published.received >= DIAGNOSTIC_SETTLE_MS) &&
-          this.state.progress.size === 0
-        ) {
-          return {
-            items: published.items,
-            freshness: published.versioned ? "versioned" : "unversioned",
-          };
-        }
-        await pause(
-          Math.min(
-            DIAGNOSTIC_POLL_INTERVAL_MS,
-            Math.max(1, deadline - Date.now()),
-          ),
-          [operationSignal],
-        );
-      }
-      throw new Error(
-        `LSP ${this.config.name} diagnostics timed out for ${file}; no fresh complete report (clean state is unverified)`,
-      );
+      return waitForPublishedDiagnostics(this, file, snapshot, {
+        key,
+        signal: operationSignal,
+        deadline,
+      });
     }).finally(() => clearTimeout(timer));
   }
 
@@ -1329,6 +1286,56 @@ function fail(state: ServerState, server: LanguageServer, error: Error): void {
       `LSP ${server.config.name} cleanup failed`,
     );
   });
+}
+
+/**
+ * Waits for a synchronized snapshot's published report without accepting silence as clean.
+ * @param server - Owner of document identity, publications, progress, and failure state.
+ * @param file - Absolute path used in failure messages.
+ * @param snapshot - Synchronized document identity and version that must remain current.
+ * @param operation - Normalized document key, owner's cancellation, and Unix-epoch deadline in milliseconds.
+ * @returns A settled publication with versioned or unversioned provenance.
+ * @throws On cancellation, server failure, superseded documents, invalid reports, or timeout.
+ * @example An empty versioned publication returns { items: [], freshness: "versioned" }.
+ */
+async function waitForPublishedDiagnostics(
+  server: StdioLanguageServer,
+  file: string,
+  snapshot: DocumentSnapshot,
+  operation: { key: string; signal: AbortSignal; deadline: number },
+): Promise<DiagnosticReport> {
+  const { state } = server;
+  const { key, signal, deadline } = operation;
+  while (Date.now() < deadline) {
+    check(signal);
+    assertAlive(server, state.failure);
+    if (state.documents.get(key) !== snapshot) {
+      throw new Error(`LSP diagnostics superseded by changes to ${file}`);
+    }
+    const error = state.diagnosticErrors.get(key);
+    if (error) {
+      throw error;
+    }
+    const published = state.publications.get(key);
+    if (
+      published?.version === snapshot.version &&
+      (published.versioned ||
+        Date.now() - published.received >= DIAGNOSTIC_SETTLE_MS) &&
+      state.progress.size === 0
+    ) {
+      return {
+        items: published.items,
+        freshness: published.versioned ? "versioned" : "unversioned",
+      };
+    }
+    await pause(
+      Math.min(DIAGNOSTIC_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())),
+      [signal],
+    );
+  }
+  throw new Error(
+    `LSP ${server.config.name} diagnostics timed out for ${file}; no fresh complete report (clean state is unverified)`,
+  );
 }
 
 /**
@@ -1530,6 +1537,31 @@ async function rpc<T>(
 }
 
 /**
+ * Finds the UTF-16 end position, treating CRLF as one line break.
+ * @param content - Prior document text whose full range will be replaced.
+ * @returns Zero-based line and UTF-16 character offsets without changing the text.
+ * @example documentEnd("a\r\n😀") returns { line: 1, character: 2 }.
+ */
+function documentEnd(content: string): { line: number; character: number } {
+  let line = 0;
+  let lineStart = 0;
+  for (let index = 0; index < content.length; index++) {
+    const char = content.charCodeAt(index);
+    if (char === CARRIAGE_RETURN_CODE || char === LINE_FEED_CODE) {
+      if (
+        char === CARRIAGE_RETURN_CODE &&
+        content.charCodeAt(index + 1) === LINE_FEED_CODE
+      ) {
+        index++;
+      }
+      line++;
+      lineStart = index + 1;
+    }
+  }
+  return { line, character: content.length - lineStart };
+}
+
+/**
  * Normalizes numeric synchronization capabilities without copying an existing options object.
  * @param sync - Server-advertised synchronization kind or options; undefined means unsupported.
  * @returns Options with numeric kinds expanded into change and open/close support.
@@ -1704,6 +1736,73 @@ function registeredCapabilities(
 }
 
 /**
+ * Validates requested settings and preserves item ordering in the protocol response.
+ * @param settings - Server configuration, left unchanged.
+ * @param params - Untrusted configuration request containing an items array.
+ * @returns One value per requested item.
+ * @throws ResponseError for invalid request or item shapes.
+ * @example workspaceConfiguration({ enabled: true }, { items: [{ section: "enabled" }] }) returns [true].
+ */
+function workspaceConfiguration(
+  settings: ServerConfig["settings"],
+  params: unknown,
+): unknown[] {
+  if (!record(params)) {
+    throw new ResponseError(
+      ErrorCodes.InvalidParams,
+      "Expected configuration items",
+    );
+  }
+  const { items } = params;
+  if (!Array.isArray(items)) {
+    throw new ResponseError(
+      ErrorCodes.InvalidParams,
+      "Expected configuration items",
+    );
+  }
+  return items.map((item: unknown) => configurationValue(settings, item));
+}
+
+/**
+ * Resolves a validated settings section, preferring literal keys over dotted traversal.
+ * @param settings - Server settings; absent settings behave as an empty object.
+ * @param item - Untrusted item with an optional string section.
+ * @returns The selected value, or protocol null when unavailable.
+ * @throws ResponseError for invalid configuration items.
+ * @example configurationValue({ "a.b": 1, a: { b: 2 } }, { section: "a.b" }) returns 1.
+ */
+function configurationValue(
+  settings: ServerConfig["settings"],
+  item: unknown,
+): unknown {
+  if (!record(item)) {
+    throw new ResponseError(
+      ErrorCodes.InvalidParams,
+      "Invalid configuration item",
+    );
+  }
+  const { section } = item;
+  if (section !== undefined && typeof section !== "string") {
+    throw new ResponseError(
+      ErrorCodes.InvalidParams,
+      "Invalid configuration item",
+    );
+  }
+  let value: unknown = settings ?? {};
+  if (typeof section === "string" && section) {
+    if (record(value) && Object.hasOwn(value, section)) {
+      return value[section];
+    }
+    for (const part of section.split(".")) {
+      value =
+        record(value) && Object.hasOwn(value, part) ? value[part] : undefined;
+    }
+  }
+  // biome-ignore lint/plugin/use-undefined: LSP configuration responses require null for unavailable settings.
+  return value ?? null;
+}
+
+/**
  * Validates and handles server-to-client requests using this client's configuration and registrations.
  * @param server - Owner of the shared state, workspace options, and edit callback.
  * @param method - Incoming protocol request method.
@@ -1722,50 +1821,8 @@ async function serverRequest(
   const { state, options } = server;
   assertAlive(server, state.failure);
   switch (method) {
-    case "workspace/configuration": {
-      if (!record(params)) {
-        throw new ResponseError(
-          ErrorCodes.InvalidParams,
-          "Expected configuration items",
-        );
-      }
-      const { items } = params;
-      if (!Array.isArray(items)) {
-        throw new ResponseError(
-          ErrorCodes.InvalidParams,
-          "Expected configuration items",
-        );
-      }
-      return items.map((item: unknown) => {
-        if (!record(item)) {
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Invalid configuration item",
-          );
-        }
-        const { section } = item;
-        if (section !== undefined && typeof section !== "string") {
-          throw new ResponseError(
-            ErrorCodes.InvalidParams,
-            "Invalid configuration item",
-          );
-        }
-        let value: unknown = server.config.settings ?? {};
-        if (typeof section === "string" && section) {
-          if (record(value) && Object.hasOwn(value, section)) {
-            return value[section];
-          }
-          for (const part of section.split(".")) {
-            value =
-              record(value) && Object.hasOwn(value, part)
-                ? value[part]
-                : undefined;
-          }
-        }
-        // biome-ignore lint/plugin/use-undefined: LSP configuration responses require null for unavailable settings.
-        return value ?? null;
-      });
-    }
+    case "workspace/configuration":
+      return workspaceConfiguration(server.config.settings, params);
     case "workspace/workspaceFolders": {
       const root = server.config.root || options.cwd;
       return [

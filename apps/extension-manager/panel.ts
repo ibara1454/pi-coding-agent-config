@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { ExtensionCatalog } from "./catalog.ts";
 import { ExtensionManagerPanelState, TABS } from "./panel-state.ts";
-import type { CommitResult } from "./types.ts";
+import type { CatalogView, CommitResult } from "./types.ts";
 
 const ENABLE_MOUSE = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE = "\u001b[?1006l\u001b[?1000l";
@@ -539,23 +539,18 @@ function finish(
 }
 
 /**
- * Builds banners, tabs, search, content panes, and footer while recording regular-mode tab hits.
- * @param state - Catalog, layout, theme, and persistent hit/scroll state for this frame.
- * @param width - Available terminal cells across the panel.
- * @param height - Terminal row budget, including seven rows of panel chrome.
- * @returns Content lines for the outer renderer to clip and pad to a full frame.
- * @example
- * renderMain(state, 120, 18); // With details closed, shows a list beside an inspector.
+ * Formats trust, reload, discovery, and operation messages in their display order.
+ * @param view - Current catalog snapshot; trust/reload flags and the first ordered diagnostic plus remaining count supply the status.
+ * @param message - Optional operation message appended after discovery status.
+ * @param theme - Caller-owned foreground formatter; uses warning styling when any status is present, otherwise dim styling.
+ * @returns One sanitized banner line; inputs remain unchanged and no I/O is performed.
+ * @example renderStatusBanner(view, "Saved", theme) appends "Saved" after diagnostics.
  */
-function renderMain(
-  state: PanelState,
-  width: number,
-  height: number,
-): string[] {
-  const view = state.catalog.view();
-  const lines: string[] = [];
-  lines.push(state.theme.bold(state.theme.fg("accent", "Extension Manager")));
-
+function renderStatusBanner(
+  view: CatalogView,
+  message: string | undefined,
+  theme: Theme,
+): string {
   const banners: string[] = [];
   if (!view.projectTrusted) {
     banners.push(
@@ -585,15 +580,34 @@ function renderMain(
       }`,
     );
   }
-  if (state.message !== undefined) {
-    banners.push(state.message);
+  if (message !== undefined) {
+    banners.push(message);
   }
-  lines.push(
-    state.theme.fg(
-      banners.length === 0 ? "dim" : "warning",
-      safeInline(banners.join(" | ") || "Persistent Extensions and Skills"),
-    ),
+  return theme.fg(
+    banners.length === 0 ? "dim" : "warning",
+    safeInline(banners.join(" | ") || "Persistent Extensions and Skills"),
   );
+}
+
+/**
+ * Builds banners, tabs, search, content panes, and footer while recording regular-mode tab hits.
+ * @param state - Catalog, layout, theme, and persistent hit/scroll state for this frame.
+ * @param width - Available terminal cells across the panel.
+ * @param height - Terminal row budget, including seven rows of panel chrome.
+ * @returns Content lines for the outer renderer to clip and pad to a full frame.
+ * @example
+ * renderMain(state, 120, 18); // With details closed, shows a list beside an inspector.
+ */
+function renderMain(
+  state: PanelState,
+  width: number,
+  height: number,
+): string[] {
+  const view = state.catalog.view();
+  const lines: string[] = [];
+  lines.push(state.theme.bold(state.theme.fg("accent", "Extension Manager")));
+
+  lines.push(renderStatusBanner(view, state.message, state.theme));
 
   const tabs = TABS.map((tab, index) => {
     const label = ` ${tab} `;

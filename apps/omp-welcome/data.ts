@@ -993,6 +993,144 @@ function extensionNames(
 }
 
 /**
+ * Discovers directory-package entries and applies the package object's filters.
+ * Reads metadata without importing code; unavailable metadata follows packageFiles defaults.
+ * @param root Existing directory selected by package root resolution.
+ * @param entry Package source and optional autoload/extension filter.
+ * @returns Ranked resources in discovery or autoload-pattern insertion order.
+ * @example With /pkg/extensions/tool.ts and no metadata/filter, yields that path enabled.
+ */
+function* packageDirectoryExtensions(
+  root: string,
+  entry: PackageEntry,
+): Generator<Omit<SnapshotResource, "insertion">> {
+  let collectionMode: PackageCollectionMode;
+  if (entry.filter === undefined) {
+    collectionMode = "package";
+  } else if (
+    entry.filter.autoload === false ||
+    entry.filter.extensions !== undefined
+  ) {
+    collectionMode = "filter";
+  } else {
+    collectionMode = "default";
+  }
+  const collected = packageFiles(root, collectionMode);
+  if (
+    collected.files.length === 0 &&
+    !collected.hasPackageResources &&
+    !entry.source.startsWith("npm:") &&
+    !entry.source.startsWith("git:")
+  ) {
+    yield {
+      path: root,
+      scope: entry.scope,
+      enabled: true,
+      rank: 4,
+      source: entry.source,
+      origin: "package",
+      baseDir: root,
+    };
+    return;
+  }
+  if (entry.filter?.autoload === false) {
+    for (const [path, enabled] of applyAutoloadDisabledPatterns(
+      collected.files,
+      entry.filter.extensions ?? [],
+      root,
+    )) {
+      yield {
+        path,
+        scope: entry.scope,
+        enabled,
+        rank: 4,
+        source: entry.source,
+        origin: "package",
+        baseDir: root,
+      };
+    }
+    return;
+  }
+  let enabled: Set<string>;
+  if (entry.filter?.extensions === undefined) {
+    enabled = new Set(collected.files);
+  } else if (entry.filter.extensions.length === 0) {
+    enabled = new Set<string>();
+  } else {
+    enabled = applyPatterns(collected.files, entry.filter.extensions, root);
+  }
+  for (const path of collected.files) {
+    yield {
+      path,
+      scope: entry.scope,
+      enabled: enabled.has(path),
+      rank: 4,
+      source: entry.source,
+      origin: "package",
+      baseDir: root,
+    };
+  }
+}
+
+/**
+ * Resolves and inspects one installed package without importing or installing it.
+ * Project autoload deltas use the matching user package root but retain project attribution.
+ * @param entry Package selected by scope/identity precedence.
+ * @param packages Deduplicated packages, including retained user delta bases.
+ * @param agentDir User package cache and relative-path base.
+ * @param projectDir Trusted project package cache and relative-path base.
+ * @returns Ranked resources in discovery order; missing/unstatable roots yield nothing.
+ * @example An existing user ./tool.ts yields a user package resource at rank 4.
+ */
+function* packageSnapshotResources(
+  entry: PackageEntry,
+  packages: readonly PackageEntry[],
+  agentDir: string,
+  projectDir: string,
+): Generator<Omit<SnapshotResource, "insertion">> {
+  const deltaBase =
+    entry.scope === "project" && entry.filter?.autoload === false
+      ? packages.find(
+          (candidate) =>
+            candidate.scope === "user" &&
+            packageIdentity(candidate.source, "user", agentDir, projectDir) ===
+              packageIdentity(entry.source, "project", agentDir, projectDir),
+        )
+      : undefined;
+  const root = packageRoot(
+    deltaBase?.source ?? entry.source,
+    deltaBase?.scope ?? entry.scope,
+    agentDir,
+    projectDir,
+  );
+  if (!(root && existsSync(root))) {
+    return;
+  }
+  let stats: Stats;
+  try {
+    stats = statSync(root);
+  } catch {
+    return;
+  }
+  if (stats.isFile()) {
+    yield {
+      path: root,
+      scope: entry.scope,
+      enabled: true,
+      rank: 4,
+      source: entry.source,
+      origin: "package",
+      baseDir: dirname(root),
+    };
+    return;
+  }
+  if (!stats.isDirectory()) {
+    return;
+  }
+  yield* packageDirectoryExtensions(root, entry);
+}
+
+/**
  * Captures Pi's enabled startup extension set without loading or installing
  * anything again. It mirrors Pi 0.84.1's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
@@ -1026,116 +1164,13 @@ export function collectWelcomeExtensions(
     projectDir,
   );
   for (const entry of packages) {
-    const deltaBase =
-      entry.scope === "project" && entry.filter?.autoload === false
-        ? packages.find(
-            (candidate) =>
-              candidate.scope === "user" &&
-              packageIdentity(
-                candidate.source,
-                "user",
-                agentDir,
-                projectDir,
-              ) ===
-                packageIdentity(entry.source, "project", agentDir, projectDir),
-          )
-        : undefined;
-    const root = packageRoot(
-      deltaBase?.source ?? entry.source,
-      deltaBase?.scope ?? entry.scope,
+    for (const resource of packageSnapshotResources(
+      entry,
+      packages,
       agentDir,
       projectDir,
-    );
-    if (!(root && existsSync(root))) {
-      continue;
-    }
-    let stats: Stats;
-    try {
-      stats = statSync(root);
-    } catch {
-      continue;
-    }
-    if (stats.isFile()) {
-      add({
-        path: root,
-        scope: entry.scope,
-        enabled: true,
-        rank: 4,
-        source: entry.source,
-        origin: "package",
-        baseDir: dirname(root),
-      });
-      continue;
-    }
-    if (!stats.isDirectory()) {
-      continue;
-    }
-
-    let collectionMode: PackageCollectionMode;
-    if (entry.filter === undefined) {
-      collectionMode = "package";
-    } else if (
-      entry.filter.autoload === false ||
-      entry.filter.extensions !== undefined
-    ) {
-      collectionMode = "filter";
-    } else {
-      collectionMode = "default";
-    }
-    const collected = packageFiles(root, collectionMode);
-    if (
-      collected.files.length === 0 &&
-      !collected.hasPackageResources &&
-      !entry.source.startsWith("npm:") &&
-      !entry.source.startsWith("git:")
-    ) {
-      add({
-        path: root,
-        scope: entry.scope,
-        enabled: true,
-        rank: 4,
-        source: entry.source,
-        origin: "package",
-        baseDir: root,
-      });
-      continue;
-    }
-    if (entry.filter?.autoload === false) {
-      for (const [file, enabled] of applyAutoloadDisabledPatterns(
-        collected.files,
-        entry.filter.extensions ?? [],
-        root,
-      )) {
-        add({
-          path: file,
-          scope: entry.scope,
-          enabled,
-          rank: 4,
-          source: entry.source,
-          origin: "package",
-          baseDir: root,
-        });
-      }
-      continue;
-    }
-    let enabled: Set<string>;
-    if (entry.filter?.extensions === undefined) {
-      enabled = new Set(collected.files);
-    } else if (entry.filter.extensions.length === 0) {
-      enabled = new Set<string>();
-    } else {
-      enabled = applyPatterns(collected.files, entry.filter.extensions, root);
-    }
-    for (const file of collected.files) {
-      add({
-        path: file,
-        scope: entry.scope,
-        enabled: enabled.has(file),
-        rank: 4,
-        source: entry.source,
-        origin: "package",
-        baseDir: root,
-      });
+    )) {
+      add(resource);
     }
   }
 
