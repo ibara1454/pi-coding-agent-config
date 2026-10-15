@@ -371,6 +371,7 @@ function renderSessions(
 
 /**
  * Joins the logo column and headed sections with cell-padded vertical borders.
+ * Missing rows in either column are rendered as blanks.
  * Theme callback errors propagate to the caller.
  * @param theme - Heading styling callbacks.
  * @param left - Centered logo-column rows.
@@ -406,7 +407,7 @@ function renderWideRows(
   const count = Math.max(left.length, right.length);
   for (let index = 0; index < count; index++) {
     rows.push(
-      `${BOX.vertical}${pad(left[index] ?? "", leftWidth)}${BOX.vertical}${pad(right[index] ?? "", rightWidth)}${BOX.vertical}`,
+      `${BOX.vertical}${pad(left.at(index) ?? "", leftWidth)}${BOX.vertical}${pad(right.at(index) ?? "", rightWidth)}${BOX.vertical}`,
     );
   }
   return rows;
