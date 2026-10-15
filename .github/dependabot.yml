@@ -6,10 +6,12 @@
 version: 2
 updates:
   - package-ecosystem: "bun"
+    # The root Bun workspace includes apps/* and packages/*, so shared
+    # dependencies are updated across their manifests in one PR.
     directory: "/"
     schedule:
       interval: "daily"
     groups:
-      dependencies:
+      earendil-works:
         patterns:
-          - "*"
+          - "@earendil-works/*"
