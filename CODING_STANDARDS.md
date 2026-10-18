@@ -50,6 +50,15 @@ function hasExpired(expiresAt: number): boolean {
 - Pi terminal UI must use cell-width and ANSI helpers, sanitize external inline text, and close OSC 8 hyperlinks within the rendered surface.
 - Keep declarative UI data separate from rendering where existing modules already do so: e.g. status-line presets/theme/types versus `renderSegment`, and welcome discovery data versus `WelcomeHeader` rendering.
 
+### Implementation and test pairing
+
+**Files:** `**/*.ts`, except `packages/biome-rules/**/*.ts`.
+
+- Every implementation `name.ts` MUST have a same-directory `name.test.ts` unit-test file; every `name.test.ts` MUST have its corresponding `name.ts` implementation.
+- An integration suite `name.integration.test.ts` MUST have a same-directory `name.ts` implementation. It supplements, but does not replace, `name.test.ts`.
+- Scenario suffixes are literal: `name.errors.test.ts` requires `name.errors.ts`. Put scenarios for `name.ts` in `name.test.ts` instead.
+- Pure re-export barrels, type-only modules, and test helpers/shared setup are exempt from requiring their own unit-test files. Runtime entry points are not exempt merely because they are named `index.ts`. Tests MUST exercise meaningful behavior; do not create empty implementations or artificial suites to satisfy pairing.
+
 ### Tests and shared setup
 
 **Files:** `**/*.test.ts`, `test/**/*.ts`.
