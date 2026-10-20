@@ -20,8 +20,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@earendil-works/pi-tui": "^0.84.1",
     "@types/bun": "1.4.3",
-    "turbo": "^2.10.11",
-    "typescript": "^7.0.2"
+    "turbo": "^2.10.11"
   },
   "scripts": {
     "check": "turbo run lint typecheck",
