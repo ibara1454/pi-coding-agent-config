@@ -223,13 +223,16 @@ describe("LanguageServer.diagnostics", () => {
     const server = fixture();
     spyOn(fs, "readFile").mockResolvedValue("const value = 1;\n");
     const client = await server.pool.get(server.config);
+    // Freeze the polling deadline so only the diagnostic abort timer can expire.
+    spyOn(Date, "now").mockReturnValue(0);
     await expect(
       client.diagnostics(
         "/project/example.ts",
         undefined,
         UNVERIFIED_DIAGNOSTIC_TIMEOUT_MS,
       ),
-    ).rejects.toThrow("unverified");
+    ).rejects.toThrow("clean state is unverified");
+    expect(client.isAlive).toBe(true);
   });
 
   test("should discard a completed pull when the document changes while the request is in flight", async () => {
