@@ -13,7 +13,7 @@
   "license": "MIT",
   "author": "",
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.3",
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@earendil-works/pi-ai": "^0.84.1",
