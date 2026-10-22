@@ -259,6 +259,151 @@ describe("LspWorkspace.create", () => {
       await creating;
     }
   });
+
+  test("should reconcile committed edits and retain document snapshots when live servers match changed files", async () => {
+    const { loaded, server, pool, poolFactory, applyEdit } = fixture();
+    loaded.settings.lazy = true;
+    const file = "/project/sample.ts";
+    let snapshot: edits.DocumentSnapshot | undefined;
+    server.document = (selected) => (selected === file ? snapshot : undefined);
+    const sync = mock<LanguageServer["syncFile"]>().mockImplementation(() => {
+      snapshot = { version: 2, content: "updated" };
+      return Promise.resolve();
+    });
+    const syncStarted = Promise.withResolvers<void>();
+    const synced = Promise.withResolvers<void>();
+    server.syncFile = sync;
+    const matching: LanguageServer = {
+      ...server,
+      config: { ...server.config, name: "matching-server" },
+      document: () => undefined,
+      syncFile: mock<LanguageServer["syncFile"]>().mockImplementation(() => {
+        syncStarted.resolve();
+        return synced.promise;
+      }),
+      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
+      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
+    };
+    const unrelated: LanguageServer = {
+      ...matching,
+      config: { ...server.config, name: "python-server", fileTypes: [".py"] },
+      syncFile: mock<LanguageServer["syncFile"]>().mockResolvedValue(undefined),
+      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
+      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
+    };
+    const dead: LanguageServer = {
+      ...matching,
+      config: { ...server.config, name: "dead-server" },
+      isAlive: false,
+      syncFile: mock<LanguageServer["syncFile"]>().mockResolvedValue(undefined),
+      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
+      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
+    };
+    loaded.servers.push(matching.config, unrelated.config, dead.config);
+    pool.clients.mockReturnValue([server, matching, unrelated, dead]);
+    const transaction = spyOn(edits, "applyWorkspaceEdit")
+      .mockResolvedValueOnce({
+        applied: true,
+        summary: ["Applied sample.ts"],
+        changes: [{ kind: "edit", file, files: [file] }],
+      })
+      .mockResolvedValue({ applied: true, summary: [], changes: [] });
+    await createWorkspace(poolFactory);
+
+    const editing = applyEdit({});
+    try {
+      await Promise.race([
+        syncStarted.promise,
+        editing.then(() => {
+          throw new Error(
+            "Expected matching-server synchronization before edit completion",
+          );
+        }),
+      ]);
+      expect(matching.saved).not.toHaveBeenCalled();
+      expect(matching.notify).not.toHaveBeenCalled();
+      synced.resolve();
+      expect(await editing).toEqual({ applied: true });
+    } finally {
+      synced.resolve();
+      await editing;
+    }
+    for (const client of [server, matching]) {
+      expect(client.syncFile).toHaveBeenCalledWith(
+        file,
+        undefined,
+        expect.any(AbortSignal),
+      );
+      expect(client.saved).toHaveBeenCalledWith(file);
+      expect(client.notify).toHaveBeenCalledWith(
+        "workspace/didChangeWatchedFiles",
+        {
+          changes: [{ uri: "file:///project/sample.ts", type: 2 }],
+        },
+      );
+    }
+    for (const client of [unrelated, dead]) {
+      expect(client.syncFile).not.toHaveBeenCalled();
+      expect(client.saved).not.toHaveBeenCalled();
+    }
+    expect(dead.notify).not.toHaveBeenCalled();
+    expect(transaction.mock.calls[0]?.[1].documents?.size).toBe(0);
+    await applyEdit({});
+    expect(transaction.mock.calls[1]?.[1].documents).toEqual(
+      new Map([[file, { version: 2, content: "updated" }]]),
+    );
+  });
+
+  test("should leave servers and tracked documents unchanged when an edit is rejected before committing", async () => {
+    const { loaded, server, pool, poolFactory, applyEdit } = fixture();
+    loaded.settings.lazy = true;
+    server.document = () => ({ version: 1, content: "original" });
+    pool.clients.mockReturnValue([server]);
+    const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
+      applied: false,
+      summary: [],
+      changes: [],
+      failureReason: "document changed",
+    });
+    await createWorkspace(poolFactory);
+
+    expect(await applyEdit({})).toEqual({
+      applied: false,
+      failureReason: "document changed",
+    });
+    await applyEdit({});
+    expect(transaction.mock.calls[1]?.[1].documents?.size).toBe(0);
+    expect(pool.clients).not.toHaveBeenCalled();
+    expect(server.syncFile).not.toHaveBeenCalled();
+    expect(server.saved).not.toHaveBeenCalled();
+    expect(server.closeFile).not.toHaveBeenCalled();
+    expect(server.notify).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["the project is untrusted", false, true],
+    ["LSP is disabled", true, false],
+  ] as const)(
+    "should reject server edits without acquiring effects when %s",
+    async (_condition, trusted, enabled) => {
+      const { loaded, pool, poolFactory, applyEdit } = fixture();
+      loaded.settings.enabled = enabled;
+      const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
+        applied: true,
+        summary: [],
+        changes: [],
+      });
+      await createWorkspace(poolFactory, trusted);
+
+      expect(await applyEdit({})).toEqual({
+        applied: false,
+        failureReason: "LSP workspace untrusted, disabled, or disposed",
+      });
+      expect(transaction).not.toHaveBeenCalled();
+      expect(pool.get).not.toHaveBeenCalled();
+      expect(pool.clients).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("LspWorkspace.execute", () => {
@@ -498,9 +643,7 @@ describe("LspWorkspace.execute", () => {
       "restart-server",
     ]);
   });
-});
 
-describe("LspWorkspace.execute", () => {
   test("should cancel server startup and release its deadline when the action exceeds the minimum timeout", async () => {
     const { loaded, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
@@ -529,252 +672,7 @@ describe("LspWorkspace.execute", () => {
     expect(get.mock.calls[0]?.[1]?.aborted).toBe(true);
     expect(clear).toHaveBeenCalledWith(timerHandle);
   });
-});
 
-describe("LspWorkspace.afterMutation", () => {
-  test("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
-    const { loaded, poolFactory } = fixture();
-    loaded.settings.lazy = true;
-    // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
-    const timerHandle: NodeJS.Timeout = Object.create(null);
-    const schedule = spyOn(timers, "setTimeout").mockReturnValue(timerHandle);
-    const clear = spyOn(timers, "clearTimeout").mockReturnValue(undefined);
-    const probe = Promise.withResolvers<Stats>();
-    spyOn(filesystem, "stat").mockReturnValue(probe.promise);
-    const workspace = await createWorkspace(poolFactory);
-    const pending = workspace.afterMutation(["sample.ts"], "edit");
-    const inner = schedule.mock.calls.find(
-      ([, delay]) => delay === MUTATION_DEADLINE_MS,
-    );
-    const outer = schedule.mock.calls.find(
-      ([, delay]) => delay === MUTATION_RESPONSE_DEADLINE_MS,
-    );
-    if (!(inner && outer)) {
-      throw new Error("Expected mutation cancellation and response deadlines");
-    }
-    try {
-      inner[0]();
-      outer[0]();
-      expect(await pending).toEqual({
-        text: "LSP feedback timed out; the host edit already succeeded. Cancellation was requested for pending LSP work.",
-        details: { action: "afterMutation", source: "edit" },
-      });
-    } finally {
-      probe.reject(new Error("file probe canceled"));
-      await workspace.dispose();
-    }
-    expect(clear).toHaveBeenCalledWith(timerHandle);
-  });
-});
-
-describe("LspWorkspace.create", () => {
-  test("should reconcile committed edits and retain document snapshots when live servers match changed files", async () => {
-    const { loaded, server, pool, poolFactory, applyEdit } = fixture();
-    loaded.settings.lazy = true;
-    const file = "/project/sample.ts";
-    let snapshot: edits.DocumentSnapshot | undefined;
-    server.document = (selected) => (selected === file ? snapshot : undefined);
-    const sync = mock<LanguageServer["syncFile"]>().mockImplementation(() => {
-      snapshot = { version: 2, content: "updated" };
-      return Promise.resolve();
-    });
-    const syncStarted = Promise.withResolvers<void>();
-    const synced = Promise.withResolvers<void>();
-    server.syncFile = sync;
-    const matching: LanguageServer = {
-      ...server,
-      config: { ...server.config, name: "matching-server" },
-      document: () => undefined,
-      syncFile: mock<LanguageServer["syncFile"]>().mockImplementation(() => {
-        syncStarted.resolve();
-        return synced.promise;
-      }),
-      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
-      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
-    };
-    const unrelated: LanguageServer = {
-      ...matching,
-      config: { ...server.config, name: "python-server", fileTypes: [".py"] },
-      syncFile: mock<LanguageServer["syncFile"]>().mockResolvedValue(undefined),
-      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
-      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
-    };
-    const dead: LanguageServer = {
-      ...matching,
-      config: { ...server.config, name: "dead-server" },
-      isAlive: false,
-      syncFile: mock<LanguageServer["syncFile"]>().mockResolvedValue(undefined),
-      saved: mock<LanguageServer["saved"]>().mockResolvedValue(undefined),
-      notify: mock<LanguageServer["notify"]>().mockResolvedValue(undefined),
-    };
-    loaded.servers.push(matching.config, unrelated.config, dead.config);
-    pool.clients.mockReturnValue([server, matching, unrelated, dead]);
-    const transaction = spyOn(edits, "applyWorkspaceEdit")
-      .mockResolvedValueOnce({
-        applied: true,
-        summary: ["Applied sample.ts"],
-        changes: [{ kind: "edit", file, files: [file] }],
-      })
-      .mockResolvedValue({ applied: true, summary: [], changes: [] });
-    await createWorkspace(poolFactory);
-
-    const editing = applyEdit({});
-    try {
-      await Promise.race([
-        syncStarted.promise,
-        editing.then(() => {
-          throw new Error(
-            "Expected matching-server synchronization before edit completion",
-          );
-        }),
-      ]);
-      expect(matching.saved).not.toHaveBeenCalled();
-      expect(matching.notify).not.toHaveBeenCalled();
-      synced.resolve();
-      expect(await editing).toEqual({ applied: true });
-    } finally {
-      synced.resolve();
-      await editing;
-    }
-    for (const client of [server, matching]) {
-      expect(client.syncFile).toHaveBeenCalledWith(
-        file,
-        undefined,
-        expect.any(AbortSignal),
-      );
-      expect(client.saved).toHaveBeenCalledWith(file);
-      expect(client.notify).toHaveBeenCalledWith(
-        "workspace/didChangeWatchedFiles",
-        {
-          changes: [{ uri: "file:///project/sample.ts", type: 2 }],
-        },
-      );
-    }
-    for (const client of [unrelated, dead]) {
-      expect(client.syncFile).not.toHaveBeenCalled();
-      expect(client.saved).not.toHaveBeenCalled();
-    }
-    expect(dead.notify).not.toHaveBeenCalled();
-    expect(transaction.mock.calls[0]?.[1].documents?.size).toBe(0);
-    await applyEdit({});
-    expect(transaction.mock.calls[1]?.[1].documents).toEqual(
-      new Map([[file, { version: 2, content: "updated" }]]),
-    );
-  });
-
-  test("should leave servers and tracked documents unchanged when an edit is rejected before committing", async () => {
-    const { loaded, server, pool, poolFactory, applyEdit } = fixture();
-    loaded.settings.lazy = true;
-    server.document = () => ({ version: 1, content: "original" });
-    pool.clients.mockReturnValue([server]);
-    const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
-      applied: false,
-      summary: [],
-      changes: [],
-      failureReason: "document changed",
-    });
-    await createWorkspace(poolFactory);
-
-    expect(await applyEdit({})).toEqual({
-      applied: false,
-      failureReason: "document changed",
-    });
-    await applyEdit({});
-    expect(transaction.mock.calls[1]?.[1].documents?.size).toBe(0);
-    expect(pool.clients).not.toHaveBeenCalled();
-    expect(server.syncFile).not.toHaveBeenCalled();
-    expect(server.saved).not.toHaveBeenCalled();
-    expect(server.closeFile).not.toHaveBeenCalled();
-    expect(server.notify).not.toHaveBeenCalled();
-  });
-
-  test.each([
-    ["the project is untrusted", false, true],
-    ["LSP is disabled", true, false],
-  ] as const)(
-    "should reject server edits without acquiring effects when %s",
-    async (_condition, trusted, enabled) => {
-      const { loaded, pool, poolFactory, applyEdit } = fixture();
-      loaded.settings.enabled = enabled;
-      const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
-        applied: true,
-        summary: [],
-        changes: [],
-      });
-      await createWorkspace(poolFactory, trusted);
-
-      expect(await applyEdit({})).toEqual({
-        applied: false,
-        failureReason: "LSP workspace untrusted, disabled, or disposed",
-      });
-      expect(transaction).not.toHaveBeenCalled();
-      expect(pool.get).not.toHaveBeenCalled();
-      expect(pool.clients).not.toHaveBeenCalled();
-    },
-  );
-});
-
-describe("LspWorkspace.dispose", () => {
-  const failure = new Error("edit transaction failed");
-  test.each([
-    [
-      "resolves",
-      (pending: PromiseWithResolvers<edits.EditResult>) =>
-        pending.resolve({ applied: true, summary: [], changes: [] }),
-      { value: { applied: true } },
-    ],
-    [
-      "rejects",
-      (pending: PromiseWithResolvers<edits.EditResult>) =>
-        pending.reject(failure),
-      { error: failure },
-    ],
-  ] as const)(
-    "should cancel edits, wait for settlement, and finish idempotent cleanup when an in-flight edit %s",
-    async (_condition, settle, expected) => {
-      const { loaded, pool, poolFactory, applyEdit } = fixture();
-      loaded.settings.lazy = true;
-      const pending = Promise.withResolvers<edits.EditResult>();
-      const transaction = spyOn(edits, "applyWorkspaceEdit").mockReturnValue(
-        pending.promise,
-      );
-      const workspace = await createWorkspace(poolFactory);
-      const edit = applyEdit({}).then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-      const signal = transaction.mock.calls[0]?.[1].signal;
-      const disposal = workspace.dispose();
-      let disposed = false;
-      const completed = disposal.then(() => {
-        disposed = true;
-      });
-      try {
-        expect(workspace.dispose()).toBe(disposal);
-        expect(signal?.aborted).toBe(true);
-        expect(await applyEdit({})).toEqual({
-          applied: false,
-          failureReason: "LSP workspace untrusted, disabled, or disposed",
-        });
-        expect(transaction).toHaveBeenCalledTimes(1);
-        expect(pool.dispose).toHaveBeenCalledTimes(1);
-        expect(disposed).toBe(false);
-        settle(pending);
-        expect(await edit).toEqual(expected);
-        await completed;
-        expect(disposed).toBe(true);
-        expect(workspace.dispose()).toBe(disposal);
-        expect(pool.dispose).toHaveBeenCalledTimes(1);
-      } finally {
-        pending.resolve({ applied: true, summary: [], changes: [] });
-        await edit;
-        await completed;
-      }
-    },
-  );
-});
-
-describe("LspWorkspace.execute", () => {
   test("should replace and dispose injected pools in order when reloading changes the idle timeout", async () => {
     const initialIdleTimeoutMs = 1000;
     const reloadedIdleTimeoutMs = 2000;
@@ -853,9 +751,7 @@ describe("LspWorkspace.execute", () => {
       await workspace.dispose();
     }
   });
-});
 
-describe("LspWorkspace.execute", () => {
   test("should sort unverified diagnostic sources without claiming a verified clean file", async () => {
     const { loaded, server, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
@@ -1076,6 +972,102 @@ describe("LspWorkspace.execute", () => {
       expect(rename).not.toHaveBeenCalled();
       expect(server.saved).not.toHaveBeenCalled();
       expect(server.notify).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("LspWorkspace.afterMutation", () => {
+  test("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
+    const { loaded, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
+    const timerHandle: NodeJS.Timeout = Object.create(null);
+    const schedule = spyOn(timers, "setTimeout").mockReturnValue(timerHandle);
+    const clear = spyOn(timers, "clearTimeout").mockReturnValue(undefined);
+    const probe = Promise.withResolvers<Stats>();
+    spyOn(filesystem, "stat").mockReturnValue(probe.promise);
+    const workspace = await createWorkspace(poolFactory);
+    const pending = workspace.afterMutation(["sample.ts"], "edit");
+    const inner = schedule.mock.calls.find(
+      ([, delay]) => delay === MUTATION_DEADLINE_MS,
+    );
+    const outer = schedule.mock.calls.find(
+      ([, delay]) => delay === MUTATION_RESPONSE_DEADLINE_MS,
+    );
+    if (!(inner && outer)) {
+      throw new Error("Expected mutation cancellation and response deadlines");
+    }
+    try {
+      inner[0]();
+      outer[0]();
+      expect(await pending).toEqual({
+        text: "LSP feedback timed out; the host edit already succeeded. Cancellation was requested for pending LSP work.",
+        details: { action: "afterMutation", source: "edit" },
+      });
+    } finally {
+      probe.reject(new Error("file probe canceled"));
+      await workspace.dispose();
+    }
+    expect(clear).toHaveBeenCalledWith(timerHandle);
+  });
+});
+
+describe("LspWorkspace.dispose", () => {
+  const failure = new Error("edit transaction failed");
+  test.each([
+    [
+      "resolves",
+      (pending: PromiseWithResolvers<edits.EditResult>) =>
+        pending.resolve({ applied: true, summary: [], changes: [] }),
+      { value: { applied: true } },
+    ],
+    [
+      "rejects",
+      (pending: PromiseWithResolvers<edits.EditResult>) =>
+        pending.reject(failure),
+      { error: failure },
+    ],
+  ] as const)(
+    "should cancel edits, wait for settlement, and finish idempotent cleanup when an in-flight edit %s",
+    async (_condition, settle, expected) => {
+      const { loaded, pool, poolFactory, applyEdit } = fixture();
+      loaded.settings.lazy = true;
+      const pending = Promise.withResolvers<edits.EditResult>();
+      const transaction = spyOn(edits, "applyWorkspaceEdit").mockReturnValue(
+        pending.promise,
+      );
+      const workspace = await createWorkspace(poolFactory);
+      const edit = applyEdit({}).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      const signal = transaction.mock.calls[0]?.[1].signal;
+      const disposal = workspace.dispose();
+      let disposed = false;
+      const completed = disposal.then(() => {
+        disposed = true;
+      });
+      try {
+        expect(workspace.dispose()).toBe(disposal);
+        expect(signal?.aborted).toBe(true);
+        expect(await applyEdit({})).toEqual({
+          applied: false,
+          failureReason: "LSP workspace untrusted, disabled, or disposed",
+        });
+        expect(transaction).toHaveBeenCalledTimes(1);
+        expect(pool.dispose).toHaveBeenCalledTimes(1);
+        expect(disposed).toBe(false);
+        settle(pending);
+        expect(await edit).toEqual(expected);
+        await completed;
+        expect(disposed).toBe(true);
+        expect(workspace.dispose()).toBe(disposal);
+        expect(pool.dispose).toHaveBeenCalledTimes(1);
+      } finally {
+        pending.resolve({ applied: true, summary: [], changes: [] });
+        await edit;
+        await completed;
+      }
     },
   );
 });

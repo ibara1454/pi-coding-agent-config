@@ -292,11 +292,10 @@ describe("lsp.session_start", () => {
           text: expect.stringContaining("unsafe"),
         },
       ]);
-      for (const part of result.content) {
-        if (part.type === "text") {
-          expect(part.text.replaceAll("\n", "")).not.toMatch(CONTROL_CHARACTER);
-        }
-      }
+      const text = result.content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text.replaceAll("\n", ""));
+      expect(text).toEqual([expect.not.stringMatching(CONTROL_CHARACTER)]);
     },
   );
 

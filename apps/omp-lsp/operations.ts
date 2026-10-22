@@ -82,7 +82,9 @@ function protocolRange(value: unknown): Range {
 
 /**
  * Resolves a 1-based line and optional symbol#N to UTF-16 coordinates.
- * Throws when the line or requested occurrence is missing.
+ * @returns Zero-based position; without a symbol, the first non-whitespace column or zero on a blank line.
+ * @throws When the line or requested occurrence is missing or invalid.
+ * @example resolvePosition("  foo") returns { line: 0, character: 2 }.
  */
 export function resolvePosition(
   content: string,
@@ -99,8 +101,7 @@ export function resolvePosition(
   if (!specification) {
     return {
       line: line - 1,
-      character:
-        text.search(NON_WHITESPACE) < 0 ? 0 : text.search(NON_WHITESPACE),
+      character: Math.max(0, text.search(NON_WHITESPACE)),
     };
   }
   const occurrenceMatch = specification.match(SYMBOL_OCCURRENCE);

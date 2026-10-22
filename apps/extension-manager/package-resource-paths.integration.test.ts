@@ -176,7 +176,9 @@ describe("packageResourcePaths", () => {
         ? [fixture.actual, fixture.linked]
         : [fixture.actual];
 
-      expect([...paths].toSorted()).toEqual(expected.toSorted());
+      expect(paths.toSorted((a, b) => a.localeCompare(b))).toEqual(
+        expected.toSorted((a, b) => a.localeCompare(b)),
+      );
     },
   );
 
@@ -202,8 +204,8 @@ describe("packageResourcePaths", () => {
 
     const paths = packageResourcePaths(root, "extensions", [actual]);
 
-    expect([...paths].toSorted()).toEqual(
-      [actual, nested, plain, legacy].toSorted(),
+    expect(paths.toSorted((a, b) => a.localeCompare(b))).toEqual(
+      [actual, nested, plain, legacy].toSorted((a, b) => a.localeCompare(b)),
     );
   });
 
@@ -224,8 +226,8 @@ describe("packageResourcePaths", () => {
 
     const paths = packageResourcePaths(root, "skills", [actual, deep, notes]);
 
-    expect([...paths].toSorted()).toEqual(
-      [actual, linked, deep, notes].toSorted(),
+    expect(paths.toSorted((a, b) => a.localeCompare(b))).toEqual(
+      [actual, linked, deep, notes].toSorted((a, b) => a.localeCompare(b)),
     );
   });
 
@@ -240,7 +242,9 @@ describe("packageResourcePaths", () => {
 
     const paths = packageResourcePaths(root, "extensions", [index]);
 
-    expect([...paths].toSorted()).toEqual([index, nested].toSorted());
+    expect(paths.toSorted((a, b) => a.localeCompare(b))).toEqual(
+      [index, nested].toSorted((a, b) => a.localeCompare(b)),
+    );
   });
 });
 

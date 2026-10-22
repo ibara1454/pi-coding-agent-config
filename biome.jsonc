@@ -41,8 +41,7 @@
           "options": { "maxLines": 750 }
         },
         "noImplicitCoercions": "error",
-        // Preserve the pre-2.6 policy; adopting this new check is a separate change.
-        "useMathMinMax": "off",
+        "useMathMinMax": "error",
         "useSimplifiedLogicExpression": "error"
       },
       "correctness": {
@@ -83,10 +82,9 @@
       "suspicious": {
         // Bitwise operations are intentional in hashing and token estimation.
         "noBitwiseOperators": "off",
-        // Preserve the pre-2.6 policy rather than rewriting tests and sort calls.
-        "noConditionalExpect": "off",
-        "noIdenticalTestTitle": "off",
-        "useArraySortCompare": "off",
+        "noConditionalExpect": "error",
+        "noIdenticalTestTitle": "error",
+        "useArraySortCompare": "error",
         "noImportCycles": {
           "level": "error",
           "options": {
