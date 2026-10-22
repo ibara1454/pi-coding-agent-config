@@ -70,7 +70,7 @@ function hasExpired(expiresAt: number): boolean {
 
 ## Workspace manifests and tooling
 
-**Files:** `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, `apps/*/package.json`, `packages/*/package.json`.
+**Files:** `package.json`, `bun.lock`, `bunfig.toml`, `turbo.jsonc`, `apps/*/package.json`, `packages/*/package.json`.
 
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. There is no root build command.
 
