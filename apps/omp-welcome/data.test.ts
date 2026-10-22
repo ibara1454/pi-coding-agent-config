@@ -410,7 +410,7 @@ describe("collectWelcomeExtensions", () => {
       {
         [join(AGENT_DIR, "settings.json")]: JSON.stringify({
           packages: [
-            // biome-ignore lint/plugin/use-undefined: Keep a malformed external null package entry to exercise settings validation.
+            // biome-ignore lint/plugin/biome-rules/use-undefined: Keep a malformed external null package entry to exercise settings validation.
             null,
             [],
             false,
@@ -419,7 +419,7 @@ describe("collectWelcomeExtensions", () => {
             standalone,
             directory,
           ],
-          // biome-ignore lint/plugin/use-undefined: Keep a malformed external null extension entry to exercise settings validation.
+          // biome-ignore lint/plugin/biome-rules/use-undefined: Keep a malformed external null extension entry to exercise settings validation.
           extensions: [false, null, { invalid: true }],
         }),
         [standalone]: "",

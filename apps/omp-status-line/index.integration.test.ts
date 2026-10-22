@@ -978,11 +978,11 @@ describe("ompStatusLine", () => {
     );
     try {
       await prStarted.promise;
-      // biome-ignore-start lint/plugin/use-undefined: Null prototypes create inert opaque timer handles for the host fixture.
+      // biome-ignore-start lint/plugin/biome-rules/use-undefined: Null prototypes create inert opaque timer handles for the host fixture.
       const firstTimer: NodeJS.Timeout = Object.create(null);
       const latestTimer: NodeJS.Timeout = Object.create(null);
       const shutdownTimer: NodeJS.Timeout = Object.create(null);
-      // biome-ignore-end lint/plugin/use-undefined: Null prototypes create inert opaque timer handles for the host fixture.
+      // biome-ignore-end lint/plugin/biome-rules/use-undefined: Null prototypes create inert opaque timer handles for the host fixture.
       const schedule = spyOn(globalThis, "setTimeout")
         .mockReturnValueOnce(firstTimer)
         .mockReturnValueOnce(latestTimer)

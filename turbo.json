@@ -4,6 +4,10 @@
     "test/setup.ts",
     "bunfig.toml",
     "biome.jsonc",
+    // All workspaces load this plugin through the root Biome config.
+    // Track its exports, presets, and rules to invalidate cached lint results.
+    "packages/biome-rules/package.json",
+    "packages/biome-rules/biome-manifest.json",
     "packages/biome-rules/src/*.grit",
     "tsconfig.base.json"
   ],
