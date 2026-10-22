@@ -167,7 +167,7 @@ describe("lsp.renderCall", () => {
       "lsp hover  a.ts:2 value   name",
     ],
     [{ action: "status" }, "lsp status"],
-    // biome-ignore lint/plugin/use-undefined: Deliberately render untrusted host arguments containing a null action.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately render untrusted host arguments containing a null action.
     [{ action: null, file: 3, line: Number.NaN, symbol: false }, "lsp"],
   ])(
     "should render a sanitized command when arguments are %j",

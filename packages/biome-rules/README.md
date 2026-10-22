@@ -1,7 +1,41 @@
 # Custom Biome rules
 
-Custom `.grit` rules and colocated integration tests live in `src/`. The root
-Biome configuration loads these checked-in rules by filesystem path.
+Custom `.grit` rules and colocated integration tests live in `src/`.
+[`biome-manifest.json`](biome-manifest.json) exports the rules and presets through
+Biome's [plugin package format](https://biomejs.dev/guides/publish-packages/).
+
+## Usage
+
+Requires Biome 2.6 or later. The root installs `biome-rules` as a workspace
+dependency; workspace configs inherit its plugin settings through `"extends": "//"`.
+The package remains private and is not published to npm. To use it in another
+project, install it from a local checkout:
+
+```bash
+bun add --dev /path/to/this-repo/packages/biome-rules
+```
+
+Add the presets to that project's `biome.jsonc`:
+
+```jsonc
+{
+  "plugins": [
+    "biome-rules/presets/source",
+    {
+      "path": "biome-rules/presets/tests",
+      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
+    }
+  ]
+}
+```
+
+`source` enables `no-double-type-assertion`, `no-private-methods`, and
+`use-undefined`. `tests` enables `no-async-describe-callback` and
+`use-should-test-title`; its file scope belongs to the consuming configuration.
+To enable one rule instead, use its exported name, such as
+`"plugins": ["biome-rules/no-private-methods"]`. Package imports require qualified
+suppression names: replace `lint/plugin/<rule-name>` with
+`lint/plugin/biome-rules/<rule-name>`.
 
 ## [no-async-describe-callback](src/no-async-describe-callback.grit)
 
@@ -39,7 +73,7 @@ objects. Place a narrow suppression immediately above the line containing
 `null`, not above the start of a multiline statement:
 
 ```ts
-// biome-ignore lint/plugin/use-undefined: LSP requires null for an unversioned document.
+// biome-ignore lint/plugin/biome-rules/use-undefined: LSP requires null for an unversioned document.
 const document = { uri, version: null };
 ```
 
@@ -48,8 +82,10 @@ Do not suppress internal absence; update its producers, consumers, and tests.
 ## Testing
 
 Each rule has a colocated `*.integration.test.ts` file with inline valid and
-invalid source strings. The shared `src/test-utils.ts` helper loads the checked-in
-`.grit` rule into an in-memory filesystem and runs the real Biome WASM engine.
+invalid source strings. The shared `src/test-utils.ts` helper loads the package
+metadata, manifest, and selected `.grit` rule into an in-memory filesystem.
+It runs the real Biome WASM engine through the exported package rule name,
+including package-qualified suppression behavior.
 It releases each workspace after use and decodes diagnostic spans as UTF-8
 byte offsets. Tests require neither CLI subprocesses nor fixture files.
 

@@ -753,9 +753,9 @@ class StdioLanguageServer implements LanguageServer {
    * child.emit("exit", 1, null); // Pending work fails with an exit-status-1 message.
    */
   private readonly onExit = (
-    // biome-ignore lint/plugin/use-undefined: Node exit events report a null code when terminated by a signal.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Node exit events report a null code when terminated by a signal.
     code: number | null,
-    // biome-ignore lint/plugin/use-undefined: Node exit events report a null signal after a numeric exit.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Node exit events report a null signal after a numeric exit.
     signal: NodeJS.Signals | null,
   ): void => {
     fail(
@@ -1201,7 +1201,7 @@ class StdioLanguageServer implements LanguageServer {
             this.child.once("exit", resolvePromise);
           });
           try {
-            // biome-ignore lint/plugin/use-undefined: LSP shutdown has no payload and uses null on the JSON-RPC wire.
+            // biome-ignore lint/plugin/biome-rules/use-undefined: LSP shutdown has no payload and uses null on the JSON-RPC wire.
             await rpc(this, "shutdown", null, {
               timeoutMs: 1000,
               stopping: true,
@@ -1798,7 +1798,7 @@ function configurationValue(
         record(value) && Object.hasOwn(value, part) ? value[part] : undefined;
     }
   }
-  // biome-ignore lint/plugin/use-undefined: LSP configuration responses require null for unavailable settings.
+  // biome-ignore lint/plugin/biome-rules/use-undefined: LSP configuration responses require null for unavailable settings.
   return value ?? null;
 }
 
@@ -1891,7 +1891,7 @@ async function serverRequest(
         state.baseCapabilities,
         state.registrations.values(),
       );
-      // biome-ignore lint/plugin/use-undefined: LSP capability registration returns a null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP capability registration returns a null result.
       return null;
     }
     case "client/unregisterCapability": {
@@ -1927,21 +1927,21 @@ async function serverRequest(
         state.baseCapabilities,
         state.registrations.values(),
       );
-      // biome-ignore lint/plugin/use-undefined: LSP capability unregistration returns a null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP capability unregistration returns a null result.
       return null;
     }
     case "window/workDoneProgress/create":
-      // biome-ignore lint/plugin/use-undefined: LSP progress-token creation returns a null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP progress-token creation returns a null result.
       return null;
     case "window/showMessageRequest":
-      // biome-ignore lint/plugin/use-undefined: LSP showMessageRequest uses null when no action is selected.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP showMessageRequest uses null when no action is selected.
       return null;
     case "window/showDocument":
       return { success: false };
     case "workspace/diagnostic/refresh":
       state.publications.clear();
       state.diagnosticErrors.clear();
-      // biome-ignore lint/plugin/use-undefined: LSP diagnostic refresh returns a null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP diagnostic refresh returns a null result.
       return null;
     case "workspace/semanticTokens/refresh":
     case "workspace/inlayHint/refresh":
@@ -1949,7 +1949,7 @@ async function serverRequest(
     case "workspace/codeAction/refresh":
     case "workspace/inlineValue/refresh":
     case "workspace/foldingRange/refresh":
-      // biome-ignore lint/plugin/use-undefined: LSP refresh requests return a null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP refresh requests return a null result.
       return null;
     default:
       throw new ResponseError(

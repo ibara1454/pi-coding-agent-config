@@ -51,7 +51,7 @@ function fixture() {
     },
   };
   spyOn(config, "loadLspConfig").mockResolvedValue(loaded);
-  // biome-ignore lint/plugin/use-undefined: Model the LSP null result for methods with no response data.
+  // biome-ignore lint/plugin/biome-rules/use-undefined: Model the LSP null result for methods with no response data.
   const request = mock<LanguageServer["request"]>().mockResolvedValue(null);
   const server: LanguageServer = {
     config: serverConfig,
@@ -482,7 +482,7 @@ describe("LspWorkspace.execute", () => {
     );
     expect(request).toHaveBeenCalledWith(
       "rust-analyzer/reloadWorkspace",
-      // biome-ignore lint/plugin/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
       null,
       expect.any(AbortSignal),
     );
@@ -504,7 +504,7 @@ describe("LspWorkspace.execute", () => {
   test("should cancel server startup and release its deadline when the action exceeds the minimum timeout", async () => {
     const { loaded, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
-    // biome-ignore lint/plugin/use-undefined: A null-prototype object safely models the opaque host timer handle.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const schedule = spyOn(timers, "setTimeout").mockReturnValue(timerHandle);
     const clear = spyOn(timers, "clearTimeout").mockReturnValue(undefined);
@@ -535,7 +535,7 @@ describe("LspWorkspace.afterMutation", () => {
   test("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
     const { loaded, poolFactory } = fixture();
     loaded.settings.lazy = true;
-    // biome-ignore lint/plugin/use-undefined: A null-prototype object safely models the opaque host timer handle.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     const schedule = spyOn(timers, "setTimeout").mockReturnValue(timerHandle);
     const clear = spyOn(timers, "clearTimeout").mockReturnValue(undefined);
@@ -908,7 +908,7 @@ describe("LspWorkspace.execute", () => {
           command: { title: "Fix", command: "test.fixUnused" },
         },
       ])
-      // biome-ignore lint/plugin/use-undefined: LSP workspace/executeCommand may return a JSON null result.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP workspace/executeCommand may return a JSON null result.
       .mockResolvedValue(null);
     const workspace = await createWorkspace(poolFactory);
 
@@ -1052,7 +1052,7 @@ describe("LspWorkspace.execute", () => {
       );
       expect(transaction.mock.calls.at(-1)?.[0]).toEqual({
         documentChanges: [
-          // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+          // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
           { textDocument: { uri, version: null }, edits: [first, independent] },
           {
             kind: "rename",

@@ -721,7 +721,7 @@ async function documentAction(
         throw new Error("new_name parameter required for rename");
       }
       const snapshots = documentSnapshots(state.knownFiles, server);
-      // biome-ignore lint/plugin/use-undefined: LSP rename results explicitly allow null when no edit exists.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP rename results explicitly allow null when no edit exists.
       const edit = await server.request<WorkspaceEdit | null>(
         "textDocument/rename",
         { ...target, newName: params.new_name },
@@ -950,7 +950,7 @@ async function rawRequest(
     const result = await server.request(method, payload, signal);
     return workspaceResult(
       params,
-      // biome-ignore lint/plugin/use-undefined: Render empty JSON-RPC results as their wire-level JSON null.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Render empty JSON-RPC results as their wire-level JSON null.
       `${server.config.name} ← ${method}:\n${typeof result === "string" ? result : JSON.stringify(result ?? null, undefined, 2)}`,
       true,
       server.config.name,
@@ -958,7 +958,7 @@ async function rawRequest(
   } catch (error) {
     return workspaceResult(
       params,
-      // biome-ignore lint/plugin/use-undefined: Render absent JSON-RPC params as JSON null in request diagnostics.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Render absent JSON-RPC params as JSON null in request diagnostics.
       `LSP error from ${server.config.name} on ${method}: ${errorText(error)}\n  params: ${JSON.stringify(payload ?? null).slice(0, MAX_RAW_REQUEST_PAYLOAD_LENGTH)}`,
       false,
       server.config.name,
@@ -1759,9 +1759,9 @@ async function validatedRenameEdit(
     documents: ReadonlyMap<string, DocumentSnapshot>;
     signal: AbortSignal;
   },
-  // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+  // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
 ): Promise<WorkspaceEdit | null> {
-  // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+  // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
   const response = await server.request<WorkspaceEdit | null>(
     "workspace/willRenameFiles",
     { files: options.pairs },
@@ -1832,7 +1832,7 @@ async function* collectFileRenameEdits(
   > {
     for (const [uri, values] of buckets) {
       yield {
-        // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+        // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
         textDocument: { uri, version: null },
         edits: values.map((value) => value.edit),
       };
@@ -1935,7 +1935,7 @@ async function* collectFileRenameEdits(
       const changes =
         response.documentChanges ??
         Object.entries(response.changes ?? {}).map(([uri, edits]) => ({
-          // biome-ignore lint/plugin/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+          // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
           textDocument: { uri, version: null },
           edits,
         }));
@@ -2120,7 +2120,7 @@ async function reloadWorkspace(
         path.basename(config.command) === "rust-analyzer"
       ) {
         try {
-          // biome-ignore lint/plugin/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
+          // biome-ignore lint/plugin/biome-rules/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
           await server.request("rust-analyzer/reloadWorkspace", null, signal);
         } catch (error) {
           if (!methodNotFound(error)) {
@@ -2478,7 +2478,7 @@ async function formatDocument(
       );
     }
     const snapshots = documentSnapshots(state.knownFiles, server);
-    // biome-ignore lint/plugin/use-undefined: LSP formatting results explicitly allow null when no edits exist.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: LSP formatting results explicitly allow null when no edits exist.
     const response = await server.request<TextEdit[] | null>(
       "textDocument/formatting",
       {

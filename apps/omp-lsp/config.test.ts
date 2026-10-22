@@ -47,7 +47,7 @@ const filesystem: {
       buffer: Buffer,
       offset: number,
       length: number,
-      // biome-ignore lint/plugin/use-undefined: The mocked Node FileHandle.read contract uses null for the current position.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: The mocked Node FileHandle.read contract uses null for the current position.
       position: null,
     ) => Promise<{ bytesRead: number }>;
     close: () => Promise<void>;
@@ -206,7 +206,7 @@ describe("loadLspConfig", () => {
   test("should retain prior definitions and apply valid siblings when server entries are malformed", async () => {
     const files = fixture({
       servers: {
-        // biome-ignore lint/plugin/use-undefined: Deliberately reject a null server entry from external JSON configuration.
+        // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject a null server entry from external JSON configuration.
         available: null,
         " ": {},
         optional: { disabled: true },
@@ -239,7 +239,7 @@ describe("loadLspConfig", () => {
           args: ["--project"],
           extensionToLanguage: { ".tsx": "typescriptreact" },
           languageId: "typescriptreact",
-          // biome-ignore lint/plugin/use-undefined: LSP initializationOptions can contain JSON null values.
+          // biome-ignore lint/plugin/biome-rules/use-undefined: LSP initializationOptions can contain JSON null values.
           initializationOptions: { options: [null, "strict", 1, true] },
           // biome-ignore lint/style/useNamingConvention: Environment variable names are external keys.
           env: { MODE: "test" },
@@ -293,7 +293,7 @@ describe("loadLspConfig", () => {
         fileTypes: [".tsx"],
         extensionToLanguage: { ".tsx": "typescriptreact" },
         languageId: "typescriptreact",
-        // biome-ignore lint/plugin/use-undefined: Preserve JSON null in the forwarded LSP initializationOptions.
+        // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve JSON null in the forwarded LSP initializationOptions.
         initOptions: { options: [null, "strict", 1, true] },
         settings: { strict: true },
         // biome-ignore lint/style/useNamingConvention: Environment variable names are external keys.
@@ -496,7 +496,7 @@ describe("loadLspConfig", () => {
   );
 
   test("should reject excessive payload nesting while preserving the earlier definition", async () => {
-    // biome-ignore lint/plugin/use-undefined: Use a valid JSON null leaf to isolate excessive external payload nesting.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Use a valid JSON null leaf to isolate excessive external payload nesting.
     let nested: unknown = null;
     for (let depth = 0; depth < excessivePayloadDepth; depth++) {
       nested = { nested };
@@ -530,11 +530,11 @@ describe("loadLspConfig", () => {
   );
 
   test.each([
-    // biome-ignore lint/plugin/use-undefined: Deliberately reject a null bundled server map.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject a null bundled server map.
     ["the bundled map is missing", null, "must contain a server map"],
     [
       "a bundled entry is not an object",
-      // biome-ignore lint/plugin/use-undefined: Deliberately reject a null bundled server entry.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject a null bundled server entry.
       { broken: null },
       "Invalid bundled LSP preset broken",
     ],

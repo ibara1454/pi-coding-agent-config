@@ -4,18 +4,18 @@ import { MemoryFileSystem, main, Workspace } from "@biomejs/wasm-nodejs";
 main();
 
 /**
- * Runs one local GritQL rule against TypeScript source using Biome's WASM API.
+ * Runs one packaged GritQL rule against TypeScript source using Biome's WASM API.
  * Each call uses an isolated in-memory workspace that is disposed before
  * returning or throwing; no input file or Biome CLI subprocess is created.
- * Preserves the rule filename so named plugin suppressions behave as in the CLI.
+ * Resolves the package manifest so qualified suppressions behave as in the CLI.
  *
- * @param rule - Rule filename beside this helper, without the `.grit` suffix.
+ * @param rule - Exported rule name, matching its filename without `.grit`.
  * @param source - Complete TypeScript source text to lint.
  * @returns Syntax and rule diagnostics with `category`, `severity`, and `source`.
  * The returned `source` is the highlighted snippet, not the complete input or
  * method declaration. It is `undefined` when a diagnostic has no span.
  * Returns an empty array when there are no diagnostics.
- * @throws If the rule cannot be read or the Biome workspace cannot be configured.
+ * @throws If package files cannot be read or the workspace cannot be configured.
  *
  * @example
  * ```ts
@@ -35,8 +35,15 @@ main();
  */
 export function lintRule(rule: string, source: string) {
   using files = new MemoryFileSystem();
+  const packagePath = "/project/node_modules/biome-rules";
+  for (const filename of ["package.json", "biome-manifest.json"]) {
+    files.insert(
+      `${packagePath}/${filename}`,
+      readFileSync(new URL(`../${filename}`, import.meta.url)),
+    );
+  }
   files.insert(
-    `/project/${rule}.grit`,
+    `${packagePath}/src/${rule}.grit`,
     readFileSync(new URL(`${rule}.grit`, import.meta.url)),
   );
   using workspace = Workspace.withFileSystem(files);
@@ -47,7 +54,7 @@ export function lintRule(rule: string, source: string) {
   const settings = workspace.updateSettings({
     projectKey,
     workspaceDirectory: "/project",
-    configuration: { plugins: [`./${rule}.grit`] },
+    configuration: { plugins: [`biome-rules/${rule}`] },
   });
   if (settings.diagnostics.length > 0) {
     throw new Error(JSON.stringify(settings.diagnostics));

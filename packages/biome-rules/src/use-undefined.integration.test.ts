@@ -81,7 +81,7 @@ describe("use-undefined", () => {
       lintRule(
         "use-undefined",
         `
-        // biome-ignore lint/plugin/use-undefined: JSON-RPC requires a null result.
+        // biome-ignore lint/plugin/biome-rules/use-undefined: JSON-RPC requires a null result.
         const response = { result: null };
         const absent = null;
         `,
@@ -94,7 +94,7 @@ describe("use-undefined", () => {
       lintRule(
         "use-undefined",
         `
-        // biome-ignore lint/plugin/use-undefined: LSP uses null for an unversioned document.
+        // biome-ignore lint/plugin/biome-rules/use-undefined: LSP uses null for an unversioned document.
         interface Document { version: number | null; }
         `,
       ),

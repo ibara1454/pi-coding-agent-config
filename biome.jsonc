@@ -1,16 +1,10 @@
 // Rule meanings and severity policy: ./docs/lint-policy.md
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
   "plugins": [
+    "biome-rules/presets/source",
     {
-      "path": "./packages/biome-rules/src/no-async-describe-callback.grit",
-      "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
-    },
-    "./packages/biome-rules/src/no-double-type-assertion.grit",
-    "./packages/biome-rules/src/no-private-methods.grit",
-    "./packages/biome-rules/src/use-undefined.grit",
-    {
-      "path": "./packages/biome-rules/src/use-should-test-title.grit",
+      "path": "biome-rules/presets/tests",
       "includes": ["**/*.test.ts", "**/*.integration.test.ts"]
     }
   ],
@@ -23,6 +17,9 @@
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 80
+  },
+  "markdown": {
+    "formatter": { "enabled": false }
   },
   "linter": {
     "enabled": true,
@@ -44,6 +41,8 @@
           "options": { "maxLines": 750 }
         },
         "noImplicitCoercions": "error",
+        // Preserve the pre-2.6 policy; adopting this new check is a separate change.
+        "useMathMinMax": "off",
         "useSimplifiedLogicExpression": "error"
       },
       "correctness": {
@@ -84,6 +83,10 @@
       "suspicious": {
         // Bitwise operations are intentional in hashing and token estimation.
         "noBitwiseOperators": "off",
+        // Preserve the pre-2.6 policy rather than rewriting tests and sort calls.
+        "noConditionalExpect": "off",
+        "noIdenticalTestTitle": "off",
+        "useArraySortCompare": "off",
         "noImportCycles": {
           "level": "error",
           "options": {

@@ -40,7 +40,7 @@ type ContextTokenEntry =
       >;
     };
 
-// biome-ignore-start lint/plugin/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
+// biome-ignore-start lint/plugin/biome-rules/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
 interface ContextUsageInput {
   readonly reportedTokens: number | null | undefined;
   readonly providerAnchored: boolean;
@@ -49,7 +49,7 @@ interface ContextUsageInput {
   readonly contextWindow: number | null | undefined;
   readonly modelContextWindow: number | null | undefined;
 }
-// biome-ignore-end lint/plugin/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
+// biome-ignore-end lint/plugin/biome-rules/use-undefined: Pi/provider usage inputs can report null while estimates are unavailable.
 
 interface ContextUsage {
   readonly contextTokens: number;

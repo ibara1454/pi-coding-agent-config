@@ -79,7 +79,7 @@ describe("updateRunMetrics", () => {
 
   test.each([
     { label: "missing", output: undefined },
-    // biome-ignore lint/plugin/use-undefined: Preserve rejection coverage for null output from the host.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve rejection coverage for null output from the host.
     { label: "null", output: null },
     { label: "a numeric string", output: "20" },
     { label: "an object", output: {} },

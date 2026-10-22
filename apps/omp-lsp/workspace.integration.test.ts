@@ -745,10 +745,10 @@ describe("LspWorkspace.execute", () => {
       }
       return Promise.resolve(stat());
     });
-    // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
     request.mockResolvedValue(null);
     const secondRequest =
-      // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
       mock<LanguageServer["request"]>().mockResolvedValue(null);
     const second: LanguageServer = {
       ...server,
@@ -814,7 +814,7 @@ describe("LspWorkspace.execute", () => {
       },
     });
     const secondRequest =
-      // biome-ignore lint/plugin/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles uses null when a server contributes no edits.
       mock<LanguageServer["request"]>().mockResolvedValue(null);
     const second: LanguageServer = {
       ...server,

@@ -370,7 +370,7 @@ describe("WelcomeHeader.render", () => {
     const timing = { start: 100, moving: 850, complete: 3100 };
     const completedRenderRequests = 3;
     const now = spyOn(performance, "now").mockReturnValue(timing.start);
-    // biome-ignore lint/plugin/use-undefined: Object.create(null) makes the opaque timer fixture intentionally prototype-free.
+    // biome-ignore lint/plugin/biome-rules/use-undefined: Object.create(null) makes the opaque timer fixture intentionally prototype-free.
     const timerHandle: NodeJS.Timeout = Object.create(null);
     let tick: (() => void) | undefined;
     const interval = spyOn(globalThis, "setInterval").mockImplementation(

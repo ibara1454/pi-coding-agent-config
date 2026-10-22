@@ -3,8 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "files": [
+    "biome-manifest.json",
+    "src/*.grit"
+  ],
+  "exports": {
+    "biome": "./biome-manifest.json"
+  },
   "devDependencies": {
-    "@biomejs/wasm-nodejs": "2.5.15"
+    "@biomejs/wasm-nodejs": "2.6.2"
   },
   "scripts": {
     "lint": "biome check --error-on-warnings .",

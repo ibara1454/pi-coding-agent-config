@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "plugins": {
+    "rules": [
+      { "no-async-describe-callback": "./src/no-async-describe-callback.grit" },
+      { "no-double-type-assertion": "./src/no-double-type-assertion.grit" },
+      { "no-private-methods": "./src/no-private-methods.grit" },
+      { "use-should-test-title": "./src/use-should-test-title.grit" },
+      { "use-undefined": "./src/use-undefined.grit" }
+    ],
+    "presets": {
+      "source": [
+        "no-double-type-assertion",
+        "no-private-methods",
+        "use-undefined"
+      ],
+      "tests": ["no-async-describe-callback", "use-should-test-title"]
+    }
+  }
+}
