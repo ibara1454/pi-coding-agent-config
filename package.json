@@ -21,7 +21,7 @@
     "@earendil-works/pi-tui": "^0.84.1",
     "@types/bun": "1.4.3",
     "biome-rules": "workspace:*",
-    "turbo": "^2.10.11"
+    "turbo": "^2.11.9"
   },
   "scripts": {
     "check": "turbo run lint typecheck",
