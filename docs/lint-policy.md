@@ -11,11 +11,11 @@ package-specific rules and `overrides` in that package's file; override globs
 are relative to the package. App configs allow default exports only in their
 root `index.ts` entrypoint.
 
-The checks deferred during the Biome 2.6 upgrade are now enforced as errors:
+The following checks are enforced as errors:
 `useMathMinMax`, `noConditionalExpect`, `noIdenticalTestTitle`, and
 `useArraySortCompare`. Use explicit numeric bounds, unconditional test assertions,
 distinct suite/test titles within each scope, and explicit sort comparators.
-Markdown formatting remains disabled.
+Markdown formatting is disabled.
 
 - **Error:** enabled and enforced by `bun run check` and `bun run lint`.
 - **Off:** deliberately disabled or deferred; no diagnostic is emitted.
