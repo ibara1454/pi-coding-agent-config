@@ -538,8 +538,7 @@ describe("applyPatterns", () => {
     "should return the expected enabled paths for: %s",
     (_label, scenario) => {
       const enabled = applyPatterns(allPaths, scenario.patterns, base);
-      const expected = [...scenario.expected].toSorted();
-      expect([...enabled].toSorted()).toEqual(expected);
+      expect(enabled).toEqual(new Set(scenario.expected));
     },
   );
 });

@@ -348,9 +348,7 @@ describe("loadLspConfig", () => {
       ),
     ).toEqual(["available"]);
   });
-});
 
-describe("loadLspConfig", () => {
   test.each([
     ["the command is blank", { command: " " }, "command must be"],
     ["the command contains a NUL", { command: "tool\0" }, "command must be"],

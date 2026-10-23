@@ -236,48 +236,7 @@ describe("lintWithCli", () => {
       await expect(lintWithCli(server, file)).rejects.toThrow(message);
     },
   );
-});
 
-describe("formatWithCli", () => {
-  test.each(["--write", "--fix=true", "--unsafe"])(
-    "should reject file-mutating configuration when %s is supplied",
-    async (flag) => {
-      const run = spyOn(processes, "runCommand").mockResolvedValue({
-        stdout: "const x = 1;",
-        stderr: "",
-        exitCode: 0,
-      });
-      await expect(
-        formatWithCli({ ...server, args: ["format", flag] }, file, "const x=1"),
-      ).rejects.toThrow("mutating CLI flags");
-      expect(run).not.toHaveBeenCalled();
-    },
-  );
-
-  test.each([
-    [
-      "the formatter exits unsuccessfully",
-      1,
-      "const x = 1;",
-      "formatting failed",
-    ],
-    ["the formatter discards nonempty input", 0, "\n", "empty output"],
-  ] as const)(
-    "should reject unsafe formatting results when %s",
-    async (_condition, exitCode, stdout, message) => {
-      spyOn(processes, "runCommand").mockResolvedValue({
-        stdout,
-        stderr: "",
-        exitCode,
-      });
-      await expect(formatWithCli(server, file, "const x=1")).rejects.toThrow(
-        message,
-      );
-    },
-  );
-});
-
-describe("lintWithCli", () => {
   test.each([
     [
       "the server is unsupported",
@@ -613,6 +572,43 @@ describe("lintWithCli", () => {
 });
 
 describe("formatWithCli", () => {
+  test.each(["--write", "--fix=true", "--unsafe"])(
+    "should reject file-mutating configuration when %s is supplied",
+    async (flag) => {
+      const run = spyOn(processes, "runCommand").mockResolvedValue({
+        stdout: "const x = 1;",
+        stderr: "",
+        exitCode: 0,
+      });
+      await expect(
+        formatWithCli({ ...server, args: ["format", flag] }, file, "const x=1"),
+      ).rejects.toThrow("mutating CLI flags");
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    [
+      "the formatter exits unsuccessfully",
+      1,
+      "const x = 1;",
+      "formatting failed",
+    ],
+    ["the formatter discards nonempty input", 0, "\n", "empty output"],
+  ] as const)(
+    "should reject unsafe formatting results when %s",
+    async (_condition, exitCode, stdout, message) => {
+      spyOn(processes, "runCommand").mockResolvedValue({
+        stdout,
+        stderr: "",
+        exitCode,
+      });
+      await expect(formatWithCli(server, file, "const x=1")).rejects.toThrow(
+        message,
+      );
+    },
+  );
+
   test("should return the unchanged snapshot without spawning when SwiftLint is selected", async () => {
     const run = spyOn(processes, "runCommand");
     expect(
