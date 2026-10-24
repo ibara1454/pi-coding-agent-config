@@ -10,14 +10,16 @@ permissions:
     pull-requests: read
 # How do I supply pricing for a custom or private model?
 # https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
+# OpenCode prices: https://opencode.ai/v2/docs/console/models/#pricing
 models:
     providers:
         openai:
             models:
-                deepseek-v4.1-flash-free:
+                deepseek-v4.1-flash:
                     cost:
-                        input: 0
-                        output: 0
+                        input: "3e-7"
+                        output: "1.2e-6"
+                        cache_read: "6e-9"
 engine:
     id: codex
     model: ${{ vars.OPENAI_MODEL }}
