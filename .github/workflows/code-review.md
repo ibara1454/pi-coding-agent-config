@@ -1,5 +1,6 @@
 ---
 name: Code review
+inlined-imports: true
 on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
