@@ -8,6 +8,16 @@ if: github.event.pull_request.draft == false
 permissions:
     contents: read
     pull-requests: read
+# How do I supply pricing for a custom or private model?
+# https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
+models:
+    providers:
+        openai:
+            models:
+                deepseek-v4.1-flash-free:
+                    cost:
+                        input: 0
+                        output: 0
 engine:
     id: codex
     model: ${{ vars.OPENAI_MODEL }}
@@ -19,6 +29,7 @@ engine:
 network:
     allowed:
         - github
+        - opencode.ai
 tools:
     github:
         toolsets: [repos, pull_requests]
