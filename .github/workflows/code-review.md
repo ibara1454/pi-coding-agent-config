@@ -30,7 +30,7 @@ checkout:
     fetch-depth: 0
 runtimes:
     bun:
-        version: "1.1.0"
+        version: "1.4.3"
 pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
