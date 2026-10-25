@@ -167,7 +167,11 @@ const keys = ["OPENAI_API_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
   "COPILOT_GITHUB_TOKEN", "CODECOV_TOKEN", "ACTIONS_RUNTIME_TOKEN",
   "ACTIONS_ID_TOKEN_REQUEST_TOKEN"];
 const keysOnlyAbsentOrMasked = keys.every(key =>
-  !process.env[key] || process.env[key] === "******");
+  !process.env[key] || process.env[key] === "******" ||
+  (["OPENAI_API_KEY", "CODEX_API_KEY"].includes(key) &&
+    process.env[key] === "sk-placeholder-for-api-proxy") ||
+  (key === "COPILOT_GITHUB_TOKEN" &&
+    process.env[key] === "ghu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
 const files = [".git-credentials", ".config/gh/hosts.yml", ".codex/auth.json"]
   .map(file => join(process.env.HOME, file));
 const persistedCredentialFilesEmpty = files.every(file =>
