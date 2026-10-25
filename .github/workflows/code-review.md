@@ -3,8 +3,12 @@ name: Code review
 inlined-imports: true
 on:
     pull_request:
-        types: [opened, synchronize, reopened, ready_for_review]
-if: github.event.pull_request.draft == false
+        types: [opened, synchronize, reopened, ready_for_review, review_requested]
+if: >-
+    github.event.pull_request.draft == false &&
+    (github.event.action != 'review_requested' ||
+    (vars.CODE_REVIEW_REVIEWER != '' &&
+    github.event.requested_reviewer.login == vars.CODE_REVIEW_REVIEWER))
 permissions:
     contents: read
     pull-requests: read
@@ -41,6 +45,7 @@ tools:
     # Codex cannot enforce per-command shell allowlists.
     bash: [":*"]
 safe-outputs:
+    github-token: ${{ secrets.CODE_REVIEW_TOKEN }}
     submit-pull-request-review:
         allowed-events: [APPROVE, REQUEST_CHANGES]
 timeout-minutes: 15
