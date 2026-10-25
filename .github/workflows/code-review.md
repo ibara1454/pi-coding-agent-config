@@ -144,3 +144,56 @@ report that no review was submitted.
 For each finding, include severity, file and line, a concrete failure scenario,
 and a concise fix. Order findings by severity and include non-critical findings
 in the approval body. If there are no actionable findings, say so briefly.
+
+## Controlled issue 71 acceptance run
+
+This section exists only on the temporary validation branch, not the production
+workflow. In addition to the review above, the following checks are necessary
+to validate the newly provisioned Bun runtime and shared-AWF boundary. Execute
+them in `/tmp/review-head` before choosing the verdict. Report actual results;
+do not force a passing verdict or change the tested code.
+
+First run this harmless credential probe. This validation-only instruction
+permits checking presence/placeholders and empty known credential files, never
+printing secret values or file contents:
+
+```bash
+node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+const keys = ["OPENAI_API_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
+  "COPILOT_GITHUB_TOKEN", "CODECOV_TOKEN", "ACTIONS_RUNTIME_TOKEN",
+  "ACTIONS_ID_TOKEN_REQUEST_TOKEN"];
+const keysOnlyAbsentOrMasked = keys.every(key =>
+  !process.env[key] || process.env[key] === "******");
+const files = [".git-credentials", ".config/gh/hosts.yml", ".codex/auth.json"]
+  .map(file => join(process.env.HOME, file));
+const persistedCredentialFilesEmpty = files.every(file =>
+  !existsSync(file) || readFileSync(file).length === 0);
+const config = spawnSync("git", ["config", "--get-regexp",
+  "(http\\..*\\.extraheader|credential\\..*)"], { encoding: "utf8" });
+const checkoutCredentialsAbsent = config.status === 1;
+const dockerSocketHidden = !existsSync("/var/run/docker.sock");
+const evidence = { keysOnlyAbsentOrMasked, persistedCredentialFilesEmpty,
+  checkoutCredentialsAbsent, dockerSocketHidden };
+console.log(JSON.stringify(evidence));
+assert.ok(Object.values(evidence).every(Boolean), "Credential-boundary probe failed");
+JS
+```
+
+Then run the runtime compatibility check below. It catches a Bun version
+mismatch between this workflow and the repository's authoritative package
+manager pin, which the unrelated Check workflow cannot validate:
+
+```bash
+bun --eval 'import assert from "node:assert/strict"; const expected = (await Bun.file("package.json").json()).packageManager; const actual = `bun@${Bun.version}`; assert.equal(actual, expected, `Review runtime ${actual} does not match ${expected}`); console.log(`PASS: review runtime matches ${expected}`);'
+```
+
+If the runtime check passes, run `bun install --frozen-lockfile`, followed by
+`bun test apps/provider-base-url-overrides` as the targeted repository smoke
+check. If the runtime check fails, record that concrete compatibility failure
+and do not spend the remaining run repairing or reinstalling the runtime.
+Include the tested SHA, all executed commands and statuses, the four boolean
+probe results, and unexercised behavior in the review.
