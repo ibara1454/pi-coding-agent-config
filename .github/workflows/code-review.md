@@ -128,6 +128,9 @@ push, or include them in a PR. Record each command, exit status, relevant output
 tested SHA, and coverage limits. A required failed, denied, timed-out, or
 unavailable check leaves the review incomplete; do not silently skip it or
 treat missing output as a pass. Passing checks establish only exercised behavior.
+Capture the check's own exit status, not a trailing `echo`, `tee`, or `tail`
+status; use `pipefail` or `PIPESTATUS` when piping output. If security policy
+blocks a necessary check, preserve the policy and report the review incomplete.
 
 ## Submit the review
 
@@ -156,41 +159,21 @@ to validate the newly provisioned Bun runtime and shared-AWF boundary. Execute
 them in `/tmp/review-head` before choosing the verdict. Report actual results;
 do not force a passing verdict or change the tested code.
 
-First run this harmless credential probe. This validation-only instruction
-permits checking presence/placeholders and empty known credential files, never
-printing secret values or file contents:
+AWF's built-in startup health check verifies provider-key filtering. Do not
+inspect credential values or files. Run this additional harmless socket-mask
+probe: it reads filesystem metadata only, never connects to a socket.
 
 ```bash
 node --input-type=module <<'JS'
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-const keys = ["OPENAI_API_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
-  "COPILOT_GITHUB_TOKEN", "CODECOV_TOKEN", "ACTIONS_RUNTIME_TOKEN",
-  "ACTIONS_ID_TOKEN_REQUEST_TOKEN"];
-const keysOnlyAbsentOrMasked = keys.every(key =>
-  !process.env[key] || process.env[key] === "******" ||
-  (["OPENAI_API_KEY", "CODEX_API_KEY"].includes(key) &&
-    process.env[key] === "sk-placeholder-for-api-proxy") ||
-  (key === "COPILOT_GITHUB_TOKEN" &&
-    process.env[key] === "ghu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-const files = [".git-credentials", ".config/gh/hosts.yml", ".codex/auth.json"]
-  .map(file => join(process.env.HOME, file));
-const persistedCredentialFilesEmpty = files.every(file =>
-  !existsSync(file) || readFileSync(file).length === 0);
-const config = spawnSync("git", ["config", "--get-regexp",
-  "(http\\..*\\.extraheader|credential\\..*)"], { encoding: "utf8" });
-const checkoutCredentialsAbsent = config.status === 1;
-const dockerSocketMasked = ["/var/run/docker.sock", "/run/docker.sock"].every(file => {
+import { existsSync, statSync } from "node:fs";
+const dockerSocketsMasked = ["/var/run/docker.sock", "/run/docker.sock"].every(file => {
   if (!existsSync(file)) return true;
   const stat = statSync(file);
   return stat.isCharacterDevice() && stat.rdev === statSync("/dev/null").rdev;
 });
-const evidence = { keysOnlyAbsentOrMasked, persistedCredentialFilesEmpty,
-  checkoutCredentialsAbsent, dockerSocketMasked };
-console.log(JSON.stringify(evidence));
-assert.ok(Object.values(evidence).every(Boolean), "Credential-boundary probe failed");
+console.log(JSON.stringify({ dockerSocketsMasked }));
+assert.ok(dockerSocketsMasked, "Docker socket is not absent or masked with /dev/null");
 JS
 ```
 
@@ -206,5 +189,5 @@ If the runtime check passes, run `bun install --frozen-lockfile`, followed by
 `bun test apps/provider-base-url-overrides` as the targeted repository smoke
 check. If the runtime check fails, record that concrete compatibility failure
 and do not spend the remaining run repairing or reinstalling the runtime.
-Include the tested SHA, all executed commands and statuses, the four boolean
-probe results, and unexercised behavior in the review.
+Include the tested SHA, all executed commands and statuses, the socket-mask
+probe result, and unexercised behavior in the review.
