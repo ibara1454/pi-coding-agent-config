@@ -32,6 +32,9 @@ runtimes:
     bun:
         version: "1.4.3"
 pre-agent-steps:
+    # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
+    - name: Expose Bun to AWF
+      run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
     - name: Prepare exact review head
       env:
           REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -160,7 +163,7 @@ printing secret values or file contents:
 ```bash
 node --input-type=module <<'JS'
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 const keys = ["OPENAI_API_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
@@ -179,9 +182,13 @@ const persistedCredentialFilesEmpty = files.every(file =>
 const config = spawnSync("git", ["config", "--get-regexp",
   "(http\\..*\\.extraheader|credential\\..*)"], { encoding: "utf8" });
 const checkoutCredentialsAbsent = config.status === 1;
-const dockerSocketHidden = !existsSync("/var/run/docker.sock");
+const dockerSocketMasked = ["/var/run/docker.sock", "/run/docker.sock"].every(file => {
+  if (!existsSync(file)) return true;
+  const stat = statSync(file);
+  return stat.isCharacterDevice() && stat.rdev === statSync("/dev/null").rdev;
+});
 const evidence = { keysOnlyAbsentOrMasked, persistedCredentialFilesEmpty,
-  checkoutCredentialsAbsent, dockerSocketHidden };
+  checkoutCredentialsAbsent, dockerSocketMasked };
 console.log(JSON.stringify(evidence));
 assert.ok(Object.values(evidence).every(Boolean), "Credential-boundary probe failed");
 JS
