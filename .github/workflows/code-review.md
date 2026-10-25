@@ -11,15 +11,20 @@ permissions:
 # How do I supply pricing for a custom or private model?
 # https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
 # OpenCode prices: https://opencode.ai/v2/docs/console/models/#pricing
+# Go Contributor prices and data use: https://opencode.ai/v2/docs/console/go
+# Meta terms: https://dev.meta.ai/docs/pricing-rate-limits#contributor-tier
+# USD/token: $0.10 input, $0.20 output, $0.002 cached input per million tokens.
+# Contributor permits training on prompts/completions and is not ZDR; requires
+# workspace privacy opt-in and geographic eligibility before OPENAI_MODEL cutover.
 models:
     providers:
         openai:
             models:
-                deepseek-v4.1-flash:
+                muse-spark-1.3-contributor:
                     cost:
-                        input: "3e-7"
-                        output: "1.2e-6"
-                        cache_read: "6e-9"
+                        input: "1e-7"
+                        output: "2e-7"
+                        cache_read: "2e-9"
 checkout:
     fetch-depth: 0
 engine:
