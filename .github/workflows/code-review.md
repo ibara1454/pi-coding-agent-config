@@ -185,9 +185,21 @@ manager pin, which the unrelated Check workflow cannot validate:
 bun --eval 'import assert from "node:assert/strict"; const expected = (await Bun.file("package.json").json()).packageManager; const actual = `bun@${Bun.version}`; assert.equal(actual, expected, `Review runtime ${actual} does not match ${expected}`); console.log(`PASS: review runtime matches ${expected}`);'
 ```
 
-If the runtime check passes, run `bun install --frozen-lockfile`, followed by
-`bun test apps/provider-base-url-overrides` as the targeted repository smoke
-check. If the runtime check fails, record that concrete compatibility failure
-and do not spend the remaining run repairing or reinstalling the runtime.
+If the runtime check passes, execute the following commands exactly. Each
+prints and returns the underlying check's exit status so output truncation
+cannot substitute a pipeline's status for the check's status:
+
+```bash
+bash -c 'bun install --frozen-lockfile; result=$?; printf "install_exit=%s\n" "$result"; exit "$result"'
+```
+
+Only after a successful install:
+
+```bash
+bash -c 'bun test apps/provider-base-url-overrides; result=$?; printf "test_exit=%s\n" "$result"; exit "$result"'
+```
+
+If any check fails, record the concrete failure and do not repair the runtime
+or tested code.
 Include the tested SHA, all executed commands and statuses, the socket-mask
 probe result, and unexercised behavior in the review.
