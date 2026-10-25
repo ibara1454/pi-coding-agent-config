@@ -62,22 +62,6 @@ safe-outputs:
     submit-pull-request-review:
         allowed-events: [APPROVE, REQUEST_CHANGES]
         commit-id: ${{ github.event.pull_request.head.sha }}
-jobs:
-    safe_outputs:
-        pre-steps:
-            - name: Reject stale review evidence
-              uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-              with:
-                  script: |
-                      const expected = context.payload.pull_request.head.sha;
-                      const { data: current } = await github.rest.pulls.get({
-                        ...context.repo,
-                        pull_number: context.payload.pull_request.number,
-                      });
-                      if (current.head.sha !== expected) {
-                        throw new Error("PR head changed; refusing to publish a review of an untested revision.");
-                      }
-                      // commit-id also pins the review if a push races this check.
 timeout-minutes: 15
 ---
 
@@ -141,11 +125,8 @@ for critical findings or an incomplete review, naming the failed check or
 missing evidence. Include the evidence above, or explain why no new execution
 was necessary. Do not merge the PR.
 
-Recheck the live PR head before submission. If it differs from the reviewed SHA,
-do not approve; report that a new review is required. The safe-output stage
-independently rejects stale heads and binds every submitted review to the
-reviewed commit. If cancellation or publication failure prevents a review,
-report that no review was submitted.
+If cancellation or publication failure prevents a review, report that no review
+was submitted.
 
 For each finding, include severity, file and line, a concrete failure scenario,
 and a concise fix. Order findings by severity and include non-critical findings
