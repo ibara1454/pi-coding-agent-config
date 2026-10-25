@@ -20,12 +20,6 @@ models:
     providers:
         openai:
             models:
-                # Keep the active model priced until the repository-variable cutover.
-                deepseek-v4.1-flash:
-                    cost:
-                        input: "3e-7"
-                        output: "1.2e-6"
-                        cache_read: "6e-9"
                 muse-spark-1.3-contributor:
                     cost:
                         input: "1e-7"
