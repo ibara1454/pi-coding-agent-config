@@ -128,6 +128,9 @@ push, or include them in a PR. Record each command, exit status, relevant output
 tested SHA, and coverage limits. A required failed, denied, timed-out, or
 unavailable check leaves the review incomplete; do not silently skip it or
 treat missing output as a pass. Passing checks establish only exercised behavior.
+Capture the check's own exit status, not a trailing `echo`, `tee`, or `tail`
+status; use `pipefail` or `PIPESTATUS` when piping output. If security policy
+blocks a necessary check, preserve the policy and report the review incomplete.
 
 ## Submit the review
 
