@@ -32,6 +32,9 @@ runtimes:
     bun:
         version: "1.4.3"
 pre-agent-steps:
+    # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
+    - name: Expose Bun to AWF
+      run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
     - name: Prepare exact review head
       env:
           REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
