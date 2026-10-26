@@ -35,6 +35,9 @@ pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
       run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
+    - name: Install dependencies
+      working-directory: ${{ github.workspace }}
+      run: bun install --frozen-lockfile
 engine:
     id: codex
     model: ${{ vars.OPENAI_MODEL }}
