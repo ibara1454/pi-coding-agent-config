@@ -35,10 +35,6 @@ pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
       run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
-    - name: Prepare exact review head
-      env:
-          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: git -c core.hooksPath=/dev/null worktree add --detach /tmp/review-head "$REVIEW_HEAD_SHA"
 engine:
     id: codex
     model: ${{ vars.OPENAI_MODEL }}
@@ -70,15 +66,17 @@ timeout-minutes: 15
 # Review the pull request
 
 Review pull request #${{ github.event.pull_request.number }} in
-`${{ github.repository }}`. Read its title and description with `gh pr view`,
-and check that the changes match their stated scope and behavior. Report
-material mismatches or missing promised behavior.
+`${{ github.repository }}`. Read its title, description, and head/base branch names
+with `gh pr view --json title,body,headRefName,baseRefName`, and check that the
+changes match their stated scope and behavior. Report material mismatches or
+missing promised behavior.
 
-Work in `/tmp/review-head`. Use local Git to inspect the complete three-dot diff
-from base `${{ github.event.pull_request.base.sha }}` to head
-`${{ github.event.pull_request.head.sha }}`, plus relevant surrounding source.
-Read large outputs in chunks. Follow `CODING_STANDARDS.md` and applicable
-repository instructions.
+Work in `$GITHUB_WORKSPACE`, the PR-head checkout. Use local Git to inspect the
+complete three-dot diff from base `${{ github.event.pull_request.base.sha }}`
+to head `${{ github.event.pull_request.head.sha }}`, plus relevant surrounding
+source. Use `git show <head-sha>:<path>` for PR contents where gh-aw restored
+base-branch configuration. Read large outputs in chunks. Follow
+`CODING_STANDARDS.md` and applicable repository instructions.
 
 Focus on actionable correctness, security, and regression bugs introduced by
 this PR. Skip style preferences, speculative issues, and problems caught by CI.
