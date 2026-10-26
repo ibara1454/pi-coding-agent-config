@@ -5,13 +5,15 @@ on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
 if: github.event.pull_request.draft == false
+# AIC policy, trigger exemptions, and overshoot: .github/workflows/README.md#code-review-credit-budgets
+max-daily-ai-credits: 100
+max-ai-credits: 10
 permissions:
     contents: read
     pull-requests: read
     actions: read
 # How do I supply pricing for a custom or private model?
 # https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
-# OpenCode prices: https://opencode.ai/v2/docs/console/models/#pricing
 # Go Contributor prices and data use: https://opencode.ai/v2/docs/console/go
 # Meta terms: https://dev.meta.ai/docs/pricing-rate-limits#contributor-tier
 # USD/token: $0.10 input, $0.20 output, $0.002 cached input per million tokens.
@@ -55,6 +57,9 @@ tools:
     # Codex cannot enforce per-command shell allowlists.
     bash: [":*"]
 safe-outputs:
+    threat-detection:
+        max-ai-credits: 5
+        continue-on-error: false
     submit-pull-request-review:
         allowed-events: [APPROVE, REQUEST_CHANGES]
         commit-id: ${{ github.event.pull_request.head.sha }}
