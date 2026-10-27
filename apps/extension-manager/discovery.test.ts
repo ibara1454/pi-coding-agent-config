@@ -9,7 +9,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 // biome-ignore lint/performance/noNamespaceImport: Restore only host effect spies; frontmatter parsing and other host exports must remain real.
 import * as host from "@earendil-works/pi-coding-agent";
-import { discoverCatalog } from "./discovery.ts";
+import { discoverCatalog, PackageResolutionFailure } from "./discovery.ts";
 
 const agentDir = "/unit/agent";
 const cwd = "/unit/project";
@@ -107,6 +107,106 @@ function mockSkillDiscovery(preview: string) {
 }
 
 describe("discoverCatalog", () => {
+  it("should recover autoload rows and diagnose failed top-level and origin resolutions", async () => {
+    const { resolve, readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ skills: ["./skills/review", "-skills/other"] }),
+    );
+    resolve
+      .mockRejectedValueOnce(new Error("top-level unavailable"))
+      .mockRejectedValueOnce("extension autoload unavailable")
+      .mockRejectedValueOnce(new Error("declared skill unavailable"));
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]).toMatchObject({
+      name: "review-code",
+      source: "Auto-discovered",
+      origins: [{ label: `${agentDir}/skills (auto)`, source: "auto" }],
+    });
+    expect(catalog.diagnostics).toEqual([
+      {
+        scope: "global",
+        message: "Top-level discovery failed: top-level unavailable",
+      },
+      {
+        scope: "global",
+        message:
+          "Could not inspect auto-discovered extensions: extension autoload unavailable",
+      },
+      {
+        scope: "global",
+        message: "Could not inspect skills[0]: declared skill unavailable",
+      },
+    ]);
+  });
+
+  it("should preserve unrelated resources when locating and inspecting installed packages fail", async () => {
+    const { readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ packages: ["npm:missing", "npm:broken"] }),
+    );
+    spyOn(host.DefaultPackageManager.prototype, "getInstalledPath")
+      .mockImplementationOnce(() => {
+        throw new Error("cache unavailable");
+      })
+      .mockReturnValueOnce("/unit/broken");
+    spyOn(
+      host.DefaultPackageManager.prototype,
+      "resolveExtensionSources",
+    ).mockRejectedValue("manifest unreadable");
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]?.name).toBe("review-code");
+    expect(catalog.diagnostics).toEqual([
+      {
+        scope: "global",
+        source: "npm:missing",
+        message: "Could not locate npm:missing: cache unavailable",
+      },
+      {
+        scope: "global",
+        source: "npm:broken",
+        message: "Could not inspect npm:broken: manifest unreadable",
+      },
+    ]);
+  });
+
+  it("should expose an invalid global settings document without hiding autoload rows", async () => {
+    const { readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue("[]");
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]?.name).toBe("review-code");
+    expect(catalog.diagnostics).toContainEqual({
+      scope: "global",
+      path: settingsPath,
+      message: "Settings root must be a JSON object",
+    });
+    expect(catalog.settings.get("global")?.error).toBe(
+      "Settings root must be a JSON object",
+    );
+  });
+
+  it("should preserve the aggregate resolver failure for malformed settings", async () => {
+    const { resolve, readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ extensions: 7, skills: [1], packages: {} }),
+    );
+    const cause = new TypeError("packages is not iterable");
+    resolve.mockRejectedValue(cause);
+
+    const result = discoverCatalog(options);
+
+    await expect(result).rejects.toBeInstanceOf(PackageResolutionFailure);
+    await expect(result).rejects.toMatchObject({
+      message: "Package resolution failed: packages is not iterable",
+      cause,
+    });
+  });
+
   it("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
     const { resource, resolve, readSettings } = mockSkillDiscovery("# Review");
     resolve.mockResolvedValue({

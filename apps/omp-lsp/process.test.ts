@@ -391,6 +391,25 @@ describe("stopProcess", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
+  it("should reject force-kill signaling failures and release the pending exit listener", async () => {
+    const { child, processChild, activeSignals } = fixture();
+    const scheduled = timers();
+    const failure = Object.assign(new Error("force kill denied"), {
+      code: "EPERM",
+    });
+    activeSignals
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+    const pending = stopProcess(processChild).catch((error: unknown) => error);
+    scheduled[0]?.run();
+    expect(await pending).toBe(failure);
+    expect(activeSignals).toHaveBeenCalledTimes(2);
+    expect(scheduled).toHaveLength(1);
+    expect(child.listenerCount("close")).toBe(0);
+  });
+
   it("should escalate to SIGKILL when graceful termination has not closed the child", async () => {
     const { child, processChild, signals } = fixture();
     const scheduled = timers();
