@@ -5,11 +5,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
+
+// Capture the pure estimator before Bun replaces live host-module exports.
+const realEstimateTokens = estimateTokens;
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
   // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
-  estimateTokens: () => 0,
+  estimateTokens: realEstimateTokens,
 }));
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -622,7 +626,7 @@ describe("ompStatusLine", () => {
 
         expect(fixture.requestRender).toHaveBeenCalledTimes(1);
         expect(fixture.top()).toContain("Replacement");
-        expect(fixture.top()).toContain("3.0%/100");
+        expect(fixture.top()).toContain("5.0%/100");
         expect(fixture.top()).not.toContain("Test");
       } finally {
         await fixture.cleanup();
