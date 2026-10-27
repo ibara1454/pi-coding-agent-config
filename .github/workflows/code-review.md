@@ -1,6 +1,8 @@
 ---
 name: Code review
 inlined-imports: true
+imports:
+    - shared/mcp/context7.md
 on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
