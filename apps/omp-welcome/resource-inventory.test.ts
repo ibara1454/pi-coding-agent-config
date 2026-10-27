@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { installResourceInventoryOverride } from "./resource-inventory.ts";
 
 interface HostOptions {
@@ -46,7 +46,7 @@ function host() {
 }
 
 describe("installResourceInventoryOverride", () => {
-  test("should suppress routine startup and reload inventory but preserve diagnostics", () => {
+  it("should suppress routine startup and reload inventory but preserve diagnostics", () => {
     const { InteractiveMode, calls, manager } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const override = installResourceInventoryOverride(
@@ -71,7 +71,7 @@ describe("installResourceInventoryOverride", () => {
     expect(calls.at(-1)).toEqual({ showListing: true, showDiagnostics: true });
   });
 
-  test("should retain explicit forced and verbose listings", () => {
+  it("should retain explicit forced and verbose listings", () => {
     const forced = host();
     const forcedOverride = installResourceInventoryOverride(
       "0.84.1",
@@ -100,7 +100,7 @@ describe("installResourceInventoryOverride", () => {
     verboseOverride.release();
   });
 
-  test("should be reference-counted across extension reloads", () => {
+  it("should be reference-counted across extension reloads", () => {
     const { InteractiveMode, calls } = host();
     const original = InteractiveMode.prototype.showLoadedResources;
     const first = installResourceInventoryOverride("0.84.1", InteractiveMode);
@@ -122,7 +122,7 @@ describe("installResourceInventoryOverride", () => {
     expect(InteractiveMode.prototype.showLoadedResources).toBe(original);
   });
 
-  test("should fail open for unsupported versions and changed method structure", () => {
+  it("should fail open for unsupported versions and changed method structure", () => {
     const unsupportedVersion = host();
     const original =
       unsupportedVersion.InteractiveMode.prototype.showLoadedResources;
@@ -148,7 +148,7 @@ describe("installResourceInventoryOverride", () => {
     expect(structureResult.reason).toContain("no longer matches");
   });
 
-  test("should fail open when the settings-manager seam is unavailable", () => {
+  it("should fail open when the settings-manager seam is unavailable", () => {
     const calls: HostOptions[] = [];
     class MissingManager {
       showLoadedResources(options?: HostOptions) {
@@ -177,7 +177,7 @@ describe("installResourceInventoryOverride", () => {
     override.release();
   });
 
-  test("should retain a replacement method when a patch owner releases after another extension changes the host", () => {
+  it("should retain a replacement method when a patch owner releases after another extension changes the host", () => {
     const { InteractiveMode } = host();
     const override = installResourceInventoryOverride(
       "0.85.1",
@@ -199,7 +199,7 @@ describe("installResourceInventoryOverride", () => {
     expect(replacement).toHaveBeenCalledTimes(1);
   });
 
-  test.each([
+  it.each([
     ["missing", {}],
     ["not callable", { showLoadedResources: true }],
   ])(
@@ -214,7 +214,7 @@ describe("installResourceInventoryOverride", () => {
     },
   );
 
-  test("should keep native listing behavior when the quiet setting cannot be temporarily replaced", () => {
+  it("should keep native listing behavior when the quiet setting cannot be temporarily replaced", () => {
     const { InteractiveMode, manager, calls } = host();
     const descriptor = Object.getOwnPropertyDescriptor(
       manager,
@@ -239,7 +239,7 @@ describe("installResourceInventoryOverride", () => {
     }
   });
 
-  test("should restore the quiet-setting descriptor when the native renderer throws", () => {
+  it("should restore the quiet-setting descriptor when the native renderer throws", () => {
     const { InteractiveMode, manager } = host();
     const descriptor = Object.getOwnPropertyDescriptor(
       manager,
@@ -263,7 +263,7 @@ describe("installResourceInventoryOverride", () => {
     }
   });
 
-  test("should leave the original method callable when its descriptor cannot be wrapped", () => {
+  it("should leave the original method callable when its descriptor cannot be wrapped", () => {
     const { InteractiveMode, calls } = host();
     Object.defineProperty(InteractiveMode.prototype, "showLoadedResources", {
       configurable: false,
@@ -280,7 +280,7 @@ describe("installResourceInventoryOverride", () => {
     override.release();
   });
 
-  test("should remove the temporary quiet setting when the manager inherits its method", () => {
+  it("should remove the temporary quiet setting when the manager inherits its method", () => {
     const { InteractiveMode, manager, calls } = host();
     const inheritedManager = Object.create(manager) as typeof manager;
     const mode = new InteractiveMode();

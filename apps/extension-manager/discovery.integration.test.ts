@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -216,7 +216,7 @@ const deltaCases: readonly DeltaCase[] = [
 ];
 
 describe("discoverCatalog", () => {
-  test("should discover installed resources without installing a missing npm package", async () => {
+  it("should discover installed resources without installing a missing npm package", async () => {
     const { agentDir, cwd, root } = fixture();
     const extensionPath = join(agentDir, "extensions", "available.ts");
     const marker = join(root, "executed");
@@ -247,7 +247,7 @@ describe("discoverCatalog", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
-  test.each([false, true])(
+  it.each([false, true])(
     "should expose project resources only when trusted (%s)",
     async (projectTrusted) => {
       const { agentDir, cwd } = fixture();
@@ -274,7 +274,7 @@ describe("discoverCatalog", () => {
       expect(projectDiagnostics.length > 0).toBe(projectTrusted);
     },
   );
-  test.each(executionCases.map((entry) => [entry.label, entry] as const))(
+  it.each(executionCases.map((entry) => [entry.label, entry] as const))(
     "should never execute an extension declared by %s",
     async (_label, scenario) => {
       const { agentDir, cwd, root } = fixture();
@@ -292,7 +292,7 @@ describe("discoverCatalog", () => {
       expect(existsSync(marker)).toBe(false);
     },
   );
-  test.each(symlinkCases.map((entry) => [entry.label, entry] as const))(
+  it.each(symlinkCases.map((entry) => [entry.label, entry] as const))(
     "should persist the raw symlink path declared by %s",
     async (_label, scenario) => {
       const { agentDir, cwd, root } = fixture();
@@ -315,7 +315,7 @@ describe("discoverCatalog", () => {
     },
   );
 
-  test("should keep both raw aliases of one canonical file addressable", async () => {
+  it("should keep both raw aliases of one canonical file addressable", async () => {
     const { agentDir, cwd } = fixture();
     const packageRoot = join(agentDir, "pkg");
     const actual = join(packageRoot, "extensions", "actual.ts");
@@ -351,7 +351,7 @@ describe("discoverCatalog", () => {
     ]);
     expect(new Set(rows.map((row) => row.resolvedAfterReload))).toHaveLength(1);
   });
-  test.each(deltaCases.map((entry) => [entry.label, entry] as const))(
+  it.each(deltaCases.map((entry) => [entry.label, entry] as const))(
     "should resolve a Project delta against the Global install when %s",
     async (_label, scenario) => {
       const { agentDir, cwd } = fixture();

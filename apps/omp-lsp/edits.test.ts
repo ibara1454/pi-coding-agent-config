@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -208,7 +208,7 @@ afterEach(() => {
 });
 
 describe("applyTextEdits", () => {
-  test("should preserve CRLF and replace complete UTF-16 characters", () => {
+  it("should preserve CRLF and replace complete UTF-16 characters", () => {
     const emojiEndOffset = 3;
     expect(
       applyTextEdits("a\u{1f600}b\r\nnext", [
@@ -220,7 +220,7 @@ describe("applyTextEdits", () => {
     ).toThrow("surrogate");
   });
 
-  test("should preserve declared insertion order when multiple edits share one position", () => {
+  it("should preserve declared insertion order when multiple edits share one position", () => {
     expect(
       applyTextEdits("ab", [
         replacement(1, 1, "1"),
@@ -230,7 +230,7 @@ describe("applyTextEdits", () => {
     ).toBe("a12c");
   });
 
-  test("should reject overlapping replacements instead of overwriting either result", () => {
+  it("should reject overlapping replacements instead of overwriting either result", () => {
     const firstRangeEndOffset = 3;
     const secondRangeEndOffset = 4;
     expect(() =>
@@ -240,7 +240,7 @@ describe("applyTextEdits", () => {
       ]),
     ).toThrow("Overlapping");
   });
-  test.each([
+  it.each([
     [
       "the line is beyond the document",
       { line: 1, character: 0 },
@@ -279,12 +279,12 @@ describe("applyTextEdits", () => {
     },
   );
 
-  test("should coalesce duplicate replacements when their ranges and text are identical", () => {
+  it("should coalesce duplicate replacements when their ranges and text are identical", () => {
     const edit = replacement(0, ORIGINAL_TEXT_LENGTH, "new");
     expect(applyTextEdits("old", [edit, edit])).toBe("new");
   });
 
-  test("should reject snippet syntax instead of inserting unresolved placeholders", () => {
+  it("should reject snippet syntax instead of inserting unresolved placeholders", () => {
     const edit = {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: LSP snippets intentionally use literal placeholder syntax.
       ...replacement(0, ORIGINAL_TEXT_LENGTH, "${1:value}"),
@@ -298,7 +298,7 @@ describe("applyTextEdits", () => {
 
 describe("snapshot mutations", () => {
   describe("applyWorkspaceEdit", () => {
-    test("should reject stale server versions before changing disk", async () => {
+    it("should reject stale server versions before changing disk", async () => {
       const documentTextEndOffset = 3;
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const edit: WorkspaceEdit = {
@@ -320,7 +320,7 @@ describe("snapshot mutations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should preserve a concurrent host write when content changes while queued", async () => {
+    it("should preserve a concurrent host write when content changes while queued", async () => {
       const hostWriteEndOffset = 3;
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       fixture.changeWhileQueued("/project/a.ts", "host update");
@@ -339,7 +339,7 @@ describe("snapshot mutations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should leave all files unchanged when a later bucket has overlapping edits", async () => {
+    it("should leave all files unchanged when a later bucket has overlapping edits", async () => {
       const firstBucketEndOffset = 3;
       const overlappingBucketEndOffset = 4;
       const fixture = memoryFiles({
@@ -365,7 +365,7 @@ describe("snapshot mutations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should apply text edits against their ordered resource-operation state", async () => {
+    it("should apply text edits against their ordered resource-operation state", async () => {
       const renamedTextLength = 5;
       const fixture = memoryFiles({});
       const first = fileToUri("/project/a.ts");
@@ -394,7 +394,7 @@ describe("snapshot mutations", () => {
       expect(fixture.files.get("/project/b.ts")?.content).toBe("world");
     });
 
-    test("should report the committed prefix when a later filesystem write fails", async () => {
+    it("should report the committed prefix when a later filesystem write fails", async () => {
       const committedTextEndOffset = 3;
       const fixture = memoryFiles({
         "/project/a.ts": "old",
@@ -423,7 +423,7 @@ describe("snapshot mutations", () => {
       ]);
     });
 
-    test("should restore only committed reference edits when a rename fails before later edits", async () => {
+    it("should restore only committed reference edits when a rename fails before later edits", async () => {
       const referenceTextEndOffset = 3;
       const fixture = memoryFiles({
         "/project/ref.ts": "old",
@@ -467,7 +467,7 @@ describe("snapshot mutations", () => {
       expect(result.changes).toEqual([]);
     });
 
-    test("should preserve intervening changes and restore other edits when rename rollback is incomplete", async () => {
+    it("should preserve intervening changes and restore other edits when rename rollback is incomplete", async () => {
       const referenceTextEndOffset = 3;
       const fixture = memoryFiles({
         "/project/other.ts": "old",
@@ -527,7 +527,7 @@ describe("snapshot mutations", () => {
 
 describe("resource operations", () => {
   describe("applyWorkspaceEdit", () => {
-    test("should create missing parent directories before creating a nested file", async () => {
+    it("should create missing parent directories before creating a nested file", async () => {
       const fixture = memoryFiles({});
       const file = "/project/new/nested/a.ts";
       const result = await applyWorkspaceEdit(
@@ -541,12 +541,7 @@ describe("resource operations", () => {
       expect(fixture.directories.has("/project/new/nested")).toBe(true);
     });
 
-    test.each([
-      "overwrite",
-      "ignoreIfExists",
-      "recursive",
-      "ignoreIfNotExists",
-    ])(
+    it.each(["overwrite", "ignoreIfExists", "recursive", "ignoreIfNotExists"])(
       "should reject resource edits without writing when %s is not a boolean",
       async (option) => {
         const fixture = memoryFiles({ "/project/a.ts": "old" });
@@ -572,7 +567,7 @@ describe("resource operations", () => {
       },
     );
 
-    test.each([
+    it.each([
       [
         "the rename source URI is missing",
         { kind: "rename", newUri: fileToUri("/project/b.ts") },
@@ -614,7 +609,7 @@ describe("resource operations", () => {
       },
     );
 
-    test.each([
+    it.each([
       [
         "a create target already exists",
         { kind: "create", uri: fileToUri("/project/a.ts") },
@@ -650,7 +645,7 @@ describe("resource operations", () => {
       },
     );
 
-    test.each([
+    it.each([
       {
         condition: "ignore is enabled without overwrite",
         options: { overwrite: false, ignoreIfExists: true },
@@ -692,7 +687,7 @@ describe("resource operations", () => {
       },
     );
 
-    test("should preserve a directory when create requests overwrite", async () => {
+    it("should preserve a directory when create requests overwrite", async () => {
       const fixture = memoryFiles({});
       fixture.directories.add("/project/folder");
       const result = await applyWorkspaceEdit(
@@ -716,7 +711,7 @@ describe("resource operations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should preserve a symlink and its target when create requests overwrite", async () => {
+    it("should preserve a symlink and its target when create requests overwrite", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       fixture.links.set("/project/link.ts", "/project/a.ts");
       const result = await applyWorkspaceEdit(
@@ -740,7 +735,7 @@ describe("resource operations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test.each([
+    it.each([
       ["equal", "/project/a.ts"],
       ["inside the source", "/project/a.ts/child"],
       ["an ancestor of the source", "/project"],
@@ -768,7 +763,7 @@ describe("resource operations", () => {
       },
     );
 
-    test.each([
+    it.each([
       {
         condition: "ignore is enabled without overwrite",
         options: { overwrite: false, ignoreIfExists: true },
@@ -822,7 +817,7 @@ describe("resource operations", () => {
       },
     );
 
-    test("should ignore a missing delete target when ignoreIfNotExists is enabled", async () => {
+    it("should ignore a missing delete target when ignoreIfNotExists is enabled", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const result = await applyWorkspaceEdit(
         {
@@ -842,7 +837,7 @@ describe("resource operations", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should recreate and edit deleted content in declared operation order", async () => {
+    it("should recreate and edit deleted content in declared operation order", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const uri = fileToUri("/project/a.ts");
       const result = await applyWorkspaceEdit(
@@ -868,7 +863,7 @@ describe("resource operations", () => {
       ]);
     });
 
-    test("should remove an empty directory when recursive deletion is disabled", async () => {
+    it("should remove an empty directory when recursive deletion is disabled", async () => {
       const fixture = memoryFiles({});
       fixture.directories.add("/project/empty");
       const result = await applyWorkspaceEdit(
@@ -886,7 +881,7 @@ describe("resource operations", () => {
       ]);
     });
 
-    test("should preserve a nonempty directory when recursive deletion is disabled", async () => {
+    it("should preserve a nonempty directory when recursive deletion is disabled", async () => {
       const fixture = memoryFiles({ "/project/folder/a.ts": "old" });
       fixture.directories.add("/project/folder");
       const result = await applyWorkspaceEdit(
@@ -904,7 +899,7 @@ describe("resource operations", () => {
       expect(fixture.files.get("/project/folder/a.ts")?.content).toBe("old");
     });
 
-    test("should report descendant files and preserve siblings when deleting recursively", async () => {
+    it("should report descendant files and preserve siblings when deleting recursively", async () => {
       const fixture = memoryFiles({
         "/project/folder/nested/a.ts": "old",
         "/project/sibling.ts": "keep",
@@ -936,7 +931,7 @@ describe("resource operations", () => {
       ]);
     });
 
-    test("should report only removed descendants when recursive deletion partially fails", async () => {
+    it("should report only removed descendants when recursive deletion partially fails", async () => {
       const fixture = memoryFiles({
         "/project/folder/a.ts": "first",
         "/project/folder/b.ts": "second",
@@ -975,7 +970,7 @@ describe("resource operations", () => {
 
 describe("canonical document aliases and mutation-time snapshots", () => {
   describe("applyWorkspaceEdit", () => {
-    test("should reject conflicting text aliases before committing either edit", async () => {
+    it("should reject conflicting text aliases before committing either edit", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       fixture.links.set("/project/link.ts", "/project/a.ts");
       const result = await applyWorkspaceEdit(
@@ -994,7 +989,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should edit a canonical target using the aliased document snapshot", async () => {
+    it("should edit a canonical target using the aliased document snapshot", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       fixture.links.set("/project/link.ts", "/project/a.ts");
       const result = await applyWorkspaceEdit(
@@ -1029,7 +1024,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       ]);
     });
 
-    test("should reject a missing text target without creating a file", async () => {
+    it("should reject a missing text target without creating a file", async () => {
       const fixture = memoryFiles({});
       const result = await applyWorkspaceEdit(
         {
@@ -1046,7 +1041,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should preserve a text target when canonical resolution fails with a nonmissing error", async () => {
+    it("should preserve a text target when canonical resolution fails with a nonmissing error", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       spyOn(fs, "realpath").mockRejectedValue(
         Object.assign(new Error("Canonical access denied"), { code: "EACCES" }),
@@ -1062,7 +1057,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should preserve a newly appeared create target when another writer wins the lock", async () => {
+    it("should preserve a newly appeared create target when another writer wins the lock", async () => {
       const fixture = memoryFiles({});
       fixture.changeWhileQueued("/project/a.ts", "host");
       const result = await applyWorkspaceEdit(
@@ -1079,7 +1074,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should reject queued edits when file metadata changes without changing content", async () => {
+    it("should reject queued edits when file metadata changes without changing content", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       fixture.changeWhileQueued("/project/a.ts", "old");
       const result = await applyWorkspaceEdit(
@@ -1092,7 +1087,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should reject a text mutation when the live document version advances after planning", async () => {
+    it("should reject a text mutation when the live document version advances after planning", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const document = mock(() => ({
         version: 2,
@@ -1128,7 +1123,7 @@ describe("canonical document aliases and mutation-time snapshots", () => {
 
 describe("untrusted workspace edit metadata", () => {
   describe("applyWorkspaceEdit", () => {
-    test.each([
+    it.each([
       // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject an external JSON null WorkspaceEdit.
       ["the workspace edit is null", null, "Invalid WorkspaceEdit"],
       [
@@ -1210,7 +1205,7 @@ describe("untrusted workspace edit metadata", () => {
       },
     );
 
-    test.each([
+    it.each([
       ["the annotation is unknown", {}, "missing", "unknown change annotation"],
       [
         "the annotation identifier is not text",
@@ -1262,7 +1257,7 @@ describe("untrusted workspace edit metadata", () => {
       },
     );
 
-    test("should apply annotated changes when confirmation is not required", async () => {
+    it("should apply annotated changes when confirmation is not required", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const result = await applyWorkspaceEdit(
         {
@@ -1284,7 +1279,7 @@ describe("untrusted workspace edit metadata", () => {
       expect(fixture.files.get("/project/a.ts")?.content).toBe("new");
     });
 
-    test("should combine edits into one snapshot-relative mutation when document buckets mix null and absent versions", async () => {
+    it("should combine edits into one snapshot-relative mutation when document buckets mix null and absent versions", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
       const textDocument = { uri: fileToUri("/project/a.ts"), version: null };
@@ -1308,7 +1303,7 @@ describe("untrusted workspace edit metadata", () => {
       expect(fixture.writes).toEqual(["/project/a.ts"]);
     });
 
-    test("should reject all document buckets when their versions conflict", async () => {
+    it("should reject all document buckets when their versions conflict", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       const result = await applyWorkspaceEdit(
         {
@@ -1331,7 +1326,7 @@ describe("untrusted workspace edit metadata", () => {
       expect(fixture.writes).toEqual([]);
     });
 
-    test("should reject a batch without filesystem access when it exceeds 2000 operations", async () => {
+    it("should reject a batch without filesystem access when it exceeds 2000 operations", async () => {
       const fixture = memoryFiles({});
       const result = await applyWorkspaceEdit(
         {
@@ -1353,7 +1348,7 @@ describe("untrusted workspace edit metadata", () => {
 
 describe("workspace edit failure reconciliation", () => {
   describe("applyWorkspaceEdit", () => {
-    test("should preserve the destination and remove the empty backup directory when displacement fails", async () => {
+    it("should preserve the destination and remove the empty backup directory when displacement fails", async () => {
       const fixture = memoryFiles({
         "/project/a.ts": "source",
         "/project/b.ts": "destination",
@@ -1381,7 +1376,7 @@ describe("workspace edit failure reconciliation", () => {
       expect([...fixture.directories]).toEqual(["/", "/project"]);
     });
 
-    test("should retain partially written content in the reconciliation report when a write truncates before failing", async () => {
+    it("should retain partially written content in the reconciliation report when a write truncates before failing", async () => {
       const fixture = memoryFiles({ "/project/a.ts": "old" });
       spyOn(fs, "writeFile").mockImplementation((file) => {
         fixture.files.set(String(file), { content: "", revision: 2 });
@@ -1408,7 +1403,7 @@ describe("workspace edit failure reconciliation", () => {
       );
     });
 
-    test("should restore the displaced destination when an overwrite rename fails", async () => {
+    it("should restore the displaced destination when an overwrite rename fails", async () => {
       const fixture = memoryFiles({
         "/project/a.ts": "source",
         "/project/b.ts": "destination",
@@ -1448,7 +1443,7 @@ describe("workspace edit failure reconciliation", () => {
       expect(fixture.directories).toEqual(new Set(["/", "/project"]));
     });
 
-    test("should retain a recoverable backup and report the lost destination when rename restoration fails", async () => {
+    it("should retain a recoverable backup and report the lost destination when rename restoration fails", async () => {
       const fixture = memoryFiles({
         "/project/a.ts": "source",
         "/project/b.ts": "destination",
@@ -1493,7 +1488,7 @@ describe("workspace edit failure reconciliation", () => {
       ]);
     });
 
-    test("should report a committed rename and retained backup when displaced destination cleanup fails", async () => {
+    it("should report a committed rename and retained backup when displaced destination cleanup fails", async () => {
       const fixture = memoryFiles({
         "/project/a.ts": "source",
         "/project/b.ts": "destination",
@@ -1535,7 +1530,7 @@ describe("workspace edit failure reconciliation", () => {
 });
 
 describe("directoryFiles", () => {
-  test("should sort nested files and symlinks without traversing a symlink target", async () => {
+  it("should sort nested files and symlinks without traversing a symlink target", async () => {
     const fixture = memoryFiles({
       "/project/tree/z.ts": "last",
       "/project/tree/nested/a.ts": "first",
@@ -1555,7 +1550,7 @@ describe("directoryFiles", () => {
     );
   });
 
-  test("should reject traversal when the directory contains more than 1000 files", async () => {
+  it("should reject traversal when the directory contains more than 1000 files", async () => {
     const fileCount = 1001;
     const fixture = memoryFiles(
       Object.fromEntries(
@@ -1574,7 +1569,7 @@ describe("directoryFiles", () => {
     expect(fixture.writes).toEqual([]);
   });
 
-  test("should reject unsupported entries instead of returning an incomplete file list", async () => {
+  it("should reject unsupported entries instead of returning an incomplete file list", async () => {
     memoryFiles({});
     spyOn(filesystem, "opendir").mockResolvedValue({
       async *[Symbol.asyncIterator]() {

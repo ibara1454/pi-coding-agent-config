@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -147,7 +147,7 @@ afterEach(async () => {
 });
 
 describe("LspWorkspace.afterMutation", () => {
-  test("should format writes without rewriting targeted edits when formatOnWrite is enabled", async () => {
+  it("should format writes without rewriting targeted edits when formatOnWrite is enabled", async () => {
     const { workspace, content } = await fixture(true);
     const formatted = "const value = { foo: 1 };\n";
     spyOn(linters, "formatWithCli").mockResolvedValue(formatted);
@@ -157,7 +157,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(content()).toBe(formatted);
   });
 
-  test("should emit normalized findings once and clear them once when diagnostics become clean", async () => {
+  it("should emit normalized findings once and clear them once when diagnostics become clean", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     const diagnostics = spyOn(server, "diagnostics")
@@ -182,7 +182,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(await workspace.afterMutation([file], "edit")).toBeUndefined();
   });
 
-  test("should repeat findings when diagnostic deduplication is disabled", async () => {
+  it("should repeat findings when diagnostic deduplication is disabled", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnWrite = true;
     loaded.settings.formatOnWrite = false;
@@ -197,7 +197,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(second?.text).toBe(first?.text);
   });
 
-  test("should emit changed severity when the diagnostic range and message stay unchanged", async () => {
+  it("should emit changed severity when the diagnostic range and message stay unchanged", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     spyOn(server, "diagnostics")
@@ -214,7 +214,7 @@ describe("LspWorkspace.afterMutation", () => {
     );
   });
 
-  test("should distinguish unverified silence from clean diagnostics and clear the freshness warning", async () => {
+  it("should distinguish unverified silence from clean diagnostics and clear the freshness warning", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     spyOn(server, "diagnostics")
@@ -236,7 +236,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(await workspace.afterMutation([file], "edit")).toBeUndefined();
   });
 
-  test("should preserve previous findings when every diagnostic source fails", async () => {
+  it("should preserve previous findings when every diagnostic source fails", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     spyOn(server, "diagnostics")
@@ -258,7 +258,7 @@ describe("LspWorkspace.afterMutation", () => {
     );
   });
 
-  test("should keep partial-source failures visible when repeated findings are deduplicated", async () => {
+  it("should keep partial-source failures visible when repeated findings are deduplicated", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     const failingConfig = { ...server.config, name: "failing-server" };
@@ -288,7 +288,7 @@ describe("LspWorkspace.afterMutation", () => {
     );
   });
 
-  test("should continue synchronizing later live servers and skip saves after failed synchronization", async () => {
+  it("should continue synchronizing later live servers and skip saves after failed synchronization", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.formatOnWrite = false;
     const sync = spyOn(server, "syncFile").mockRejectedValue(
@@ -330,7 +330,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(dead.syncFile).not.toHaveBeenCalled();
   });
 
-  test("should report a failed save without preventing synchronization of the next selected server", async () => {
+  it("should report a failed save without preventing synchronization of the next selected server", async () => {
     const { workspace, server } = await fixture();
     spyOn(server, "saved").mockRejectedValue(new Error("save rejected"));
     const next: LanguageServer = {
@@ -351,7 +351,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(next.saved).toHaveBeenCalledWith(file);
   });
 
-  test("should discard diagnostics for changed content without suppressing the next stable report", async () => {
+  it("should discard diagnostics for changed content without suppressing the next stable report", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     spyOn(server, "diagnostics")
@@ -370,7 +370,7 @@ describe("LspWorkspace.afterMutation", () => {
     );
   });
 
-  test("should discard superseded feedback without replacing the latest diagnostic fingerprint", async () => {
+  it("should discard superseded feedback without replacing the latest diagnostic fingerprint", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     const started = Promise.withResolvers<void>();
@@ -396,7 +396,7 @@ describe("LspWorkspace.afterMutation", () => {
     expect(await workspace.afterMutation([file], "edit")).toBeUndefined();
   });
 
-  test("should clear diagnostic history and close documents when a deleted file is recreated", async () => {
+  it("should clear diagnostic history and close documents when a deleted file is recreated", async () => {
     const { workspace, server, loaded, stat } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     spyOn(server, "diagnostics").mockResolvedValue({
@@ -421,7 +421,7 @@ describe("LspWorkspace.afterMutation", () => {
     );
   });
 
-  test("should cancel pending feedback and reject later hooks when the workspace is disposed", async () => {
+  it("should cancel pending feedback and reject later hooks when the workspace is disposed", async () => {
     const { workspace, server, loaded } = await fixture();
     loaded.settings.diagnosticsOnEdit = true;
     const started = Promise.withResolvers<void>();
@@ -450,7 +450,7 @@ describe("LspWorkspace.afterMutation", () => {
 });
 
 describe("LspWorkspace.execute", () => {
-  test.each(["definition", "type_definition", "implementation"] as const)(
+  it.each(["definition", "type_definition", "implementation"] as const)(
     "should return a declaration without reference retries when the action is %s",
     async (action) => {
       const { workspace, request } = await fixture();
@@ -469,7 +469,7 @@ describe("LspWorkspace.execute", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["empty", []],
     ["declaration-only", [location()]],
   ])(
@@ -504,7 +504,7 @@ describe("LspWorkspace.execute", () => {
     },
   );
 
-  test("should stop after two retries when references remain empty", async () => {
+  it("should stop after two retries when references remain empty", async () => {
     const { workspace, request } = await fixture();
     const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined);
     request.mockResolvedValue([]);
@@ -520,7 +520,7 @@ describe("LspWorkspace.execute", () => {
     expect(delay).toHaveBeenCalledTimes(2);
   });
 
-  test("should retry twice when a declaration-only response is followed by empty references", async () => {
+  it("should retry twice when a declaration-only response is followed by empty references", async () => {
     const { workspace, request } = await fixture();
     const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined);
     request
@@ -538,7 +538,7 @@ describe("LspWorkspace.execute", () => {
     expect(delay).toHaveBeenCalledTimes(2);
   });
 
-  test("should return references on another line without retrying the requested declaration", async () => {
+  it("should return references on another line without retrying the requested declaration", async () => {
     const { workspace, request } = await fixture();
     const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined);
     request.mockResolvedValue([location(file, 1)]);
@@ -553,7 +553,7 @@ describe("LspWorkspace.execute", () => {
     expect(delay).not.toHaveBeenCalled();
   });
 
-  test("should return linter references without semantic retries when only the declaration is found", async () => {
+  it("should return linter references without semantic retries when only the declaration is found", async () => {
     const { workspace, request, server } = await fixture();
     server.config.isLinter = true;
     const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined);
@@ -569,7 +569,7 @@ describe("LspWorkspace.execute", () => {
     expect(delay).not.toHaveBeenCalled();
   });
 
-  test("should report a failed reference retry without returning the earlier declaration as complete", async () => {
+  it("should report a failed reference retry without returning the earlier declaration as complete", async () => {
     const { workspace, request } = await fixture();
     spyOn(timers, "setTimeout").mockResolvedValue(undefined);
     request
@@ -587,7 +587,7 @@ describe("LspWorkspace.execute", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  test("should stop before sending another reference request when cancellation occurs during retry delay", async () => {
+  it("should stop before sending another reference request when cancellation occurs during retry delay", async () => {
     const { workspace, request } = await fixture();
     const controller = new AbortController();
     spyOn(timers, "setTimeout").mockImplementation(() => {
@@ -605,7 +605,7 @@ describe("LspWorkspace.execute", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  test("should preserve navigation order and bounded cached context when targets are unreadable or oversized", async () => {
+  it("should preserve navigation order and bounded cached context when targets are unreadable or oversized", async () => {
     const { workspace, request, stat } = await fixture();
     const longFile = "/project/long.ts";
     const unavailable = "/project/unavailable.ts";
@@ -662,7 +662,7 @@ describe("LspWorkspace.execute", () => {
     );
   });
 
-  test("should limit reference context reads while reporting the total location count", async () => {
+  it("should limit reference context reads while reporting the total location count", async () => {
     const { workspace, request } = await fixture();
     const reads = spyOn(filesystem, "readFile");
     request.mockResolvedValue(
@@ -685,7 +685,7 @@ describe("LspWorkspace.execute", () => {
     ).toHaveLength(1);
   });
 
-  test("should discard navigation context when cancellation interrupts reading the first target", async () => {
+  it("should discard navigation context when cancellation interrupts reading the first target", async () => {
     const { workspace, request } = await fixture();
     const controller = new AbortController();
     const first = "/project/first.ts";
@@ -706,7 +706,7 @@ describe("LspWorkspace.execute", () => {
     expect(reads.mock.calls.some(([target]) => target === second)).toBe(false);
   });
 
-  test("should synchronize a raw-request file and derive its resolved document position when no payload is supplied", async () => {
+  it("should synchronize a raw-request file and derive its resolved document position when no payload is supplied", async () => {
     const { workspace, request, server } = await fixture();
     request.mockResolvedValue({ accepted: true });
     const result = await workspace.execute({
@@ -733,7 +733,7 @@ describe("LspWorkspace.execute", () => {
     expect(result.text).toContain('"accepted": true');
   });
 
-  test("should abort a file rename without requesting later edits when servers disagree about snapshots", async () => {
+  it("should abort a file rename without requesting later edits when servers disagree about snapshots", async () => {
     const { workspace, request, server, loaded, stat, content } =
       await fixture();
     const destination = "/project/moved.ts";
@@ -781,7 +781,7 @@ describe("LspWorkspace.execute", () => {
     expect(content()).toBe(original);
   });
 
-  test("should preview a file rename when server snapshots agree on content despite different document versions", async () => {
+  it("should preview a file rename when server snapshots agree on content despite different document versions", async () => {
     const { workspace, request, server, loaded, stat, content } =
       await fixture();
     const destination = "/project/moved.ts";
@@ -868,7 +868,7 @@ describe("LspWorkspace.execute", () => {
     },
     command: { title: "Invalid command", command: 42 },
   };
-  test.each([
+  it.each([
     ["initial", [invalidAction]],
     ["resolved", [{ title: "Change value", data: {} }]],
   ] as const)(
@@ -891,7 +891,7 @@ describe("LspWorkspace.execute", () => {
     },
   );
 
-  test("should report committed edits when a resolved code-action command fails", async () => {
+  it("should report committed edits when a resolved code-action command fails", async () => {
     const { workspace, request, content } = await fixture();
     const action = {
       ...invalidAction,
@@ -917,7 +917,7 @@ describe("LspWorkspace.execute", () => {
     expect(result.text).toContain("server rejected command");
   });
 
-  test("should reject stale edits to files opened before a later rename synchronization fails", async () => {
+  it("should reject stale edits to files opened before a later rename synchronization fails", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "lsp-rename-tracking-"));
     const source = join(root, "source");
     const destination = join(root, "renamed");

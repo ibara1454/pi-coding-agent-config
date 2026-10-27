@@ -4,8 +4,8 @@ import {
   beforeEach,
   describe,
   expect,
+  it,
   mock,
-  test,
 } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -180,7 +180,7 @@ afterAll(() => {
 });
 
 describe("sandbox", () => {
-  test("should recursively apply project values over global values when project is trusted", async () => {
+  it("should recursively apply project values over global values when project is trusted", async () => {
     const { cwd } = await createConfigFiles(
       {
         filesystem: { allowWrite: ["global-write"] },
@@ -218,7 +218,7 @@ describe("sandbox", () => {
     await harness.shutdown(context);
   });
 
-  test("should reject session start when config JSON is malformed", async () => {
+  it("should reject session start when config JSON is malformed", async () => {
     const { cwd } = await createConfigFiles();
     await fs.writeFile(path.join(agentDir, "sandbox.json"), "{");
     const { context } = createContext(cwd);
@@ -228,7 +228,7 @@ describe("sandbox", () => {
     expect(initializeCalls).toHaveLength(0);
   });
 
-  test("should report reset failures during shutdown", async () => {
+  it("should report reset failures during shutdown", async () => {
     const { cwd } = await createConfigFiles();
     const { context, notifications } = createContext(cwd);
     const harness = createHarness();
@@ -247,7 +247,7 @@ describe("sandbox", () => {
     ).toBe(true);
   });
 
-  test("should reset owned runtime once when shutdown repeats", async () => {
+  it("should reset owned runtime once when shutdown repeats", async () => {
     const { cwd } = await createConfigFiles();
     const { context } = createContext(cwd);
     const harness = createHarness();

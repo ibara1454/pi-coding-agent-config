@@ -118,6 +118,7 @@
         "useNamingConvention": "error",
         "useAtIndex": "error",
         "useConsistentArrayType": "error",
+        "useConsistentTestIt": "error",
         "useConsistentTypeDefinitions": "error",
         "useDestructuring": "error",
         "useErrorCause": "error",

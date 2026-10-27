@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import process from "node:process";
 import { createGitStatus } from "./git-status.ts";
 
@@ -181,7 +181,7 @@ async function startAndFetch(fixture: Fixture): Promise<void> {
 }
 
 describe("createGitStatus.start", () => {
-  test("should clear values without starting commands when a lifetime starts", async () => {
+  it("should clear values without starting commands when a lifetime starts", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     const previous = fixture.status.snapshot;
@@ -191,7 +191,7 @@ describe("createGitStatus.start", () => {
     expect(fixture.calls).toHaveLength(2);
   });
 
-  test("should discard queued refreshes when a session is replaced before Git starts", async () => {
+  it("should discard queued refreshes when a session is replaced before Git starts", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -217,7 +217,7 @@ describe("createGitStatus.start", () => {
     expect(fixture.status.snapshot.unstaged).toBe(1);
   });
 
-  test("should discard queued PR lookup when a session is replaced after Git publication", async () => {
+  it("should discard queued PR lookup when a session is replaced after Git publication", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -242,7 +242,7 @@ describe("createGitStatus.start", () => {
     expect(fixture.status.snapshot.unstaged).toBe(1);
   });
 
-  test("should abort and join the old Git before accepting refreshes when a session is replaced", async () => {
+  it("should abort and join the old Git before accepting refreshes when a session is replaced", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -277,7 +277,7 @@ describe("createGitStatus.start", () => {
     expect(fixture.input.changes).toBe(2);
   });
 
-  test("should clear PR keys and join old lookup work when serial sessions reuse the owner", async () => {
+  it("should clear PR keys and join old lookup work when serial sessions reuse the owner", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -298,7 +298,7 @@ describe("createGitStatus.start", () => {
 });
 
 describe("createGitStatus.requestRefresh", () => {
-  test("should coalesce synchronous and pending normal requests when Git has not completed", async () => {
+  it("should coalesce synchronous and pending normal requests when Git has not completed", async () => {
     const fixture = createStatus();
     fixture.input.branch = undefined;
     await fixture.status.start();
@@ -320,7 +320,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.status.snapshot.branch).toBe("feature");
   });
 
-  test("should coalesce queued forced and normal requests when no Git job is running", async () => {
+  it("should coalesce queued forced and normal requests when no Git job is running", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     const firstGit = await fixture.command("git");
@@ -343,7 +343,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.status.snapshot.pr).toEqual(FIRST_PR);
   });
 
-  test("should publish independent porcelain counts and bounded commands when Git succeeds", async () => {
+  it("should publish independent porcelain counts and bounded commands when Git succeeds", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -387,7 +387,7 @@ describe("createGitStatus.requestRefresh", () => {
     );
   });
 
-  test("should throttle normal requests until exactly 1000 ms after completion when the cache is fresh", async () => {
+  it("should throttle normal requests until exactly 1000 ms after completion when the cache is fresh", async () => {
     const fixture = createStatus();
     fixture.input.branch = undefined;
     await fixture.status.start();
@@ -404,7 +404,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.calls).toHaveLength(2);
   });
 
-  test("should retain Git values and throttle retries when a command rejects", async () => {
+  it("should retain Git values and throttle retries when a command rejects", async () => {
     const fixture = createStatus();
     fixture.input.branch = undefined;
     await fixture.status.start();
@@ -426,7 +426,7 @@ describe("createGitStatus.requestRefresh", () => {
     await finishGit(fixture, THIRD_GIT_FETCH);
   });
 
-  test("should clear counts and invalidate PR caching when Git exits nonzero", async () => {
+  it("should clear counts and invalidate PR caching when Git exits nonzero", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     fixture.status.invalidate("working-tree");
@@ -441,7 +441,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.status.snapshot.pr).toEqual(SECOND_PR);
   });
 
-  test("should cache the new branch and clear PR and counts when owned Git exits nonzero after a branch change", async () => {
+  it("should cache the new branch and clear PR and counts when owned Git exits nonzero after a branch change", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     const previous = fixture.status.snapshot;
@@ -458,7 +458,7 @@ describe("createGitStatus.requestRefresh", () => {
     );
   });
 
-  test("should cache the new branch and clear stale PR but retain counts when owned Git rejects after a branch change", async () => {
+  it("should cache the new branch and clear stale PR but retain counts when owned Git rejects after a branch change", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     fixture.input.branch = "feature";
@@ -477,7 +477,7 @@ describe("createGitStatus.requestRefresh", () => {
     );
   });
 
-  test("should skip absent contexts without reading branches when refresh is requested", async () => {
+  it("should skip absent contexts without reading branches when refresh is requested", async () => {
     const fixture = createStatus();
     fixture.input.context = undefined;
     await fixture.status.start();
@@ -493,7 +493,7 @@ describe("createGitStatus.requestRefresh", () => {
     await finishPr(fixture);
   });
 
-  test("should skip missing branches and retain the cached branch when the branch provider becomes unavailable", async () => {
+  it("should skip missing branches and retain the cached branch when the branch provider becomes unavailable", async () => {
     const fixture = createStatus();
     fixture.input.branch = undefined;
     await fixture.status.start();
@@ -515,7 +515,7 @@ describe("createGitStatus.requestRefresh", () => {
     );
   });
 
-  test("should keep Git progressive without duplicating lookups when PR remains slow", async () => {
+  it("should keep Git progressive without duplicating lookups when PR remains slow", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -535,7 +535,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.status.snapshot.pr).toEqual(FIRST_PR);
   });
 
-  test.each([
+  it.each([
     { condition: "invalid JSON", result: { code: 0, stdout: "{" } },
     { condition: "a non-object response", result: { code: 0, stdout: "[]" } },
     {
@@ -571,7 +571,7 @@ describe("createGitStatus.requestRefresh", () => {
     },
   );
 
-  test("should hide PR data without retrying its key when optional gh rejects", async () => {
+  it("should hide PR data without retrying its key when optional gh rejects", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -592,7 +592,7 @@ describe("createGitStatus.requestRefresh", () => {
     );
   });
 
-  test.each(["owner", "cwd"] as const)(
+  it.each(["owner", "cwd"] as const)(
     "should reject stale Git success when context %s changes during a command",
     async (field) => {
       const fixture = createStatus();
@@ -616,7 +616,7 @@ describe("createGitStatus.requestRefresh", () => {
     },
   );
 
-  test("should retain retry throttling when an old context command rejects", async () => {
+  it("should retain retry throttling when an old context command rejects", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -631,7 +631,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.status.snapshot).toEqual(EMPTY_SNAPSHOT);
   });
 
-  test.each(["owner", "cwd", "release"] as const)(
+  it.each(["owner", "cwd", "release"] as const)(
     "should reject stale PR success when context %s changes during lookup",
     async (transition) => {
       const fixture = createStatus();
@@ -656,7 +656,7 @@ describe("createGitStatus.requestRefresh", () => {
     },
   );
 
-  test.each(["owner", "cwd"] as const)(
+  it.each(["owner", "cwd"] as const)(
     "should replace PR caching when context %s changes with the same branch",
     async (field) => {
       const fixture = createStatus();
@@ -678,7 +678,7 @@ describe("createGitStatus.requestRefresh", () => {
     },
   );
 
-  test("should abort old PR and replace its key when cwd changes during a slow lookup", async () => {
+  it("should abort old PR and replace its key when cwd changes during a slow lookup", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -701,7 +701,7 @@ describe("createGitStatus.requestRefresh", () => {
     expect(fixture.input.changes).toBe(changes + 1);
   });
 
-  test.each(["context", "branch", "notification"] as const)(
+  it.each(["context", "branch", "notification"] as const)(
     "should recover without leaking rejections when %s callbacks throw",
     async (failurePoint) => {
       let failing = false;
@@ -780,7 +780,7 @@ describe("createGitStatus.requestRefresh", () => {
 });
 
 describe("createGitStatus.invalidate", () => {
-  test.each(["working-tree", "branch", "pending-pr"] as const)(
+  it.each(["working-tree", "branch", "pending-pr"] as const)(
     "should queue one forced follow-up when %s invalidation arrives during Git",
     async (reason) => {
       const fixture = createStatus();
@@ -803,7 +803,7 @@ describe("createGitStatus.invalidate", () => {
     },
   );
 
-  test("should preserve cached PR and stable previous snapshots when only the working tree changes", async () => {
+  it("should preserve cached PR and stable previous snapshots when only the working tree changes", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     const previous = fixture.status.snapshot;
@@ -821,7 +821,7 @@ describe("createGitStatus.invalidate", () => {
     });
   });
 
-  test("should abort old PR and reject late success when branch invalidation replaces its key", async () => {
+  it("should abort old PR and reject late success when branch invalidation replaces its key", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -839,7 +839,7 @@ describe("createGitStatus.invalidate", () => {
     expect(fixture.input.changes).toBe(changes);
   });
 
-  test("should abort old PR when a newer Git refresh discovers an unannounced branch change", async () => {
+  it("should abort old PR when a newer Git refresh discovers an unannounced branch change", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -857,7 +857,7 @@ describe("createGitStatus.invalidate", () => {
     expect(fixture.input.changes).toBe(changes);
   });
 
-  test("should clear stale cached PR immediately and skip gh when the branch becomes detached", async () => {
+  it("should clear stale cached PR immediately and skip gh when the branch becomes detached", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     fixture.input.branch = "detached";
@@ -874,7 +874,7 @@ describe("createGitStatus.invalidate", () => {
     );
   });
 
-  test("should abort pending PR without retrying its key when pending-pr queues forced Git", async () => {
+  it("should abort pending PR without retrying its key when pending-pr queues forced Git", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -892,7 +892,7 @@ describe("createGitStatus.invalidate", () => {
     expect(fixture.input.changes).toBe(2);
   });
 
-  test("should preserve completed PR caching when pending-pr forces Git", async () => {
+  it("should preserve completed PR caching when pending-pr forces Git", async () => {
     const fixture = createStatus();
     await startAndFetch(fixture);
     fixture.status.invalidate("pending-pr");
@@ -905,7 +905,7 @@ describe("createGitStatus.invalidate", () => {
 });
 
 describe("createGitStatus.stop", () => {
-  test.each(["context", "branch"] as const)(
+  it.each(["context", "branch"] as const)(
     "should keep cancelled Git unpublished when the %s provider synchronously stops during publication",
     async (provider) => {
       spyOn(Date, "now").mockReturnValue(START_MS);
@@ -951,7 +951,7 @@ describe("createGitStatus.stop", () => {
     },
   );
 
-  test("should retain the previous snapshot when a PR abort listener synchronously stops rejected Git publication", async () => {
+  it("should retain the previous snapshot when a PR abort listener synchronously stops rejected Git publication", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -982,7 +982,7 @@ describe("createGitStatus.stop", () => {
     ]);
   });
 
-  test("should stop idempotently and ignore requests when the owner is stopped", async () => {
+  it("should stop idempotently and ignore requests when the owner is stopped", async () => {
     const fixture = createStatus();
     fixture.status.requestRefresh();
     fixture.status.invalidate("branch");
@@ -999,7 +999,7 @@ describe("createGitStatus.stop", () => {
     expect(fixture.input.changes).toBe(0);
   });
 
-  test("should cancel queued Git without executing commands when stopped before dispatch", async () => {
+  it("should cancel queued Git without executing commands when stopped before dispatch", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -1018,7 +1018,7 @@ describe("createGitStatus.stop", () => {
     expect(fixture.calls.map((call) => call.command)).toEqual(["git", "gh"]);
   });
 
-  test("should cancel queued PR without changing published Git when stopped before lookup dispatch", async () => {
+  it("should cancel queued PR without changing published Git when stopped before lookup dispatch", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -1034,7 +1034,7 @@ describe("createGitStatus.stop", () => {
     expect(fixture.input.changes).toBe(changes);
   });
 
-  test("should abort both commands and make late successes inert when shutdown joins pending jobs", async () => {
+  it("should abort both commands and make late successes inert when shutdown joins pending jobs", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();
@@ -1063,7 +1063,7 @@ describe("createGitStatus.stop", () => {
     expect(fixture.input.changes).toBe(changes + 2);
   });
 
-  test("should consume late command rejections without notifying when ignored aborts outlive stop", async () => {
+  it("should consume late command rejections without notifying when ignored aborts outlive stop", async () => {
     const fixture = createStatus();
     const unhandled: unknown[] = [];
     const recordUnhandled = (reason: unknown) => {
@@ -1094,7 +1094,7 @@ describe("createGitStatus.stop", () => {
     }
   });
 
-  test("should remove owned abort listeners when command completion and shutdown release resources", async () => {
+  it("should remove owned abort listeners when command completion and shutdown release resources", async () => {
     const fixture = createStatus();
     await fixture.status.start();
     fixture.status.requestRefresh();

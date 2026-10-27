@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import { IntroAnimation, introFrame, RESTING_FRAMES } from "./gradient.ts";
 import { sanitizeInline } from "./terminal.ts";
 
@@ -9,7 +9,7 @@ const TRUECOLOR_ESCAPE_RE = /\x1b\[38;2;\d+;\d+;\d+m/;
 const INDEXED_ESCAPE_RE = /\x1b\[38;5;\d+m/;
 
 describe("introFrame", () => {
-  test.each([
+  it.each([
     { mode: "truecolor" as const, encoding: TRUECOLOR_ESCAPE_RE },
     { mode: "256color" as const, encoding: INDEXED_ESCAPE_RE },
   ])(
@@ -38,7 +38,7 @@ describe("introFrame", () => {
     },
   );
 
-  test.each([{ mode: "truecolor" as const }, { mode: "256color" as const }])(
+  it.each([{ mode: "truecolor" as const }, { mode: "256color" as const }])(
     "should clamp late progress to the resting logo when the terminal uses $mode",
     ({ mode }) => {
       const lateProgress = { elapsed: 2 };
@@ -50,7 +50,7 @@ describe("introFrame", () => {
 });
 
 describe("welcome intro lifecycle", () => {
-  test("should terminate at three seconds and clear the only timer during disposal", () => {
+  it("should terminate at three seconds and clear the only timer during disposal", () => {
     let now = 0;
     let timer: (() => void) | undefined;
     let cleared = 0;
@@ -86,7 +86,7 @@ describe("welcome intro lifecycle", () => {
 });
 
 describe("IntroAnimation.start", () => {
-  test("should reset progress and release replaced timers when an active intro restarts", () => {
+  it("should reset progress and release replaced timers when an active intro restarts", () => {
     const timing = {
       backward: -100,
       midway: 1500,
@@ -148,7 +148,7 @@ describe("IntroAnimation.start", () => {
     expect(clearInterval).toHaveBeenCalledTimes(2);
   });
 
-  test("should use the platform clock and release its interval when a default-clock intro is disposed", () => {
+  it("should use the platform clock and release its interval when a default-clock intro is disposed", () => {
     const startedAt = 100;
     const elapsed = 750;
     const tickMilliseconds = 33;

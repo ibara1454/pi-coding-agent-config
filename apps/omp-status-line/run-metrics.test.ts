@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   activeRunMilliseconds,
   EMPTY_RUN_METRICS,
@@ -23,7 +23,7 @@ const RATED_METRICS = Object.freeze(
 );
 
 describe("updateRunMetrics", () => {
-  test("should open active and stream intervals without mutating state when a run starts", () => {
+  it("should open active and stream intervals without mutating state when a run starts", () => {
     const previous = Object.freeze({ ...EMPTY_RUN_METRICS });
 
     const next = updateRunMetrics(previous, { kind: "start" }, 0);
@@ -37,7 +37,7 @@ describe("updateRunMetrics", () => {
     expect(previous).toEqual(EMPTY_RUN_METRICS);
   });
 
-  test("should retain the active interval and rate but restart stream timing when start repeats", () => {
+  it("should retain the active interval and rate but restart stream timing when start repeats", () => {
     const next = updateRunMetrics(
       RATED_METRICS,
       { kind: "start" },
@@ -59,7 +59,7 @@ describe("updateRunMetrics", () => {
     expect(RATED_METRICS.tokensPerSecond).toBe(10);
   });
 
-  test.each([
+  it.each([
     { output: 20, elapsedMs: 2000, rate: 10 },
     { output: 40, elapsedMs: 5000, rate: 8 },
     { output: 0.5, elapsedMs: 250, rate: 2 },
@@ -77,7 +77,7 @@ describe("updateRunMetrics", () => {
     },
   );
 
-  test.each([
+  it.each([
     { label: "missing", output: undefined },
     // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve rejection coverage for null output from the host.
     { label: "null", output: null },
@@ -98,7 +98,7 @@ describe("updateRunMetrics", () => {
     ).toEqual(RATED_METRICS);
   });
 
-  test.each([
+  it.each([
     { label: "zero", elapsedMs: 0 },
     { label: "negative", elapsedMs: -1 },
   ])(
@@ -114,7 +114,7 @@ describe("updateRunMetrics", () => {
     },
   );
 
-  test("should ignore output when no stream has started", () => {
+  it("should ignore output when no stream has started", () => {
     expect(
       updateRunMetrics(
         EMPTY_RUN_METRICS,
@@ -124,7 +124,7 @@ describe("updateRunMetrics", () => {
     ).toEqual(EMPTY_RUN_METRICS);
   });
 
-  test("should close intervals and retain the rate when a run ends", () => {
+  it("should close intervals and retain the rate when a run ends", () => {
     const ended = updateRunMetrics(
       RATED_METRICS,
       { kind: "end" },
@@ -155,7 +155,7 @@ describe("updateRunMetrics", () => {
     expect(RATED_METRICS.activeStartedAt).toBe(START_TIMESTAMP_MS);
   });
 
-  test("should accumulate only active intervals when a new run follows idle time", () => {
+  it("should accumulate only active intervals when a new run follows idle time", () => {
     const ended = updateRunMetrics(
       RATED_METRICS,
       { kind: "end" },
@@ -176,7 +176,7 @@ describe("updateRunMetrics", () => {
     expect(next.activeMs).toBe(END_ELAPSED_MS + UPDATE_ELAPSED_MS);
   });
 
-  test("should retain signed elapsed time when the clock moves backward before end", () => {
+  it("should retain signed elapsed time when the clock moves backward before end", () => {
     const ended = updateRunMetrics(
       ACTIVE_METRICS,
       { kind: "end" },
@@ -190,13 +190,13 @@ describe("updateRunMetrics", () => {
 });
 
 describe("activeRunMilliseconds", () => {
-  test("should return zero when no run has started", () => {
+  it("should return zero when no run has started", () => {
     expect(activeRunMilliseconds(EMPTY_RUN_METRICS, START_TIMESTAMP_MS)).toBe(
       0,
     );
   });
 
-  test.each([
+  it.each([
     { label: "at start", elapsedMs: 0 },
     { label: "after start", elapsedMs: UPDATE_ELAPSED_MS },
     {
@@ -218,7 +218,7 @@ describe("activeRunMilliseconds", () => {
     },
   );
 
-  test("should return frozen accumulated milliseconds when the agent has ended", () => {
+  it("should return frozen accumulated milliseconds when the agent has ended", () => {
     const ended = updateRunMetrics(
       ACTIVE_METRICS,
       { kind: "end" },
