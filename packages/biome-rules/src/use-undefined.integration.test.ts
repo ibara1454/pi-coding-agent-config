@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { lintRule } from "./test-utils.ts";
 
 const diagnostic = {
@@ -8,7 +8,7 @@ const diagnostic = {
 } as const;
 
 describe("use-undefined", () => {
-  test.each([
+  it.each([
     ["a value initializer", "const value = null;"],
     ["an absence type", "type Value = null;"],
     ["a nullable member", "interface State { value: string | null; }"],
@@ -23,7 +23,7 @@ describe("use-undefined", () => {
     expect(lintRule("use-undefined", source)).toEqual([diagnostic]);
   });
 
-  test.each(["==", "!=", "===", "!=="])(
+  it.each(["==", "!=", "===", "!=="])(
     "should allow null on either side of %s",
     (operator) => {
       expect(
@@ -35,7 +35,7 @@ describe("use-undefined", () => {
     },
   );
 
-  test("should allow parenthesized and nested null checks in boolean results", () => {
+  it("should allow parenthesized and nested null checks in boolean results", () => {
     expect(
       lintRule(
         "use-undefined",
@@ -49,7 +49,7 @@ describe("use-undefined", () => {
     ).toEqual([]);
   });
 
-  test.each([
+  it.each([
     ["an argument", "null === send(null);"],
     ["an object value", "null === { value: null };"],
     ["a fallback", "value === (other ?? null);"],
@@ -59,7 +59,7 @@ describe("use-undefined", () => {
     expect(lintRule("use-undefined", source)).toEqual([diagnostic]);
   });
 
-  test("should allow undefined and null text that is not a literal or type", () => {
+  it("should allow undefined and null text that is not a literal or type", () => {
     expect(
       lintRule(
         "use-undefined",
@@ -76,7 +76,7 @@ describe("use-undefined", () => {
     ).toEqual([]);
   });
 
-  test("should allow a documented protocol exception without suppressing the next value", () => {
+  it("should allow a documented protocol exception without suppressing the next value", () => {
     expect(
       lintRule(
         "use-undefined",
@@ -89,7 +89,7 @@ describe("use-undefined", () => {
     ).toEqual([diagnostic]);
   });
 
-  test("should allow a documented nullable external type", () => {
+  it("should allow a documented nullable external type", () => {
     expect(
       lintRule(
         "use-undefined",

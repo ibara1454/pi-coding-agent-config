@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type { Dirent, PathLike, PathOrFileDescriptor, Stats } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named ESM filesystem imports used by discovery.
 import * as fs from "node:fs";
@@ -115,7 +115,7 @@ const AGENT_DIR = "/unit/agent";
 const PROJECT_DIR = "/unit/project";
 
 describe("getAgentDir", () => {
-  test.each([
+  it.each([
     ["absent", undefined, "/unit/home/.pi/agent"],
     ["empty", "", "/unit/home/.pi/agent"],
     ["home only", "~", "/unit/home"],
@@ -138,7 +138,7 @@ describe("getAgentDir", () => {
 });
 
 describe("effectiveQuietStartup", () => {
-  test.each([
+  it.each([
     ["malformed JSON", "{"],
     ["array JSON", "[]"],
     ["null JSON", "null"],
@@ -156,7 +156,7 @@ describe("effectiveQuietStartup", () => {
     },
   );
 
-  test("should avoid reading project metadata when the project is untrusted", () => {
+  it("should avoid reading project metadata when the project is untrusted", () => {
     mockDiscovery({
       [join(AGENT_DIR, "settings.json")]: '{"quietStartup":true}',
       [join(PROJECT_DIR, ".pi", "settings.json")]: '{"quietStartup":false}',
@@ -171,7 +171,7 @@ describe("effectiveQuietStartup", () => {
 });
 
 describe("collectWelcomeExtensions", () => {
-  test.each([
+  it.each([
     [
       "git:github:team/tool@main",
       "github.com/team/tool",
@@ -230,7 +230,7 @@ describe("collectWelcomeExtensions", () => {
     },
   );
 
-  test.each([
+  it.each([
     "git:invalid",
     "git:example.org/",
     "git:https://example.org/",
@@ -254,7 +254,7 @@ describe("collectWelcomeExtensions", () => {
     },
   );
 
-  test("should traverse manifest globs once and apply exact forced overrides when paths include nested and cyclic links", () => {
+  it("should traverse manifest globs once and apply exact forced overrides when paths include nested and cyclic links", () => {
     const root = join(AGENT_DIR, "npm", "node_modules", "tool");
     const keep = join(root, "extensions", "nested", "a.ts");
     const forced = join(root, "extensions", "forced.ts");
@@ -311,7 +311,7 @@ describe("collectWelcomeExtensions", () => {
     );
   });
 
-  test("should use absolute manifest globs and directory entries while applying manifest-level exclusions", () => {
+  it("should use absolute manifest globs and directory entries while applying manifest-level exclusions", () => {
     const root = join(AGENT_DIR, "npm", "node_modules", "tool");
     mockDiscovery({
       [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
@@ -344,7 +344,7 @@ describe("collectWelcomeExtensions", () => {
     ]);
   });
 
-  test("should honor ordered exact filters when autoload is disabled", () => {
+  it("should honor ordered exact filters when autoload is disabled", () => {
     const root = join(AGENT_DIR, "npm", "node_modules", "tool");
     mockDiscovery({
       [join(AGENT_DIR, "settings.json")]: JSON.stringify({
@@ -376,7 +376,7 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["npm:tool:forced", "npm:tool:normal"]);
   });
 
-  test("should distinguish authoritative package metadata from default convention discovery", () => {
+  it("should distinguish authoritative package metadata from default convention discovery", () => {
     const first = join(AGENT_DIR, "npm", "node_modules", "authoritative");
     const second = join(AGENT_DIR, "npm", "node_modules", "default");
     const third = join(AGENT_DIR, "npm", "node_modules", "convention");
@@ -403,7 +403,7 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["npm:convention:visible", "npm:default:visible"]);
   });
 
-  test("should retain standalone file and directory packages while discarding malformed settings entries", () => {
+  it("should retain standalone file and directory packages while discarding malformed settings entries", () => {
     const standalone = join(AGENT_DIR, "standalone.ts");
     const directory = join(AGENT_DIR, "empty-package");
     mockDiscovery(
@@ -448,7 +448,7 @@ describe("collectWelcomeExtensions", () => {
     ]);
   });
 
-  test("should use the last project package filter when duplicate package identities have different versions", () => {
+  it("should use the last project package filter when duplicate package identities have different versions", () => {
     const root = join(PROJECT_DIR, ".pi", "npm", "node_modules", "tool");
     mockDiscovery({
       [join(PROJECT_DIR, ".pi", "settings.json")]: JSON.stringify({
@@ -478,7 +478,7 @@ describe("collectWelcomeExtensions", () => {
     ]);
   });
 
-  test("should configure directory and file-URL entries while restoring exact auto-discovery exceptions", () => {
+  it("should configure directory and file-URL entries while restoring exact auto-discovery exceptions", () => {
     const extensions = join(AGENT_DIR, "extensions");
     const configured = join(AGENT_DIR, "configured");
     mockDiscovery({
@@ -507,7 +507,7 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["configured", "kept"]);
   });
 
-  test("should honor ignore-rule precedence and tolerate inaccessible discovery paths", () => {
+  it("should honor ignore-rule precedence and tolerate inaccessible discovery paths", () => {
     const extensions = join(AGENT_DIR, "extensions");
     mockDiscovery(
       {
@@ -544,7 +544,7 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["also-kept", "kept", "linked"]);
   });
 
-  test("should disambiguate equal local basenames within a scope", () => {
+  it("should disambiguate equal local basenames within a scope", () => {
     mockDiscovery({
       [join(AGENT_DIR, "settings.json")]:
         '{"extensions":["first/same.ts","second/same.ts"]}',
@@ -560,7 +560,7 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["first/same", "second/same"]);
   });
 
-  test("should skip a package when its previously available root cannot be inspected", () => {
+  it("should skip a package when its previously available root cannot be inspected", () => {
     const root = join(AGENT_DIR, "package");
     mockDiscovery(
       {
@@ -580,7 +580,7 @@ describe("collectWelcomeExtensions", () => {
 });
 
 describe("welcomeSessions", () => {
-  test("should use explicit names, then sanitized prompts, then OMP untitled labels and ages", () => {
+  it("should use explicit names, then sanitized prompts, then OMP untitled labels and ages", () => {
     const now = new Date("2026-08-12T12:00:00.000Z").getTime();
     const named = {
       name: "  Named\nignored",
@@ -609,7 +609,7 @@ describe("welcomeSessions", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     ["just now", "from near future", NEAR_FUTURE_OFFSET_MS],
     [
       "59m ago",

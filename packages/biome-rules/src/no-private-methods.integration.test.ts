@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { lintRule } from "./test-utils.ts";
 
 const invalid = `
@@ -54,7 +54,7 @@ export class Example {
 `;
 
 describe("no-private-methods", () => {
-  test("should reject private method declarations and signatures", () => {
+  it("should reject private method declarations and signatures", () => {
     expect(lintRule("no-private-methods", invalid)).toEqual(
       [
         "méthode",
@@ -72,7 +72,7 @@ describe("no-private-methods", () => {
     );
   });
 
-  test("should allow fields, constructors, and nonprivate methods", () => {
+  it("should allow fields, constructors, and nonprivate methods", () => {
     expect(lintRule("no-private-methods", valid)).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { ExtensionCatalog } from "./catalog.ts";
@@ -130,19 +130,19 @@ function frame(panel: ExtensionManagerPanel, width: number): string {
 }
 
 describe("ExtensionManagerPanel.render", () => {
-  test("should render the default narrow list", () => {
+  it("should render the default narrow list", () => {
     const { panel } = makePanel();
 
     expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render the default wide list beside the inspector", () => {
+  it("should render the default wide list beside the inspector", () => {
     const { panel } = makePanel();
 
     expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render stable search results", () => {
+  it("should render stable search results", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     for (const character of "rev") {
@@ -152,7 +152,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render the focused inspector", () => {
+  it("should render the focused inspector", () => {
     const { panel } = makePanel();
     panel.render(WIDE_PANEL_WIDTH);
     panel.handleInput("\r");
@@ -160,7 +160,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render the close confirmation", () => {
+  it("should render the close confirmation", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput(" ");
@@ -169,7 +169,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render the self-disable warning", () => {
+  it("should render the self-disable warning", () => {
     const selfPath = "/repo/alpha.ts";
     const { panel } = makePanel({
       rows: [catalogRow("alpha", "extension", "Settings", selfPath)],
@@ -181,7 +181,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render discovery diagnostics", () => {
+  it("should render discovery diagnostics", () => {
     const { panel } = makePanel({
       diagnostics: [
         {
@@ -200,7 +200,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(frame(panel, WIDE_PANEL_WIDTH)).toMatchSnapshot();
   });
 
-  test("should render the partial commit error state", async () => {
+  it("should render the partial commit error state", async () => {
     const { panel } = makePanel({
       commit: async () => ({
         scopes: [
@@ -217,7 +217,7 @@ describe("ExtensionManagerPanel.render", () => {
 
     expect(frame(panel, NARROW_PANEL_WIDTH)).toMatchSnapshot();
   });
-  test.each([
+  it.each([
     ["narrow", NARROW_PANEL_WIDTH],
     ["medium", MEDIUM_PANEL_WIDTH],
     ["wide", WIDE_PANEL_WIDTH],
@@ -232,7 +232,7 @@ describe("ExtensionManagerPanel.render", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["narrow", NARROW_PANEL_WIDTH],
     ["wide", WIDE_PANEL_WIDTH],
   ] as const)(
@@ -250,7 +250,7 @@ describe("ExtensionManagerPanel.render", () => {
     },
   );
 
-  test("should leave fullscreen mouse modes unchanged and omit click support", () => {
+  it("should leave fullscreen mouse modes unchanged and omit click support", () => {
     const { panel, writes } = makePanel({ mode: "fullscreen" });
     const lines = panel.render(COMPACT_PANEL_WIDTH);
 
@@ -259,7 +259,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(lines.join("\n")).not.toContain("Click/wheel");
   });
 
-  test("should render the first malformed discovery item instead of only its count", () => {
+  it("should render the first malformed discovery item instead of only its count", () => {
     const { panel } = makePanel({
       diagnostics: [
         {
@@ -275,7 +275,7 @@ describe("ExtensionManagerPanel.render", () => {
     );
   });
 
-  test("should mark rows affected by source diagnostics", () => {
+  it("should mark rows affected by source diagnostics", () => {
     const { panel } = makePanel({
       diagnostics: [
         {
@@ -289,7 +289,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain("alpha [!]");
   });
 
-  test("should sanitize row diagnostics before rendering the inspector", () => {
+  it("should sanitize row diagnostics before rendering the inspector", () => {
     const { panel } = makePanel({
       diagnostics: [
         {
@@ -304,7 +304,7 @@ describe("ExtensionManagerPanel.render", () => {
     expect(rendered).not.toContain("\u001b[31m");
   });
 
-  test("should strip hyperlink escapes from row names instead of rendering them", () => {
+  it("should strip hyperlink escapes from row names instead of rendering them", () => {
     const hyperlink =
       "alpha\u001b]8;;https://example.com\u0007label\u001b]8;;\u0007";
     const { panel } = makePanel({
@@ -333,7 +333,7 @@ describe("ExtensionManagerPanel.render", () => {
 });
 
 describe("ExtensionManagerPanel.dispose", () => {
-  test("should release regular-mode mouse state exactly once", () => {
+  it("should release regular-mode mouse state exactly once", () => {
     const { panel, writes } = makePanel();
     panel.render(COMPACT_PANEL_WIDTH);
 
@@ -344,7 +344,7 @@ describe("ExtensionManagerPanel.dispose", () => {
     expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(1);
   });
 
-  test("should release regular-mode mouse state when discard closes the panel", () => {
+  it("should release regular-mode mouse state when discard closes the panel", () => {
     const commit = mock(
       async (): Promise<CommitResult> => ({
         scopes: [],
@@ -364,7 +364,7 @@ describe("ExtensionManagerPanel.dispose", () => {
 });
 
 describe("ExtensionManagerPanel.handleInput", () => {
-  test("should open narrow details with Enter and return to the list with Escape", () => {
+  it("should open narrow details with Enter and return to the list with Escape", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\r");
@@ -376,7 +376,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain("[x]");
   });
 
-  test("should expand and focus the wide inspector until Escape", () => {
+  it("should expand and focus the wide inspector until Escape", () => {
     const { panel } = makePanel();
     expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).toContain("│");
 
@@ -392,7 +392,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(panel.render(WIDE_PANEL_WIDTH).join("\n")).toContain("│");
   });
 
-  test("should route printable input to search but keep j and k as navigation", () => {
+  it("should route printable input to search but keep j and k as navigation", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
 
@@ -415,7 +415,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(rendered).not.toContain("Search: rev");
   });
 
-  test("should ignore list keys while the inspector is focused", () => {
+  it("should ignore list keys while the inspector is focused", () => {
     const { catalog, panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\r");
@@ -429,7 +429,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(catalog.hasChanges()).toBe(false);
   });
 
-  test("should clear search with Escape before closing", () => {
+  it("should clear search with Escape before closing", () => {
     const { panel, results } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("a");
@@ -443,7 +443,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(results).toEqual([{ type: "closed" }]);
   });
 
-  test("should warn before staging self-disable and stage only on confirmation", () => {
+  it("should warn before staging self-disable and stage only on confirmation", () => {
     const selfPath = "/repo/alpha.ts";
     const { catalog, panel } = makePanel({
       rows: [catalogRow("alpha", "extension", "Settings", selfPath)],
@@ -468,7 +468,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(catalog.view().rows[0]?.configured).toBe(false);
   });
 
-  test("should cancel the close dialog and keep staged changes", () => {
+  it("should cancel the close dialog and keep staged changes", () => {
     const commit = mock(
       async (): Promise<CommitResult> => ({
         scopes: [],
@@ -490,7 +490,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     );
   });
 
-  test("should discard staged changes and close when discard is confirmed", () => {
+  it("should discard staged changes and close when discard is confirmed", () => {
     const commit = mock(
       async (): Promise<CommitResult> => ({
         scopes: [],
@@ -510,7 +510,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  test("should report missing staged changes without calling the committer", () => {
+  it("should report missing staged changes without calling the committer", () => {
     const commit = mock(
       async (): Promise<CommitResult> => ({
         scopes: [],
@@ -533,7 +533,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     ["wide", WIDE_PANEL_WIDTH],
   ];
 
-  test.each(layouts)(
+  it.each(layouts)(
     "should toggle a row on the second regular click in %s layout",
     (_layout: string, width: number) => {
       const { catalog, panel } = makePanel();
@@ -550,7 +550,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     },
   );
 
-  test("should toggle an unselected row on its checkbox click", () => {
+  it("should toggle an unselected row on its checkbox click", () => {
     const { catalog, panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
 
@@ -562,7 +562,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     ).toBe(false);
   });
 
-  test("should switch tabs from a header click", () => {
+  it("should switch tabs from a header click", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
 
@@ -573,7 +573,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(rendered).not.toContain("project-review");
   });
 
-  test("should ignore fullscreen clicks but accept fullscreen wheel input", () => {
+  it("should ignore fullscreen clicks but accept fullscreen wheel input", () => {
     const { catalog, panel } = makePanel({ mode: "fullscreen" });
     panel.render(NARROW_PANEL_WIDTH);
     panel.handleInput("\u001b[<0;3;9M");
@@ -585,7 +585,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     );
   });
 
-  test("should request a render only for handled mouse events", () => {
+  it("should request a render only for handled mouse events", () => {
     const { panel, renders } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
     const before = renders.count;
