@@ -154,5 +154,7 @@ command above. Never edit the lock file or bypass hook trust globally.
 Installation and execution share `CODEX_HOME=/tmp/gh-aw/mcp-config` in the
 existing AWF sandbox mount. A live PR run must show `PONYTAIL MODE ACTIVE` and
 review-skill access inside the sandbox, not just a successful runner install.
-Only local loading has been verified; live AWF verification remains outstanding.
+[Live verification](https://github.com/ibara1454/pi-coding-agent-config/actions/runs/40558618618):
+the sandboxed reviewer read the installed review skill and approved PR #87
+without interactive setup.
 
