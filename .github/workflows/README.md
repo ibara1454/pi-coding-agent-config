@@ -92,3 +92,21 @@ shellcheck validation passed. Actionlint additionally reports eight pre-existing
 compiler-generated references to undeclared admission outputs; they are not
 introduced by these budget settings.
 
+## Code-review ponytail plugin
+
+The reviewer installs the [official ponytail plugin](https://github.com/DietrichGebert/ponytail)
+through gh-aw's pinned `plugins:` entry; no additional secrets or manual setup
+are needed. Keep the generated local marketplace: the upstream marketplace's
+plugin entry follows `main`.
+
+When upgrading ponytail/Codex or reordering `plugins:`, review the bundled hooks
+and refresh `engine.config`'s `hooks.state` keys/hashes using Codex's
+`app-server` → `hooks/list`. Verify enabled/trusted hooks and the enabled
+`ponytail:ponytail-review` skill via `skills/list`, then recompile with the
+command above. Never edit the lock file or bypass hook trust globally.
+
+Installation and execution share `CODEX_HOME=/tmp/gh-aw/mcp-config` in the
+existing AWF sandbox mount. A live PR run must show `PONYTAIL MODE ACTIVE` and
+review-skill access inside the sandbox, not just a successful runner install.
+Only local loading has been verified; live AWF verification remains outstanding.
+
