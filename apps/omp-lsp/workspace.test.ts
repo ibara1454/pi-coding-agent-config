@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type { Stats } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import fs from "node:fs/promises";
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace to intercept configuration-loading effects.
 import * as config from "./config.ts";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies intercept the effect-owning edit transaction boundary.
 import * as edits from "./edits.ts";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies intercept CLI effects without replacing workspace decisions.
+import * as linters from "./linters.ts";
 import type { LanguageServer, LanguageServerPool } from "./runtime.ts";
 import type { LspConfig, ServerConfig } from "./types.ts";
 import { LspWorkspace } from "./workspace.ts";
@@ -16,11 +18,22 @@ const STARTUP_SERVER_COUNT = 5;
 const ACTION_DEADLINE_MS = 5000;
 const MUTATION_DEADLINE_MS = 15_000;
 const MUTATION_RESPONSE_DEADLINE_MS = 16_000;
+const MAX_DIAGNOSTIC_TARGET_FILES = 20;
 const timers: {
   setTimeout: (callback: () => void, delay?: number) => NodeJS.Timeout;
   clearTimeout: (timer: NodeJS.Timeout | undefined) => void;
 } = globalThis;
-const filesystem: { stat: (file: string) => Promise<Stats> } = fs;
+const filesystem: {
+  stat: (file: string) => Promise<Stats>;
+  lstat: (file: string) => Promise<Stats>;
+  opendir: (
+    directory: string,
+  ) => Promise<
+    AsyncIterable<
+      Pick<Dirent, "name" | "isFile" | "isDirectory" | "isSymbolicLink">
+    >
+  >;
+} = fs;
 type PoolFactory = NonNullable<Parameters<typeof LspWorkspace.create>[1]>;
 
 /**
@@ -129,6 +142,19 @@ async function createWorkspace(
   );
   workspaces.push(workspace);
   return workspace;
+}
+
+/**
+ * Supplies one bounded document while keeping workspace validation and protocol handling real.
+ * @param content - UTF-8 source returned by the filesystem boundary.
+ * @example mockDocument("const value = 1;") allows position-based workspace actions.
+ */
+function mockDocument(content = "const value = 1;"): void {
+  spyOn(filesystem, "stat").mockResolvedValue({
+    size: content.length,
+    isFile: () => true,
+  } as Stats);
+  spyOn(fs, "readFile").mockResolvedValue(content);
 }
 
 // Dispose test-owned pools, even when a test assertion fails.
@@ -974,7 +1000,519 @@ describe("LspWorkspace.execute", () => {
       expect(server.notify).not.toHaveBeenCalled();
     },
   );
+
+  it("should describe configured server states without starting disabled, unavailable or on-demand tools", async () => {
+    const { loaded, server, get, pool, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    const { resolvedCommand: _resolvedCommand, ...missing } = server.config;
+    loaded.servers = [
+      { ...server.config, name: "disabled", disabled: true },
+      { ...missing, name: "missing" },
+      { ...server.config, name: "biome" },
+      server.config,
+      { ...server.config, name: "stopped" },
+    ];
+    pool.clients.mockReturnValue([server]);
+    const workspace = await createWorkspace(poolFactory);
+    const status = await workspace.execute({ action: "status" });
+    expect(status.text.split("\n")).toEqual([
+      "LSP: enabled; lazy; session-owned servers",
+      "disabled: disabled; root=/project; command=/installed/test-server",
+      "missing: unavailable (executable not installed); root=/project; command=test-server",
+      "biome: CLI linter (runs on demand); root=/project; command=/installed/test-server",
+      "test-server: running; root=/project; command=/installed/test-server",
+      "stopped: configured, not started; root=/project; command=/installed/test-server",
+    ]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("should retain diagnostic uncertainty and reject ambiguous or disabled action selections", async () => {
+    const { loaded, server, request, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    mockDocument();
+    const diagnostics = spyOn(server, "diagnostics").mockResolvedValue({
+      items: [],
+      freshness: "unversioned",
+    });
+    request.mockResolvedValue([
+      { title: "Fix value", kind: "quickfix", isPreferred: true },
+      { title: "Fix import", disabled: { reason: "Read-only document" } },
+    ]);
+    const workspace = await createWorkspace(poolFactory);
+    const target = {
+      action: "code_actions",
+      file: "sample.ts",
+      symbol: "value",
+    } as const;
+    const list = await workspace.execute({ ...target, query: "quickfix" });
+    expect(list.text).toBe(
+      "2 action(s):\n0: [quickfix] Fix value (preferred)\n1: [action] Fix import (disabled: Read-only document)\nDiagnostic context freshness-unverified from test-server: unversioned diagnostics may be stale.",
+    );
+    const ambiguous = await workspace.execute({
+      ...target,
+      apply: true,
+      query: "fix",
+    });
+    expect(ambiguous.isError).toBe(true);
+    expect(ambiguous.text).toContain('Multiple code actions match "fix"');
+    const disabled = await workspace.execute({
+      ...target,
+      apply: true,
+      query: "1",
+    });
+    expect(disabled.isError).toBe(true);
+    expect(disabled.text).toContain("Code action disabled: Read-only document");
+    diagnostics.mockRejectedValueOnce(new Error("diagnostics disconnected"));
+    // biome-ignore lint/plugin/biome-rules/use-undefined: An LSP action request may return null.
+    request.mockResolvedValue(null);
+    const unavailable = await workspace.execute(target);
+    expect(unavailable.isError).toBe(true);
+    expect(unavailable.text).toBe(
+      "No code actions available\nDiagnostic context unavailable: diagnostics disconnected",
+    );
+    expect(
+      request.mock.calls.every(
+        ([method]) => method === "textDocument/codeAction",
+      ),
+    ).toBe(true);
+  });
+
+  it("should follow committed rename chains and suppress commands when reconciliation later fails", async () => {
+    const { loaded, server, pool, request, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    mockDocument();
+    const source = "/project/sample.ts";
+    const intermediate = "/project/intermediate.ts";
+    const final = "/project/final.py";
+    const doomed = "/project/doomed.ts";
+    const gone = "/project/gone.py";
+    const created = "/project/created.ts";
+    server.document = (file) =>
+      [source, doomed].includes(file)
+        ? { version: 1, content: "const value = 1;" }
+        : undefined;
+    pool.clients.mockReturnValue([server]);
+    spyOn(edits, "applyWorkspaceEdit").mockImplementation(async () => ({
+      applied: true,
+      summary: ["Committed document changes"],
+      changes: [
+        {
+          kind: "rename",
+          file: source,
+          newFile: intermediate,
+          files: [source],
+        },
+        {
+          kind: "rename",
+          file: intermediate,
+          newFile: final,
+          files: [intermediate],
+          removedFiles: [final],
+        },
+        { kind: "rename", file: doomed, newFile: gone, files: [doomed] },
+        { kind: "delete", file: gone, files: [gone] },
+        { kind: "create", file: created, files: [created] },
+      ],
+    }));
+    request.mockResolvedValue([
+      {
+        title: "Move documents",
+        edit: {},
+        command: { title: "Refresh", command: "test.refresh" },
+      },
+    ]);
+    const workspace = await createWorkspace(poolFactory);
+    const target = {
+      action: "code_actions",
+      file: source,
+      symbol: "value",
+      apply: true,
+      query: "0",
+    } as const;
+    const committed = await workspace.execute(target);
+    expect(committed.isError).not.toBe(true);
+    for (const removed of [source, intermediate, doomed, gone]) {
+      expect(server.closeFile).toHaveBeenCalledWith(removed);
+      expect(server.saved).not.toHaveBeenCalledWith(removed);
+    }
+    expect(server.saved).toHaveBeenCalledWith(final);
+    expect(server.saved).toHaveBeenCalledWith(created);
+    expect(server.notify).toHaveBeenCalledWith(
+      "workspace/didChangeWatchedFiles",
+      {
+        changes: [
+          ...[source, intermediate, doomed, gone].map((file) => ({
+            uri: edits.fileToUri(file),
+            type: 3,
+          })),
+          ...[final, created].map((file) => ({
+            uri: edits.fileToUri(file),
+            type: 1,
+          })),
+        ],
+      },
+    );
+    expect(committed.text).toContain("Executed command: test.refresh");
+    const commands = request.mock.calls.filter(
+      ([method]) => method === "workspace/executeCommand",
+    ).length;
+    spyOn(server, "saved").mockRejectedValue(
+      new Error("save notification failed"),
+    );
+    const failed = await workspace.execute(target);
+    expect(failed.isError).toBe(true);
+    expect(failed.text).toContain(
+      'Code action "Move documents" failed:\nCommitted document changes',
+    );
+    expect(failed.text).toContain(
+      "Filesystem changes committed, but server synchronization failed:\ntest-server: save notification failed",
+    );
+    expect(
+      request.mock.calls.filter(
+        ([method]) => method === "workspace/executeCommand",
+      ),
+    ).toHaveLength(commands);
+  });
+
+  registerDocumentActionTests();
 });
+
+/**
+ * Registers direct action cases without moving baseline workspace tests.
+ * @example describe("LspWorkspace.execute", registerDocumentActionTests);
+ */
+function registerDocumentActionTests(): void {
+  describe("document results", () => {
+    const outputLimit = 60_000;
+    it.each([
+      [
+        "oversized hover text",
+        "hover",
+        { contents: "x".repeat(outputLimit + 1) },
+        `${"x".repeat(outputLimit)}\n…output truncated at 60000 characters…`,
+      ],
+      // biome-ignore lint/plugin/biome-rules/use-undefined: The LSP hover response may be null.
+      ["missing hover information", "hover", null, "No hover information"],
+      ["empty document symbols", "symbols", [], "No symbols found"],
+    ] as const)(
+      "should bound or explain %s",
+      async (_condition, action, response, text) => {
+        const { loaded, request, poolFactory } = fixture();
+        loaded.settings.lazy = true;
+        mockDocument();
+        request.mockResolvedValue(response);
+        const workspace = await createWorkspace(poolFactory);
+        const result = await workspace.execute({ action, file: "sample.ts" });
+        expect(result.isError).not.toBe(true);
+        expect(result.text).toBe(text);
+      },
+    );
+
+    it("should limit document-symbol output and explain omitted matches", async () => {
+      const { loaded, request, poolFactory } = fixture();
+      loaded.settings.lazy = true;
+      mockDocument();
+      const symbolLimit = 200;
+      const range = {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 5 },
+      };
+      request.mockResolvedValue(
+        Array.from({ length: symbolLimit + 1 }, (_, index) => ({
+          name: `symbol${index}`,
+          kind: 13,
+          range,
+          selectionRange: range,
+        })),
+      );
+      const workspace = await createWorkspace(poolFactory);
+
+      const result = await workspace.execute({
+        action: "symbols",
+        file: "sample.ts",
+      });
+
+      expect(result.text).toContain(`symbol${symbolLimit - 1} `);
+      expect(result.text).not.toContain(`symbol${symbolLimit} `);
+      expect(result.text).toContain("…1 symbols elided…");
+    });
+
+    it("should render raw results and attribute request failures without opening an unspecified document", async () => {
+      const { loaded, server, request, poolFactory } = fixture();
+      loaded.settings.lazy = true;
+      const workspace = await createWorkspace(poolFactory);
+      const target = { action: "request", query: "test/state" } as const;
+      const empty = await workspace.execute(target);
+      expect(empty.text).toBe("test-server ← test/state:\nnull");
+      expect(server.syncFile).not.toHaveBeenCalled();
+      const invalid = await workspace.execute({ ...target, payload: "{" });
+      expect(invalid.isError).toBe(true);
+      expect(invalid.text).toContain("Invalid JSON in payload");
+      request.mockRejectedValue(new Error("permission denied"));
+      const failed = await workspace.execute({
+        ...target,
+        payload: '{"key":"value"}',
+      });
+      expect(failed.isError).toBe(true);
+      expect(failed.text).toBe(
+        'LSP error from test-server on test/state: permission denied\n  params: {"key":"value"}',
+      );
+      expect(failed.details).toMatchObject({
+        serverName: "test-server",
+        success: false,
+      });
+    });
+  });
+
+  describe("rename_file", () => {
+    it("should combine annotated references and resource edits while retaining unavailable-peer notes and rejecting changed sources", async () => {
+      const { loaded, server, get, request, poolFactory } = fixture();
+      loaded.settings.lazy = true;
+      mockDocument();
+      const source = "/project/source";
+      const destination = "/project/moved";
+      const file = `${source}/a.ts`;
+      const uri = edits.fileToUri(file);
+      const sidecar = {
+        kind: "create",
+        uri: "file:///project/sidecar.ts",
+        annotationId: "sidecar",
+      };
+      const reference = {
+        range: {
+          start: { line: 0, character: 6 },
+          end: { line: 0, character: 11 },
+        },
+        newText: "renamed",
+        annotationId: "reference",
+      };
+      spyOn(filesystem, "lstat").mockImplementation((candidatePath) =>
+        candidatePath === destination
+          ? Promise.reject(
+              Object.assign(new Error("missing"), { code: "ENOENT" }),
+            )
+          : Promise.resolve({ isDirectory: () => true } as Stats),
+      );
+      const discovery = spyOn(edits, "directoryFiles").mockResolvedValue([
+        file,
+        `${source}/notes.py`,
+      ]);
+      server.document = (documentFile) =>
+        documentFile === file
+          ? { version: 1, content: "const value = 1;" }
+          : undefined;
+      request.mockResolvedValue({
+        changeAnnotations: {
+          reference: { label: "Update import" },
+          sidecar: { label: "Create sidecar" },
+        },
+        documentChanges: [
+          {
+            textDocument: { uri, version: 1 },
+            edits: [reference],
+          },
+          sidecar,
+          {
+            textDocument: { uri, version: 1 },
+            edits: [{ ...reference, newText: "later" }],
+          },
+        ],
+      });
+      loaded.servers.push(
+        { ...server.config, name: "unavailable" },
+        { ...server.config, name: "unsupported" },
+      );
+      get.mockImplementation((selected) => {
+        if (selected.name === "unavailable") {
+          return Promise.reject(new Error("executable missing"));
+        }
+        return Promise.resolve(
+          selected.name === "unsupported"
+            ? {
+                ...server,
+                config: selected,
+                request: mock<LanguageServer["request"]>().mockRejectedValue({
+                  code: -32_601,
+                }) as LanguageServer["request"],
+              }
+            : server,
+        );
+      });
+      const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
+        applied: true,
+        summary: [],
+        changes: [],
+      });
+      const workspace = await createWorkspace(poolFactory);
+      const target = {
+        action: "rename_file",
+        file: source,
+        // biome-ignore lint/style/useNamingConvention: LSP tool schema preserves the external new_name argument.
+        new_name: destination,
+        apply: false,
+      } as const;
+      const preview = await workspace.execute(target);
+      expect(preview.isError).not.toBe(true);
+      expect(preview.text).toContain(
+        "Rename preview: /project/source → /project/moved (2 file(s))",
+      );
+      expect(preview.text).toContain(
+        "unavailable: failed to start: executable missing",
+      );
+      expect(preview.text).toContain(
+        "unsupported: willRenameFiles is not supported",
+      );
+      expect(transaction.mock.calls.at(-1)?.[0]).toEqual({
+        documentChanges: [
+          {
+            // biome-ignore lint/plugin/biome-rules/use-undefined: Aggregated reference edits are unversioned.
+            textDocument: { uri, version: null },
+            edits: [{ ...reference, annotationId: "test-server:reference" }],
+          },
+          { ...sidecar, annotationId: "test-server:sidecar" },
+          {
+            // biome-ignore lint/plugin/biome-rules/use-undefined: Aggregated reference edits are unversioned.
+            textDocument: { uri, version: null },
+            edits: [
+              {
+                ...reference,
+                newText: "later",
+                annotationId: "test-server:reference",
+              },
+            ],
+          },
+          {
+            kind: "rename",
+            oldUri: edits.fileToUri(source),
+            newUri: edits.fileToUri(destination),
+          },
+        ],
+        changeAnnotations: {
+          "test-server:reference": { label: "Update import" },
+          "test-server:sidecar": { label: "Create sidecar" },
+        },
+      });
+      expect(server.syncFile).not.toHaveBeenCalledWith(
+        `${source}/notes.py`,
+        expect.anything(),
+        expect.anything(),
+      );
+      discovery
+        .mockResolvedValueOnce([file])
+        .mockResolvedValue([file, `${source}/new.ts`]);
+      const before = transaction.mock.calls.length;
+      const changed = await workspace.execute(target);
+      expect(changed.isError).toBe(true);
+      expect(changed.text).toContain(
+        "Directory contents changed while computing rename references; no files moved",
+      );
+      expect(transaction).toHaveBeenCalledTimes(before + 1);
+      discovery.mockResolvedValue([file]);
+      transaction.mockResolvedValueOnce({
+        applied: false,
+        summary: [],
+        changes: [],
+        failureReason: "stale references",
+      });
+      const stale = await workspace.execute(target);
+      expect(stale.isError).toBe(true);
+      expect(stale.text).toContain(
+        "Aborted rename: workspace/willRenameFiles failed. No files moved.",
+      );
+      expect(stale.text).toContain("test-server: stale references");
+      expect(stale.text).toContain("Server notes:");
+      expect(transaction).toHaveBeenCalledTimes(before + 2);
+    });
+  });
+
+  describe("diagnostics", () => {
+    it("should bound selected files and combine CLI findings with source failures without treating an unmatched or unknown workspace as clean", async () => {
+      const { loaded, server, get, poolFactory } = fixture();
+      loaded.settings.lazy = true;
+      loaded.servers.push(
+        { ...server.config, name: "biome" },
+        { ...server.config, name: "disconnected" },
+      );
+      get.mockImplementation((candidate) =>
+        candidate.name === "disconnected"
+          ? Promise.reject(new Error("transport closed"))
+          : Promise.resolve(server),
+      );
+      mockDocument();
+      spyOn(filesystem, "stat").mockImplementation((file) =>
+        file.includes("*")
+          ? Promise.reject(
+              Object.assign(new Error("missing"), { code: "ENOENT" }),
+            )
+          : Promise.resolve({ isFile: () => true, size: 16 } as Stats),
+      );
+      const entries = Array.from(
+        { length: MAX_DIAGNOSTIC_TARGET_FILES + 1 },
+        (_, index) => ({
+          name: `sample-${index}.ts`,
+          isFile: () => true,
+          isDirectory: () => false,
+          isSymbolicLink: () => false,
+        }),
+      );
+      spyOn(filesystem, "opendir").mockResolvedValue({
+        [Symbol.asyncIterator]: () => {
+          const iterator = entries.values();
+          return { next: () => Promise.resolve(iterator.next()) };
+        },
+      });
+      const lint = spyOn(linters, "lintWithCli").mockResolvedValue([
+        {
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 0, character: 1 },
+          },
+          severity: 2,
+          message: "unused value",
+        },
+      ]);
+      const workspace = await createWorkspace(poolFactory);
+      const selected = await workspace.execute({
+        action: "diagnostics",
+        file: "*.ts",
+      });
+      expect(selected.isError).not.toBe(true);
+      expect(
+        selected.text.match(/sample-\d+\.ts: 0 error\(s\), 1 warning\(s\)/g),
+      ).toHaveLength(MAX_DIAGNOSTIC_TARGET_FILES);
+      expect(selected.text).not.toContain("sample-20.ts");
+      expect(selected.text).toContain(
+        "diagnostics limited to 20 matched files; narrow the glob",
+      );
+      expect(selected.text).toContain(
+        "Server failures:\ndisconnected: transport closed",
+      );
+      expect(lint).toHaveBeenCalledTimes(MAX_DIAGNOSTIC_TARGET_FILES);
+      const acquisitions = get.mock.calls.length;
+      const unmatched = await workspace.execute({
+        action: "diagnostics",
+        file: "*.py",
+      });
+      expect(unmatched.text).toBe("No files matched pattern: *.py");
+      expect(get).toHaveBeenCalledTimes(acquisitions);
+      spyOn(fs, "access").mockRejectedValue(
+        Object.assign(new Error("missing marker"), { code: "ENOENT" }),
+      );
+      const unknown = await workspace.execute({
+        action: "diagnostics",
+        file: "*",
+      });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.text).toContain("Cannot detect project type");
+      expect(unknown.text).toContain("Workspace was not verified");
+      expect(unknown.details).toMatchObject({
+        action: "diagnostics",
+        request: { action: "diagnostics", file: "*" },
+        success: false,
+      });
+    });
+  });
+}
 
 describe("LspWorkspace.afterMutation", () => {
   it("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
@@ -1009,6 +1547,135 @@ describe("LspWorkspace.afterMutation", () => {
       await workspace.dispose();
     }
     expect(clear).toHaveBeenCalledWith(timerHandle);
+  });
+
+  it("should skip unchanged CLI formatting and report guarded-application failures without reversing the host write", async () => {
+    const { loaded, server, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    loaded.settings.formatOnWrite = true;
+    loaded.servers = [{ ...server.config, name: "biome" }];
+    const original = "const value = 1;";
+    mockDocument(original);
+    const format = spyOn(linters, "formatWithCli").mockResolvedValue(original);
+    const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
+      applied: true,
+      summary: [],
+      changes: [],
+    });
+    const workspace = await createWorkspace(poolFactory);
+    expect(
+      await workspace.afterMutation(["sample.ts"], "write"),
+    ).toBeUndefined();
+    expect(transaction).not.toHaveBeenCalled();
+    format.mockResolvedValue("const value = 2;");
+    expect((await workspace.afterMutation(["sample.ts"], "write"))?.text).toBe(
+      "Formatted sample.ts with biome",
+    );
+    expect(transaction.mock.calls[0]?.[0]).toEqual({
+      changes: {
+        "file:///project/sample.ts": [
+          {
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: 0, character: original.length },
+            },
+            newText: "const value = 2;",
+          },
+        ],
+      },
+    });
+    transaction.mockResolvedValue({
+      applied: false,
+      summary: [],
+      changes: [],
+      failureReason: "host wrote newer content",
+    });
+    const failed = await workspace.afterMutation(["sample.ts"], "write");
+    expect(failed?.text).toBe("Formatting failed: host wrote newer content");
+    expect(failed?.isError).not.toBe(true);
+    expect(failed?.details).toEqual({
+      action: "afterMutation",
+      source: "write",
+    });
+  });
+
+  it("should select a capable formatter and discard unavailable, empty or stale formatting feedback", async () => {
+    const { loaded, server, get, request, poolFactory } = fixture();
+    loaded.settings.lazy = true;
+    loaded.settings.formatOnWrite = true;
+    const incapable = {
+      ...server,
+      config: { ...server.config, name: "no-formatter" },
+      capabilities: {},
+    };
+    loaded.servers.unshift(incapable.config);
+    get.mockImplementation((selected) =>
+      Promise.resolve(
+        selected.name === incapable.config.name ? incapable : server,
+      ),
+    );
+    server.capabilities.documentFormattingProvider = true;
+    mockDocument();
+    server.document = () => ({ version: 1, content: "const value = 1;" });
+    const transaction = spyOn(edits, "applyWorkspaceEdit").mockResolvedValue({
+      applied: true,
+      summary: [],
+      changes: [],
+    });
+    const workspace = await createWorkspace(poolFactory);
+    expect(
+      await workspace.afterMutation(["sample.ts"], "write"),
+    ).toBeUndefined();
+    expect(transaction).not.toHaveBeenCalled();
+    request.mockResolvedValue([]);
+    expect(
+      await workspace.afterMutation(["sample.ts"], "write"),
+    ).toBeUndefined();
+    request.mockResolvedValue([
+      {
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 16 },
+        },
+        newText: "const value = 2;",
+      },
+    ]);
+    transaction.mockResolvedValue({
+      applied: true,
+      summary: [],
+      changes: [
+        {
+          kind: "edit",
+          file: "/project/sample.ts",
+          files: ["/project/sample.ts"],
+        },
+      ],
+    });
+    expect((await workspace.afterMutation(["sample.ts"], "write"))?.text).toBe(
+      "Formatted sample.ts with test-server",
+    );
+    transaction.mockResolvedValue({
+      applied: false,
+      summary: [],
+      changes: [],
+      failureReason: "stale formatter response",
+    });
+    expect((await workspace.afterMutation(["sample.ts"], "write"))?.text).toBe(
+      "Formatting failed: stale formatter response",
+    );
+    server.capabilities.documentFormattingProvider = false;
+    expect((await workspace.afterMutation(["sample.ts"], "write"))?.text).toBe(
+      "Formatting unavailable: no matching formatting-capable server is installed",
+    );
+    server.capabilities.documentFormattingProvider = true;
+    spyOn(fs, "readFile")
+      .mockResolvedValueOnce("const value = 1;")
+      .mockResolvedValue("newer");
+    const requests = request.mock.calls.length;
+    expect((await workspace.afterMutation(["sample.ts"], "write"))?.text).toBe(
+      "Formatting failed: File changed before formatting; stale formatter result discarded",
+    );
+    expect(request).toHaveBeenCalledTimes(requests);
   });
 });
 

@@ -441,6 +441,69 @@ describe("ExtensionCatalog.discard", () => {
 });
 
 describe("ExtensionCatalog.inspect", () => {
+  it.each([
+    {
+      label: "an autoload-disabled package is explicitly enabled",
+      autoloadDelta: true,
+      configured: false,
+      filters: [],
+      desired: true,
+      expectedFilters: ["+extensions/shared.ts"],
+      reason:
+        "Enabled by last matching autoload:false filter `+extensions/shared.ts`",
+    },
+    {
+      label: "the sole package exclusion is removed",
+      autoloadDelta: false,
+      configured: false,
+      filters: ["-extensions/shared.ts"],
+      desired: true,
+      expectedFilters: [],
+      reason: "Enabled by package autoload: no kind filter is configured",
+    },
+    {
+      label: "the sole package inclusion is removed",
+      autoloadDelta: false,
+      configured: true,
+      filters: ["extensions/shared.ts"],
+      desired: false,
+      expectedFilters: [],
+      reason: "Disabled by explicit empty package filter",
+    },
+  ])("should explain staged package filters when $label", (scenario) => {
+    const packagePath = "/global/pkg/extensions/shared.ts";
+    const catalog = catalogFor(
+      [
+        {
+          ...row("package", "global", scenario.configured),
+          path: packagePath,
+          canonicalPath: packagePath,
+          filters: scenario.filters,
+        },
+      ],
+      new Map([
+        [
+          "package",
+          {
+            ...packageTarget("package", "global", {
+              canonicalPath: packagePath,
+              autoloadDelta: scenario.autoloadDelta,
+            }),
+            hadFilterField: true,
+          },
+        ],
+      ]),
+    );
+
+    catalog.stage("package", scenario.desired);
+
+    expect(catalog.inspect("package")?.row).toMatchObject({
+      configured: scenario.desired,
+      filters: scenario.expectedFilters,
+      configurationReason: scenario.reason,
+    });
+  });
+
   it("should return configured and resolved provenance", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
 

@@ -5,11 +5,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
+
+// Capture the pure estimator before Bun replaces live host-module exports.
+const realEstimateTokens = estimateTokens;
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
   // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
-  estimateTokens: () => 0,
+  estimateTokens: realEstimateTokens,
 }));
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -589,15 +593,31 @@ describe("ompStatusLine", () => {
     "should render the replacement context and invalidate the UI when %s fires",
     async (event) => {
       const fixture = await createRenderedFixture({
-        leftSegments: ["model"],
+        leftSegments: ["model", "context_pct"],
       });
+      const replacementContextWindow = 100;
       try {
         expect(fixture.top()).toContain("Test");
+        expect(fixture.top()).toContain("6.9%/272K");
         const nextContext = {
           ...fixture.harness.context,
           model: {
             ...fixture.harness.context.model,
             name: "Replacement",
+            contextWindow: replacementContextWindow,
+          },
+          getContextUsage: () => undefined,
+          getSystemPrompt: () => "context",
+          sessionManager: {
+            ...fixture.harness.context.sessionManager,
+            getBranch: () => [{ type: "compaction" }],
+            buildContextEntries: () => [
+              {
+                type: "message",
+                message: { role: "user", content: "Continue" },
+              },
+              { type: "compaction", summary: "Gist" },
+            ],
           },
         };
         fixture.requestRender.mockClear();
@@ -606,6 +626,7 @@ describe("ompStatusLine", () => {
 
         expect(fixture.requestRender).toHaveBeenCalledTimes(1);
         expect(fixture.top()).toContain("Replacement");
+        expect(fixture.top()).toContain("5.0%/100");
         expect(fixture.top()).not.toContain("Test");
       } finally {
         await fixture.cleanup();

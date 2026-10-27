@@ -34,7 +34,7 @@ checkout:
     fetch-depth: 0
 runtimes:
     bun:
-        version: "1.4.3"
+        version: "1.4.4"
 plugins:
     # Official ponytail v5.3.2; keep hook trust below aligned with this revision.
     - DietrichGebert/ponytail@16352ac229eb08a9598dcae48fe9f2b342567d86

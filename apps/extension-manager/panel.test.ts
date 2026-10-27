@@ -15,6 +15,7 @@ const MEDIUM_PANEL_WIDTH = 100;
 const WIDE_PANEL_WIDTH = 120;
 const COMPACT_PANEL_WIDTH = 80;
 const PANEL_ROW_COUNT = 18;
+const OVERFLOWING_MOUSE_COORDINATE_DIGITS = 400;
 const openPanels: ExtensionManagerPanel[] = [];
 
 afterEach(() => {
@@ -364,6 +365,28 @@ describe("ExtensionManagerPanel.dispose", () => {
 });
 
 describe("ExtensionManagerPanel.handleInput", () => {
+  it.each([
+    ["a malformed mouse report", "\u001b[<0;3;9X"],
+    [
+      "an overflowing mouse coordinate",
+      `\u001b[<0;${"9".repeat(OVERFLOWING_MOUSE_COORDINATE_DIGITS)};9M`,
+    ],
+    ["an empty input event", ""],
+    ["a pasted control character", "alpha\u0001"],
+  ])(
+    "should preserve search and configuration when receiving %s",
+    (_label, input) => {
+      const { catalog, panel, results } = makePanel();
+      const before = panel.render(NARROW_PANEL_WIDTH);
+
+      panel.handleInput(input);
+
+      expect(panel.render(NARROW_PANEL_WIDTH)).toEqual(before);
+      expect(catalog.hasChanges()).toBe(false);
+      expect(results).toEqual([]);
+    },
+  );
+
   it("should open narrow details with Enter and return to the list with Escape", () => {
     const { panel } = makePanel();
     panel.render(NARROW_PANEL_WIDTH);
