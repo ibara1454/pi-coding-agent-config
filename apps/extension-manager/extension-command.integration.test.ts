@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import type {
   ExtensionCommandContext,
   ExtensionHandler,
@@ -151,7 +151,7 @@ function commandHost(options: {
 }
 
 describe("registerExtensionManager", () => {
-  test("should register the extensions command and session shutdown handler", () => {
+  it("should register the extensions command and session shutdown handler", () => {
     const pi = piHarness(runtimeAdapter());
 
     expect(pi.commands).toHaveLength(1);
@@ -162,7 +162,7 @@ describe("registerExtensionManager", () => {
     expect(pi.events).toContain("session_shutdown");
   });
 
-  test.each(["rpc", "json", "print"] as const)(
+  it.each(["rpc", "json", "print"] as const)(
     "should warn without waiting for idle or discovering in %s mode",
     async (mode) => {
       const trace: string[] = [];
@@ -183,7 +183,7 @@ describe("registerExtensionManager", () => {
     },
   );
 
-  test("should wait for idle before discovery and forward agent dir, cwd, and trust", async () => {
+  it("should wait for idle before discovery and forward agent dir, cwd, and trust", async () => {
     const trace: string[] = [];
     const inputs: DiscoverInput[] = [];
     const pi = piHarness(
@@ -214,7 +214,7 @@ describe("registerExtensionManager", () => {
     ]);
   });
 
-  test("should retry discovery only while the package resolution prompt is accepted", async () => {
+  it("should retry discovery only while the package resolution prompt is accepted", async () => {
     let attempts = 0;
     const openPanel = mock(async () => ({ type: "closed" }) as const);
     const pi = piHarness(
@@ -243,7 +243,7 @@ describe("registerExtensionManager", () => {
     expect(host.notifications).toEqual([]);
   });
 
-  test("should not open the panel when the package resolution prompt is closed", async () => {
+  it("should not open the panel when the package resolution prompt is closed", async () => {
     const openPanel = mock(async () => ({ type: "closed" }) as const);
     const pi = piHarness(
       runtimeAdapter({
@@ -260,7 +260,7 @@ describe("registerExtensionManager", () => {
     expect(host.notifications).toEqual([]);
   });
 
-  test.each([
+  it.each([
     ["error instances report their message", new Error("boom"), "boom"],
     [
       "non-error throws are stringified",
@@ -289,7 +289,7 @@ describe("registerExtensionManager", () => {
     },
   );
 
-  test("should build the panel catalog from the discovered seed and runtime committer", async () => {
+  it("should build the panel catalog from the discovered seed and runtime committer", async () => {
     const settings = new Map<ResourceScope, SettingsDocument>();
     const requests: CommitRequest[] = [];
     let opened:
@@ -331,7 +331,7 @@ describe("registerExtensionManager", () => {
     expect(requests[0]?.documents).toBe(settings);
   });
 
-  test("should not notify or mark later discovery pending when panels close", async () => {
+  it("should not notify or mark later discovery pending when panels close", async () => {
     const pending: boolean[] = [];
     const pi = piHarness(
       runtimeAdapter({
@@ -350,7 +350,7 @@ describe("registerExtensionManager", () => {
     expect(host.notifications).toEqual([]);
   });
 
-  test("should warn, request a manual reload, and mark later discovery pending when a commit is partial", async () => {
+  it("should warn, request a manual reload, and mark later discovery pending when a commit is partial", async () => {
     const pending: boolean[] = [];
     let opens = 0;
     const pi = piHarness(
@@ -396,7 +396,7 @@ describe("registerExtensionManager", () => {
     );
   });
 
-  test("should dispose the runtime on session shutdown but not during command runs", async () => {
+  it("should dispose the runtime on session shutdown but not during command runs", async () => {
     const dispose = mock(() => undefined);
     const pi = piHarness(runtimeAdapter({ dispose }));
     const host = commandHost({});

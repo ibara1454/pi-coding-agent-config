@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies intercept live filesystem imports.
 import * as fs from "node:fs/promises";
 import { formatWithCli, lintWithCli } from "./linters.ts";
@@ -112,7 +112,7 @@ const swiftFinding = {
 };
 
 describe("lintWithCli", () => {
-  test("should convert Unicode positions and filter other files when Biome exits with violations", async () => {
+  it("should convert Unicode positions and filter other files when Biome exits with violations", async () => {
     const close = mockSourceFile("\u{1f600}x\r\n");
     const run = spyOn(processes, "runCommand").mockResolvedValue({
       stdout: JSON.stringify({
@@ -146,7 +146,7 @@ describe("lintWithCli", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  test("should use zero-based ranges when SwiftLint omits the column", async () => {
+  it("should use zero-based ranges when SwiftLint omits the column", async () => {
     spyOn(processes, "runCommand").mockResolvedValue({
       stdout: JSON.stringify([
         {
@@ -180,7 +180,7 @@ describe("lintWithCli", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     ["output is malformed", "not json", 0, "invalid or missing JSON"],
     [
       "a failed command reports no findings",
@@ -210,7 +210,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["the end precedes the start", { line: 1, column: 1 }, "reversed"],
     [
       "the line is outside the source",
@@ -237,7 +237,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     [
       "the server is unsupported",
       { ...server, name: "custom" },
@@ -264,7 +264,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["the source is a directory", { regular: false }, "regular source file"],
     ["the source exceeds 8 MiB", { size: 8_388_609 }, "no larger than 8 MiB"],
     ["the source grows after stat", { size: 1 }, "changed while being read"],
@@ -284,7 +284,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test("should close the source and stop before spawning when cancellation occurs during reading", async () => {
+  it("should close the source and stop before spawning when cancellation occurs during reading", async () => {
     const controller = new AbortController();
     const close = mockSourceFile("abc", {
       onRead: () => controller.abort(new Error("cancelled read")),
@@ -297,7 +297,7 @@ describe("lintWithCli", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     ["the JSON root is an array", [], "did not return diagnostics array"],
     [
       "diagnostics is not an array",
@@ -392,7 +392,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["fatal", 1],
     ["error", 1],
     ["INFO", infoSeverity],
@@ -429,7 +429,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["the JSON root is an object", {}, "violations array"],
     [
       "the finding count exceeds the limit",
@@ -482,7 +482,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test("should preserve explicit SwiftLint columns and avoid duplicate quiet flags when configured", async () => {
+  it("should preserve explicit SwiftLint columns and avoid duplicate quiet flags when configured", async () => {
     const run = spyOn(processes, "runCommand").mockResolvedValue({
       stdout: JSON.stringify([
         { ...swiftFinding, line: 2, character: 4, severity: "Error" },
@@ -538,7 +538,7 @@ describe("lintWithCli", () => {
     );
   });
 
-  test.each([-1, 2, unexpectedExitCode])(
+  it.each([-1, 2, unexpectedExitCode])(
     "should reject abnormal Biome exits even with usable diagnostics when exit code is %s",
     async (exitCode) => {
       mockSourceFile("abc");
@@ -553,7 +553,7 @@ describe("lintWithCli", () => {
     },
   );
 
-  test("should surface bounded stderr and retain the parse cause when a command emits no JSON", async () => {
+  it("should surface bounded stderr and retain the parse cause when a command emits no JSON", async () => {
     mockSourceFile("abc");
     spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "",
@@ -572,7 +572,7 @@ describe("lintWithCli", () => {
 });
 
 describe("formatWithCli", () => {
-  test.each(["--write", "--fix=true", "--unsafe"])(
+  it.each(["--write", "--fix=true", "--unsafe"])(
     "should reject file-mutating configuration when %s is supplied",
     async (flag) => {
       const run = spyOn(processes, "runCommand").mockResolvedValue({
@@ -587,7 +587,7 @@ describe("formatWithCli", () => {
     },
   );
 
-  test.each([
+  it.each([
     [
       "the formatter exits unsuccessfully",
       1,
@@ -609,7 +609,7 @@ describe("formatWithCli", () => {
     },
   );
 
-  test("should return the unchanged snapshot without spawning when SwiftLint is selected", async () => {
+  it("should return the unchanged snapshot without spawning when SwiftLint is selected", async () => {
     const run = spyOn(processes, "runCommand");
     expect(
       await formatWithCli(
@@ -621,7 +621,7 @@ describe("formatWithCli", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     [
       "the formatter is unsupported",
       { ...server, name: "custom" },
@@ -648,7 +648,7 @@ describe("formatWithCli", () => {
     },
   );
 
-  test("should return stdout and forward a bounded stdin-only request when Biome formats successfully", async () => {
+  it("should return stdout and forward a bounded stdin-only request when Biome formats successfully", async () => {
     const run = spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "const x = 1;\n",
       stderr: "",
@@ -685,7 +685,7 @@ describe("formatWithCli", () => {
     );
   });
 
-  test("should allow empty stdout when the input contains only whitespace", async () => {
+  it("should allow empty stdout when the input contains only whitespace", async () => {
     spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "",
       stderr: "",
@@ -694,7 +694,7 @@ describe("formatWithCli", () => {
     expect(await formatWithCli(server, file, " \n")).toBe("");
   });
 
-  test("should reject before spawning when cancellation precedes formatting", async () => {
+  it("should reject before spawning when cancellation precedes formatting", async () => {
     const controller = new AbortController();
     controller.abort(new Error("cancelled format"));
     const run = spyOn(processes, "runCommand");
@@ -704,7 +704,7 @@ describe("formatWithCli", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test("should reject successful output when cancellation occurs while the command is running", async () => {
+  it("should reject successful output when cancellation occurs while the command is running", async () => {
     const controller = new AbortController();
     spyOn(processes, "runCommand").mockImplementation(() => {
       controller.abort(new Error("cancelled format"));

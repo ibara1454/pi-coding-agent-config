@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type { PathLike, PathOrFileDescriptor } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept live named filesystem imports without replacing pure discovery policy.
 import * as fs from "node:fs";
@@ -107,7 +107,7 @@ function mockSkillDiscovery(preview: string) {
 }
 
 describe("discoverCatalog", () => {
-  test("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
+  it("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
     const { resource, resolve, readSettings } = mockSkillDiscovery("# Review");
     resolve.mockResolvedValue({
       extensions: [],
@@ -145,7 +145,7 @@ describe("discoverCatalog", () => {
     ]);
   });
 
-  test("should mark the global package as shadowed when a regular project entry has the same package identity", async () => {
+  it("should mark the global package as shadowed when a regular project entry has the same package identity", async () => {
     const { resolve, readSettings } = mockSkillDiscovery("");
     const globalRoot = `${agentDir}/npm/node_modules/kit`;
     const projectRoot = `${cwd}/.pi/npm/node_modules/kit`;
@@ -234,7 +234,7 @@ describe("discoverCatalog", () => {
     });
   });
 
-  test("should use loaded skill metadata and a safe body preview when the file contains frontmatter and terminal controls", async () => {
+  it("should use loaded skill metadata and a safe body preview when the file contains frontmatter and terminal controls", async () => {
     const { close } = mockSkillDiscovery(
       [
         "---",
@@ -262,7 +262,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test("should bound file reads and preview characters when a UTF-8 skill exceeds both budgets", async () => {
+  it("should bound file reads and preview characters when a UTF-8 skill exceeds both budgets", async () => {
     const { read, close } = mockSkillDiscovery(
       `${"é".repeat(previewByteLimit)}not part of the preview`,
     );
@@ -281,7 +281,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test("should retain skill metadata without a preview when the file cannot be opened", async () => {
+  it("should retain skill metadata without a preview when the file cannot be opened", async () => {
     const { open, close } = mockSkillDiscovery("unreadable");
     open.mockImplementation(() => {
       throw new Error("permission denied");
@@ -298,7 +298,7 @@ describe("discoverCatalog", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  test("should retain skill metadata and close the descriptor when reading the preview fails", async () => {
+  it("should retain skill metadata and close the descriptor when reading the preview fails", async () => {
     const { read, close } = mockSkillDiscovery("unreadable");
     read.mockImplementation(() => {
       throw new Error("read failed");
@@ -315,7 +315,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test.each([
+  it.each([
     ["no text", ""],
     [
       "only frontmatter, whitespace, and controls",
@@ -334,7 +334,7 @@ describe("discoverCatalog", () => {
     },
   );
 
-  test("should forward diagnostics and use the directory name when skill loading returns no metadata", async () => {
+  it("should forward diagnostics and use the directory name when skill loading returns no metadata", async () => {
     const { loadSkills } = mockSkillDiscovery("# Still available");
     loadSkills.mockReturnValue({
       skills: [],

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { lintRule } from "./test-utils.ts";
 
 const invalid = `
@@ -22,7 +22,7 @@ other.test("unrelated function", () => {});
 `;
 
 describe("use-should-test-title", () => {
-  test("should reject literal titles without the exact should prefix", () => {
+  it("should reject literal titles without the exact should prefix", () => {
     expect(lintRule("use-should-test-title", invalid)).toEqual(
       [
         '"missing prefix"',
@@ -35,7 +35,7 @@ describe("use-should-test-title", () => {
     );
   });
 
-  test("should allow prefixed and dynamic titles without inspecting table data", () => {
+  it("should allow prefixed and dynamic titles without inspecting table data", () => {
     expect(lintRule("use-should-test-title", valid)).toEqual([]);
   });
 });

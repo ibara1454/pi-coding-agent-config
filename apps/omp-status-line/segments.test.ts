@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies need the live named-import binding.
 import * as os from "node:os";
 import { renderSegment } from "./segments.ts";
@@ -85,7 +85,7 @@ function createContext(options?: {
   };
 }
 
-test("should remove terminal controls from model text", () => {
+it("should remove terminal controls from model text", () => {
   const rendered = renderSegment(
     "model",
     createContext({
@@ -98,7 +98,7 @@ test("should remove terminal controls from model text", () => {
   expect(rendered.content).not.toContain("\n");
 });
 
-test("should omit an unsafe pull-request hyperlink", () => {
+it("should omit an unsafe pull-request hyperlink", () => {
   const rendered = renderSegment(
     "pr",
     createContext({
@@ -110,7 +110,7 @@ test("should omit an unsafe pull-request hyperlink", () => {
   expect(rendered.content).not.toContain("\x1b]8;;");
 });
 
-test("should clamp paths by terminal cells", () => {
+it("should clamp paths by terminal cells", () => {
   const context = createContext({ cwd: "/tmp/界界/é.ts" });
   context.options.path = {
     abbreviate: false,
@@ -129,7 +129,7 @@ test("should clamp paths by terminal cells", () => {
 });
 
 describe("renderSegment", () => {
-  test.each([
+  it.each([
     { cwd: "/work/project/src", options: {}, expected: "project/src" },
     {
       cwd: "/home/test/Projects/project",
@@ -164,7 +164,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       name: "Claude Sonnet",
       id: "test-model",
@@ -188,7 +188,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       level: "off",
       ascii: true,
@@ -242,7 +242,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     { hours: 0, format: "12h", seconds: false, expected: "12:05am" },
     { hours: 13, format: "12h", seconds: true, expected: "1:05:09pm" },
     { hours: 13, format: "24h", seconds: true, expected: "13:05:09" },
@@ -272,7 +272,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       url: "https://example.com/pr/42",
       expected: "\x1b]8;;https://example.com/pr/42\x07PR #42\x1b]8;;\x07",
@@ -296,7 +296,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should total input, output, and cache writes without cache reads when rendering token_total", () => {
+  it("should total input, output, and cache writes without cache reads when rendering token_total", () => {
     const context = createContext();
     Object.assign(context.usage, {
       input: 120,
@@ -311,7 +311,7 @@ describe("renderSegment", () => {
     expect(Bun.stripANSI(rendered.content)).toBe("tok: 200");
   });
 
-  test.each([{ cacheRead: 0 }, { cacheRead: 400 }])(
+  it.each([{ cacheRead: 0 }, { cacheRead: 400 }])(
     "should hide token_total when counted usage is zero and cache reads are $cacheRead",
     ({ cacheRead }) => {
       const context = createContext();
@@ -324,7 +324,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     { expected: "999", input: 999 },
     { expected: "1K", input: 1000 },
     { expected: "1.5K", input: 1500 },
@@ -343,7 +343,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should display dirty counts and respect git visibility options when a branch has changes", () => {
+  it("should display dirty counts and respect git visibility options when a branch has changes", () => {
     const context = createContext();
     Object.assign(context.git, {
       branch: "feature\n\tbranch",
@@ -372,7 +372,7 @@ describe("renderSegment", () => {
     });
   });
 
-  test("should show a clean branch but hide git when repository information is absent", () => {
+  it("should show a clean branch but hide git when repository information is absent", () => {
     const context = createContext();
     expect(renderSegment("git", context)).toEqual({
       content: "",
@@ -385,7 +385,7 @@ describe("renderSegment", () => {
     expect(Bun.stripANSI(rendered.content)).toBe("@ main");
   });
 
-  test.each([
+  it.each([
     { id: "token_in", key: "input", value: 1250, expected: "in: 1.3K" },
     { id: "token_out", key: "output", value: 500, expected: "out: 500" },
     { id: "cache_read", key: "cacheRead", value: 100, expected: "cache 100" },
@@ -417,7 +417,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should calculate cache hits from input and both cache counters when output tokens are present", () => {
+  it("should calculate cache hits from input and both cache counters when output tokens are present", () => {
     const context = createContext();
     expect(renderSegment("cache_hit", context).visible).toBe(false);
     Object.assign(context.usage, {
@@ -432,7 +432,7 @@ describe("renderSegment", () => {
     expect(Bun.stripANSI(rendered.content)).toBe("cache 50.00%");
   });
 
-  test.each([
+  it.each([
     {
       label: "no spend or subscription is present",
       subscription: false,
@@ -477,7 +477,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     { percent: 49.9, window: 0, severity: undefined },
     { percent: 50, window: 0, severity: "warning" },
     { percent: 70, window: 0, severity: "thinkingHigh" },
@@ -502,7 +502,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should distinguish unknown usage from an unknown capacity when rendering context", () => {
+  it("should distinguish unknown usage from an unknown capacity when rendering context", () => {
     const context = createContext();
     const usage = { tokens: 1500, window: 200_000, percent: 25 };
     context.contextTokens = usage.tokens;
@@ -525,7 +525,7 @@ describe("renderSegment", () => {
     );
   });
 
-  test.each([
+  it.each([
     { milliseconds: 999, expected: "", visible: false },
     { milliseconds: 1000, expected: "time: 1s", visible: true },
     { milliseconds: 60_000, expected: "time: 1m", visible: true },
@@ -544,7 +544,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should hide empty extension status and sanitize visible status when footer data changes", () => {
+  it("should hide empty extension status and sanitize visible status when footer data changes", () => {
     const context = createContext();
     const statuses = new Map([["mode", "\n\t"]]);
     context.footerData = {
@@ -561,7 +561,7 @@ describe("renderSegment", () => {
       visible: true,
     });
   });
-  test("should show the Pi label but hide pull requests when no PR is available", () => {
+  it("should show the Pi label but hide pull requests when no PR is available", () => {
     const context = createContext();
 
     expect(renderSegment("pi", context)).toEqual({
@@ -574,7 +574,7 @@ describe("renderSegment", () => {
     });
   });
 
-  test("should hide empty subagent status and show sanitized activity when agents report progress", () => {
+  it("should hide empty subagent status and show sanitized activity when agents report progress", () => {
     const context = createContext();
     const statuses = new Map([["subagents", "\n\t"]]);
     context.footerData = {
@@ -592,7 +592,7 @@ describe("renderSegment", () => {
     });
   });
 
-  test.each([
+  it.each([
     ["empty", "", "new"],
     ["control-only", "\x1b[31m\n\t", "new"],
     ["long ASCII", "abcdefghijk", "abcdefgh"],
@@ -613,7 +613,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test("should show a sanitized short hostname when the host name includes a domain and controls", () => {
+  it("should show a sanitized short hostname when the host name includes a domain and controls", () => {
     const host = spyOn(os, "hostname").mockReturnValue(
       "\x1b[31m界work\x1b[0m.example.test\n",
     );
@@ -627,7 +627,7 @@ describe("renderSegment", () => {
     }
   });
 
-  test.each([
+  it.each([
     ["absent", undefined],
     ["control-only", "\x1b[31m\n\t"],
   ] as const)(
@@ -642,7 +642,7 @@ describe("renderSegment", () => {
     },
   );
 
-  test.each([
+  it.each([
     [false, "\x1b[38;2;10;20;30m"],
     [true, "\x1b[38;2;226;101;140m"],
   ] as const)(

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   chmod,
   mkdir,
@@ -129,7 +129,7 @@ async function createFilesystemTarget(
 }
 
 describe("commitSettings", () => {
-  test("should atomically replace settings and retain permissions when an unrelated setting changes after staging", async () => {
+  it("should atomically replace settings and retain permissions when an unrelated setting changes after staging", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       const path = join(root, "settings.json");
@@ -173,7 +173,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test("should create settings and parent directories when no settings file exists", async () => {
+  it("should create settings and parent directories when no settings file exists", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       const path = join(root, "nested", ".pi", "settings.json");
@@ -196,7 +196,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test("should preserve both files and release earlier locks when another scope remains locked", async () => {
+  it("should preserve both files and release earlier locks when another scope remains locked", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       const globalFile = join(root, "global.json");
@@ -265,7 +265,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test("should commit once and reject stale input when concurrent commits share a snapshot", async () => {
+  it("should commit once and reject stale input when concurrent commits share a snapshot", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       const path = join(root, "settings.json");
@@ -330,7 +330,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test("should report a read failure and release the lock when settings is a directory", async () => {
+  it("should report a read failure and release the lock when settings is a directory", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       const path = join(root, "settings.json");
@@ -356,7 +356,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test("should preserve the original file and remove locks when the atomic temporary filename exceeds the filesystem limit", async () => {
+  it("should preserve the original file and remove locks when the atomic temporary filename exceeds the filesystem limit", async () => {
     await withRoot(async (root) => {
       const target = await createFilesystemTarget(root);
       // Settings and its .lock fit NAME_MAX; the unique atomic filename does not.
@@ -384,7 +384,7 @@ describe("commitSettings", () => {
     });
   });
 
-  test.each(packageDrifts)(
+  it.each(packageDrifts)(
     "should leave settings untouched when %s",
     async (_label: string, prepare: (
       root: string,
@@ -415,7 +415,7 @@ describe("commitSettings", () => {
     },
   );
 
-  test("should commit when the real target identity still holds", async () => {
+  it("should commit when the real target identity still holds", async () => {
     await withRoot(async (root) => {
       const target = manifestPackage(root);
       const path = join(root, "settings.json");

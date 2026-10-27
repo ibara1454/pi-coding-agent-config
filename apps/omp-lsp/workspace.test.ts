@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Stats } from "node:fs";
 import fs from "node:fs/promises";
 import type { TextEdit, WorkspaceEdit } from "vscode-languageserver-protocol";
@@ -143,7 +143,7 @@ afterEach(async () => {
 });
 
 describe("LspWorkspace.create", () => {
-  test("should warm eligible servers and retain startup failures as warnings when eager startup is enabled", async () => {
+  it("should warm eligible servers and retain startup failures as warnings when eager startup is enabled", async () => {
     const { loaded, server, get, poolFactory } = fixture();
     loaded.warnings.push("configuration warning");
     const unavailable = { ...server.config, name: "unavailable-server" };
@@ -181,7 +181,7 @@ describe("LspWorkspace.create", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     ["the project is untrusted", false, true, false],
     ["LSP is disabled", true, false, false],
     ["lazy startup is enabled", true, true, true],
@@ -199,7 +199,7 @@ describe("LspWorkspace.create", () => {
     },
   );
 
-  test("should bound concurrent starts and order warnings by configuration when startups settle out of order", async () => {
+  it("should bound concurrent starts and order warnings by configuration when startups settle out of order", async () => {
     const { loaded, server, get, poolFactory } = fixture();
     const starts = Array.from({ length: STARTUP_SERVER_COUNT }, (_, index) => ({
       config: { ...server.config, name: `server-${index}` },
@@ -260,7 +260,7 @@ describe("LspWorkspace.create", () => {
     }
   });
 
-  test("should reconcile committed edits and retain document snapshots when live servers match changed files", async () => {
+  it("should reconcile committed edits and retain document snapshots when live servers match changed files", async () => {
     const { loaded, server, pool, poolFactory, applyEdit } = fixture();
     loaded.settings.lazy = true;
     const file = "/project/sample.ts";
@@ -354,7 +354,7 @@ describe("LspWorkspace.create", () => {
     );
   });
 
-  test("should leave servers and tracked documents unchanged when an edit is rejected before committing", async () => {
+  it("should leave servers and tracked documents unchanged when an edit is rejected before committing", async () => {
     const { loaded, server, pool, poolFactory, applyEdit } = fixture();
     loaded.settings.lazy = true;
     server.document = () => ({ version: 1, content: "original" });
@@ -380,7 +380,7 @@ describe("LspWorkspace.create", () => {
     expect(server.notify).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     ["the project is untrusted", false, true],
     ["LSP is disabled", true, false],
   ] as const)(
@@ -407,7 +407,7 @@ describe("LspWorkspace.create", () => {
 });
 
 describe("LspWorkspace.execute", () => {
-  test("should aggregate negotiated capabilities and startup failures while excluding disabled servers and CLI linters", async () => {
+  it("should aggregate negotiated capabilities and startup failures while excluding disabled servers and CLI linters", async () => {
     const { loaded, server, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
     loaded.servers.push(
@@ -440,7 +440,7 @@ describe("LspWorkspace.execute", () => {
     });
   });
 
-  test.each([
+  it.each([
     [
       "no configured server matches the file",
       "sample.py",
@@ -467,7 +467,7 @@ describe("LspWorkspace.execute", () => {
     },
   );
 
-  test("should filter workspace symbols case-insensitively and deduplicate locations while retaining failed sources", async () => {
+  it("should filter workspace symbols case-insensitively and deduplicate locations while retaining failed sources", async () => {
     const { loaded, server, get, request, poolFactory } = fixture();
     loaded.settings.lazy = true;
     loaded.servers.push(
@@ -527,7 +527,7 @@ describe("LspWorkspace.execute", () => {
     }
   });
 
-  test("should bound displayed workspace symbols while retaining the total match count", async () => {
+  it("should bound displayed workspace symbols while retaining the total match count", async () => {
     const { loaded, request, poolFactory } = fixture();
     loaded.settings.lazy = true;
     request.mockResolvedValue(
@@ -549,7 +549,7 @@ describe("LspWorkspace.execute", () => {
     expect(result.text).toContain("…1 symbols elided…");
   });
 
-  test("should distinguish an empty symbol search from invalid peer data and unavailable servers", async () => {
+  it("should distinguish an empty symbol search from invalid peer data and unavailable servers", async () => {
     const { loaded, request, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
     const workspace = await createWorkspace(poolFactory);
@@ -590,7 +590,7 @@ describe("LspWorkspace.execute", () => {
     );
   });
 
-  test("should reload compatible servers and restart notification failures while preserving server-specific errors", async () => {
+  it("should reload compatible servers and restart notification failures while preserving server-specific errors", async () => {
     const { loaded, server, get, request, pool, poolFactory } = fixture();
     loaded.settings.lazy = true;
     loaded.servers = [
@@ -644,7 +644,7 @@ describe("LspWorkspace.execute", () => {
     ]);
   });
 
-  test("should cancel server startup and release its deadline when the action exceeds the minimum timeout", async () => {
+  it("should cancel server startup and release its deadline when the action exceeds the minimum timeout", async () => {
     const { loaded, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
     // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
@@ -673,7 +673,7 @@ describe("LspWorkspace.execute", () => {
     expect(clear).toHaveBeenCalledWith(timerHandle);
   });
 
-  test("should replace and dispose injected pools in order when reloading changes the idle timeout", async () => {
+  it("should replace and dispose injected pools in order when reloading changes the idle timeout", async () => {
     const initialIdleTimeoutMs = 1000;
     const reloadedIdleTimeoutMs = 2000;
     const { loaded, server, pool, poolFactory } = fixture();
@@ -752,7 +752,7 @@ describe("LspWorkspace.execute", () => {
     }
   });
 
-  test("should sort unverified diagnostic sources without claiming a verified clean file", async () => {
+  it("should sort unverified diagnostic sources without claiming a verified clean file", async () => {
     const { loaded, server, get, poolFactory } = fixture();
     loaded.settings.lazy = true;
     const names = ["zeta-server", "alpha-server", "middle-server"];
@@ -785,7 +785,7 @@ describe("LspWorkspace.execute", () => {
     expect(diagnostics).toHaveBeenCalledTimes(names.length);
   });
 
-  test("should select one code action by a case-insensitive title fragment without executing other actions", async () => {
+  it("should select one code action by a case-insensitive title fragment without executing other actions", async () => {
     const { loaded, request, poolFactory } = fixture();
     loaded.settings.lazy = true;
     spyOn(filesystem, "stat").mockResolvedValue({
@@ -834,7 +834,7 @@ describe("LspWorkspace.execute", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     {
       condition: "duplicate edits",
       conflictStart: 6,
@@ -977,7 +977,7 @@ describe("LspWorkspace.execute", () => {
 });
 
 describe("LspWorkspace.afterMutation", () => {
-  test("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
+  it("should bound the response and cancel pending feedback without reversing a successful host edit when feedback stalls", async () => {
     const { loaded, poolFactory } = fixture();
     loaded.settings.lazy = true;
     // biome-ignore lint/plugin/biome-rules/use-undefined: A null-prototype object safely models the opaque host timer handle.
@@ -1014,7 +1014,7 @@ describe("LspWorkspace.afterMutation", () => {
 
 describe("LspWorkspace.dispose", () => {
   const failure = new Error("edit transaction failed");
-  test.each([
+  it.each([
     [
       "resolves",
       (pending: PromiseWithResolvers<edits.EditResult>) =>

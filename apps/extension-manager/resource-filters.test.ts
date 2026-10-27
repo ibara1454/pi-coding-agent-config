@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   applyPatterns,
   explainFilterState,
@@ -534,7 +534,7 @@ const packageCases: readonly PackageCase[] = [
 ];
 
 describe("applyPatterns", () => {
-  test.each(applyCases.map((entry) => [entry.label, entry] as const))(
+  it.each(applyCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected enabled paths for: %s",
     (_label, scenario) => {
       const enabled = applyPatterns(allPaths, scenario.patterns, base);
@@ -544,7 +544,7 @@ describe("applyPatterns", () => {
 });
 
 describe("explainFilterState", () => {
-  test.each(explainCases.map((entry) => [entry.label, entry] as const))(
+  it.each(explainCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected filter explanation for: %s",
     (_label, scenario) => {
       const explanation = explainFilterState(
@@ -562,7 +562,7 @@ describe("explainFilterState", () => {
 });
 
 describe("isEnabledByAutoloadDisabledPatterns", () => {
-  test.each(enabledCases.map((entry) => [entry.label, entry] as const))(
+  it.each(enabledCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected enabled state for: %s",
     (_label, scenario) => {
       const enabled = isEnabledByAutoloadDisabledPatterns(
@@ -576,7 +576,7 @@ describe("isEnabledByAutoloadDisabledPatterns", () => {
 });
 
 describe("matchesAutoloadDisabledPattern", () => {
-  test.each(matchCases.map((entry) => [entry.label, entry] as const))(
+  it.each(matchCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected match state for: %s",
     (_label, scenario) => {
       const matched = matchesAutoloadDisabledPattern(
@@ -590,7 +590,7 @@ describe("matchesAutoloadDisabledPattern", () => {
 });
 
 describe("mutateExactPattern", () => {
-  test.each(exactCases.map((entry) => [entry.label, entry] as const))(
+  it.each(exactCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected patterns for: %s",
     (_label, scenario) => {
       const patterns = mutateExactPattern({
@@ -606,7 +606,7 @@ describe("mutateExactPattern", () => {
 });
 
 describe("mutatePackagePatterns", () => {
-  test.each(packageCases.map((entry) => [entry.label, entry] as const))(
+  it.each(packageCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected mutation result for: %s",
     (_label, scenario) => {
       const result = mutatePackagePatterns({

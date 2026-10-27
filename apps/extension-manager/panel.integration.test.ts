@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { ExtensionCatalog } from "./catalog.ts";
@@ -99,7 +99,7 @@ function makePanel(
 }
 
 describe("ExtensionManagerPanel.handleInput", () => {
-  test.each([
+  it.each([
     ["Extensions", "\t", "extension", ""],
     ["Skills", LEFT, "skill", ""],
     ["filtered Skills", LEFT, "skill", "ill"],
@@ -156,7 +156,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     },
   );
 
-  test("should apply staged changes and forward catalog mutations when the close dialog applies", async () => {
+  it("should apply staged changes and forward catalog mutations when the close dialog applies", async () => {
     const requests: CommitRequest[] = [];
     const commitResult: CommitResult = {
       scopes: [{ scope: "global", status: "committed" }],
@@ -194,7 +194,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(1);
   });
 
-  test("should commit an effective self-disable and show recovery instructions", async () => {
+  it("should commit an effective self-disable and show recovery instructions", async () => {
     const selfPath = "/repo/self.ts";
     const commitResult: CommitResult = {
       scopes: [{ scope: "global", status: "committed" }],
@@ -232,7 +232,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(catalog.selfResolved(selfPath, false)).toBe(false);
   });
 
-  test("should keep self-disable unreported when an uncommitted scope still resolves self", async () => {
+  it("should keep self-disable unreported when an uncommitted scope still resolves self", async () => {
     const selfPath = "/repo/self.ts";
     const commitResult: CommitResult = {
       scopes: [
@@ -262,7 +262,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(catalog.selfResolved(selfPath, false)).toBe(true);
   });
 
-  test("should skip the self-disable warning when another scope still resolves self", () => {
+  it("should skip the self-disable warning when another scope still resolves self", () => {
     const selfPath = "/repo/self.ts";
     const { catalog, panel } = makePanel({
       rows: [
@@ -283,7 +283,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
     ).toBe(false);
   });
 
-  test("should emit the exact partial commit result consumed by command notifications", async () => {
+  it("should emit the exact partial commit result consumed by command notifications", async () => {
     const commitResult: CommitResult = {
       scopes: [
         { scope: "global", status: "committed" },
@@ -394,7 +394,7 @@ describe("ExtensionManagerPanel.handleInput", () => {
       ),
   );
 
-  test.each(noCommitCases)(
+  it.each(noCommitCases)(
     "should keep the panel open and staged when using %s with %s",
     async (_entryPoint: string, _outcome: string, {
       trigger,

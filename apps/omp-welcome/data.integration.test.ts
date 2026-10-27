@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("collectWelcomeExtensions", () => {
-  test("should honor root entries, ignored files, and symlink targets exactly once", () => {
+  it("should honor root entries, ignored files, and symlink targets exactly once", () => {
     const root = temporaryDirectory();
     const extensions = join(root, "extensions");
     write(join(extensions, "first.ts"));
@@ -76,7 +76,7 @@ describe("collectWelcomeExtensions", () => {
 });
 
 describe("welcome extension snapshot", () => {
-  test("should use Pi scope precedence, filters, package deltas, and base directories", () => {
+  it("should use Pi scope precedence, filters, package deltas, and base directories", () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
@@ -169,7 +169,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("should use convention files for a filtered empty manifest and normalize glob entries", () => {
+  it("should use convention files for a filtered empty manifest and normalize glob entries", () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
@@ -199,7 +199,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("should omit all project-local settings, packages, and files when untrusted", () => {
+  it("should omit all project-local settings, packages, and files when untrusted", () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
@@ -224,7 +224,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  test("should honor effective quiet startup and its verbose command-line override", () => {
+  it("should honor effective quiet startup and its verbose command-line override", () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");

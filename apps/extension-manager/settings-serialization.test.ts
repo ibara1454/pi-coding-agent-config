@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { serializeSettings } from "./settings-serialization.ts";
 import type { JsonObject } from "./types.ts";
 
@@ -55,21 +55,21 @@ const trailingNewlines: [string, string | undefined, string][] = [
 ];
 
 describe("serializeSettings", () => {
-  test.each(indentations)(
+  it.each(indentations)(
     "should preserve the expected indentation for: %s",
     (_label: string, previousContent: string | undefined, expected: string) => {
       expect(serializeSettings(settings, previousContent)).toBe(expected);
     },
   );
 
-  test.each(trailingNewlines)(
+  it.each(trailingNewlines)(
     "should preserve the expected final newline for: %s",
     (_label: string, previousContent: string | undefined, expected: string) => {
       expect(serializeSettings({}, previousContent)).toBe(expected);
     },
   );
 
-  test("should render nested package entries with the detected indentation", () => {
+  it("should render nested package entries with the detected indentation", () => {
     const document: JsonObject = {
       packages: [
         { source: "npm:kit", extensions: ["-extensions/alpha.ts"] },
@@ -95,13 +95,13 @@ describe("serializeSettings", () => {
     );
   });
 
-  test("should preserve key insertion order", () => {
+  it("should preserve key insertion order", () => {
     expect(
       serializeSettings({ theme: "dark", extensions: [], packages: [] }, "{}"),
     ).toBe('{\n  "theme": "dark",\n  "extensions": [],\n  "packages": []\n}');
   });
 
-  test("should omit keys whose value is undefined", () => {
+  it("should omit keys whose value is undefined", () => {
     expect(
       serializeSettings({ extensions: undefined, theme: "dark" }, undefined),
     ).toBe('{\n  "theme": "dark"\n}\n');

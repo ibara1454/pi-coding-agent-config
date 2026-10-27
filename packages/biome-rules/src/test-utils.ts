@@ -19,10 +19,10 @@ main();
  *
  * @example
  * ```ts
- * import { expect, test } from "bun:test";
+ * import { expect, it } from "bun:test";
  * import { lintRule } from "./test-utils";
  *
- * test("should highlight private methods and allow public methods", () => {
+ * it("should highlight private methods and allow public methods", () => {
  *   const invalid = "class Example { private méthode() {} }";
  *   expect(lintRule("no-private-methods", invalid)).toEqual([
  *     { category: "plugin", severity: "error", source: "méthode" },

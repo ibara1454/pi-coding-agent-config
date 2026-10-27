@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   calculateContextUsage,
   estimateContextEntryTokens,
@@ -87,7 +87,7 @@ const PROVIDER_MESSAGE = Object.freeze({
 });
 
 describe("calculateContextUsage", () => {
-  test("should estimate 16 tokens and 1.6 percent from summaries and active tools when compaction removes the provider anchor", () => {
+  it("should estimate 16 tokens and 1.6 percent from summaries and active tools when compaction removes the provider anchor", () => {
     const providerAnchored = hasProviderContextAnchor(COMPACTED_BRANCH);
     const estimatedMessageTokens = estimateContextEntryTokens(SUMMARY_ENTRIES);
     const estimatedOverheadTokens = estimateContextOverhead(TOOL_OVERHEAD);
@@ -113,7 +113,7 @@ describe("calculateContextUsage", () => {
     });
   });
 
-  test.each([
+  it.each([
     {
       label: "positive",
       reportedTokens: 500,
@@ -140,7 +140,7 @@ describe("calculateContextUsage", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       label: "positive",
       reportedTokens: 500,
@@ -161,7 +161,7 @@ describe("calculateContextUsage", () => {
     },
   );
 
-  test.each([
+  it.each([
     { label: "missing", reportedTokens: undefined },
     // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve the host's unavailable-token input case.
     { label: "null", reportedTokens: null },
@@ -182,7 +182,7 @@ describe("calculateContextUsage", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       label: "reported",
       contextWindow: 1000,
@@ -257,7 +257,7 @@ describe("calculateContextUsage", () => {
 });
 
 describe("hasProviderContextAnchor", () => {
-  test("should reject prior provider usage when the latest compaction removes its anchor", () => {
+  it("should reject prior provider usage when the latest compaction removes its anchor", () => {
     expect(hasProviderContextAnchor(COMPACTED_BRANCH)).toBe(false);
     expect(
       hasProviderContextAnchor([
@@ -268,23 +268,23 @@ describe("hasProviderContextAnchor", () => {
     ).toBe(false);
   });
 
-  test("should accept fresh provider usage when an assistant completes after compaction", () => {
+  it("should accept fresh provider usage when an assistant completes after compaction", () => {
     expect(
       hasProviderContextAnchor([...COMPACTED_BRANCH, PROVIDER_MESSAGE]),
     ).toBe(true);
   });
 
-  test("should reject an anchor when the branch is empty", () => {
+  it("should reject an anchor when the branch is empty", () => {
     expect(hasProviderContextAnchor([])).toBe(false);
   });
 
-  test("should retain earlier provider usage when later entries are not messages", () => {
+  it("should retain earlier provider usage when later entries are not messages", () => {
     expect(
       hasProviderContextAnchor([PROVIDER_MESSAGE, { type: "branch_summary" }]),
     ).toBe(true);
   });
 
-  test.each([
+  it.each([
     { label: "a positive total", usage: { totalTokens: 5 }, expected: true },
     {
       label: "a component sum",
@@ -330,7 +330,7 @@ describe("hasProviderContextAnchor", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       label: "aborted",
       message: { ...PROVIDER_MESSAGE.message, stopReason: "aborted" },
@@ -351,13 +351,13 @@ describe("hasProviderContextAnchor", () => {
 });
 
 describe("estimateContextOverhead", () => {
-  test("should count only active tools and retain their names and descriptions when a schema is cyclic", () => {
+  it("should count only active tools and retain their names and descriptions when a schema is cyclic", () => {
     expect(estimateContextOverhead(TOOL_OVERHEAD)).toBe(PROMPT_AND_TOOL_TOKENS);
     expect(TOOL_OVERHEAD.tools.at(1)?.parameters).toBe(CYCLIC_VALUE);
     expect(CYCLIC_VALUE.self).toBe(CYCLIC_VALUE);
   });
 
-  test.each([
+  it.each([
     { label: "zero bytes", systemPrompt: "", expected: 0 },
     { label: "one byte", systemPrompt: "a", expected: 1 },
     { label: "four bytes", systemPrompt: "abcd", expected: 1 },
@@ -376,7 +376,7 @@ describe("estimateContextOverhead", () => {
     },
   );
 
-  test("should omit only schema tokens when the schema cannot serialize to text", () => {
+  it("should omit only schema tokens when the schema cannot serialize to text", () => {
     expect(
       estimateContextOverhead({
         systemPrompt: "",
@@ -388,13 +388,13 @@ describe("estimateContextOverhead", () => {
 });
 
 describe("estimateContextEntryTokens", () => {
-  test("should count summaries and string or serialized custom content using UTF-8 bytes", () => {
+  it("should count summaries and string or serialized custom content using UTF-8 bytes", () => {
     expect(estimateContextEntryTokens(SUMMARY_ENTRIES)).toBe(
       SUMMARY_CONTEXT_TOKENS,
     );
   });
 
-  test("should add explicit Pi message contributions without interpreting their contents and ignore other entries", () => {
+  it("should add explicit Pi message contributions without interpreting their contents and ignore other entries", () => {
     const entries = Object.freeze([
       Object.freeze({ type: "message" as const, tokens: PI_MESSAGE_TOKENS }),
       Object.freeze({ type: "message" as const, tokens: 0 }),
@@ -404,7 +404,7 @@ describe("estimateContextEntryTokens", () => {
     expect(estimateContextEntryTokens([])).toBe(0);
   });
 
-  test("should propagate serialization failure when custom content is cyclic", () => {
+  it("should propagate serialization failure when custom content is cyclic", () => {
     expect(() =>
       estimateContextEntryTokens([
         { type: "custom_message", content: CYCLIC_VALUE },
@@ -413,7 +413,7 @@ describe("estimateContextEntryTokens", () => {
     expect(CYCLIC_VALUE.self).toBe(CYCLIC_VALUE);
   });
 
-  test("should propagate byte-measurement failure when custom content serializes to no text", () => {
+  it("should propagate byte-measurement failure when custom content serializes to no text", () => {
     expect(() =>
       estimateContextEntryTokens([
         { type: "custom_message", content: undefined },
