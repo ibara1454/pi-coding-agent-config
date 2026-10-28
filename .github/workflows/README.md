@@ -2,14 +2,31 @@
 
 ## Automated PR review
 
-[Code review](code-review.md) pre-fetches the PR title, description, head/base
-branch names, conversation comments, submitted review bodies, and inline threads
-before starting the agent on every initial review and re-review.
+[Code review](code-review.md) imports [shared/pr-review-context.md](shared/pr-review-context.md)
+to pre-fetch the PR title, description, head/base branch names, conversation
+comments, submitted review bodies, and inline threads before starting the agent
+on every initial review and re-review.
 
 The trusted workflow step uses authenticated `gh` reads with the job's read-only
 token. It paginates REST collections and each GraphQL thread/reply connection
 separately, retaining authors, timestamps, review state, reply relationships, and
 resolved/outdated context. It does not execute code from the PR checkout.
+
+The shared component bundles the collector, required read permissions, and
+snapshot-reading instructions. Reuse it in another PR workflow with:
+
+```yaml
+imports:
+    - shared/pr-review-context.md
+permissions:
+    issues: read
+    pull-requests: read
+```
+
+The caller must declare those permissions; imports validate but do not grant
+them. Imported pre-agent steps run before workflow-local setup. Collection needs
+neither Bun nor installed workspace packages, and remains embedded in the
+compiled lockfile rather than loading a helper from the PR checkout.
 
 Raw API pages are streamed to disk. A manifest indexes readable text chunks of
 at most 8,000 UTF-16 code units under
