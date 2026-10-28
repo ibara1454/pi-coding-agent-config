@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { commitNotification } from "./commit-notification.ts";
 import type { PanelResult } from "./panel.ts";
 import type { CommitResult } from "./types.ts";
@@ -117,7 +117,7 @@ const cases: readonly NotificationCase[] = [
 ];
 
 describe("commitNotification", () => {
-  test.each(cases)(
+  it.each(cases)(
     "should return the expected notification for: %s",
     (_name, panelResult, expected) => {
       expect(commitNotification(panelResult)).toEqual(expected);

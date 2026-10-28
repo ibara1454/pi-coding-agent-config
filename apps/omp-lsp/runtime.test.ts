@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the runtime's live filesystem imports.
@@ -33,6 +33,7 @@ const BUSY_CLOCK_MS = 2000;
 const EXPIRED_CLOCK_MS = 2011;
 const DIAGNOSTIC_POLL_MS = 50;
 const PROGRESS_DIAGNOSTIC_TIMEOUT_MS = 1000;
+const INVALID_TEXT_SYNC_KIND = 3;
 // Narrow host timer effects rather than inheriting Bun/Node's overloaded signatures.
 const timers: {
   setTimeout: (callback: () => void, delay?: number) => NodeJS.Timeout;
@@ -45,6 +46,35 @@ const resources: Array<{
   peer: MessageConnection;
   release: () => void;
 }> = [];
+
+/**
+ * Holds the next matching timeout so a test can advance one deadline without sleeping.
+ * Other timers remain real; the inert held handle is ignored by clearTimeout.
+ * @param delay - Exact timeout delay in milliseconds to intercept once.
+ * @returns The held callback after production schedules it; the caller must resume it.
+ * @example const polling = holdTimeout(50); const pending = client.diagnostics(file); (await polling)();
+ */
+function holdTimeout(delay: number): Promise<() => void> {
+  const { promise, resolve: scheduled } = Promise.withResolvers<() => void>();
+  // biome-ignore lint/plugin/biome-rules/use-undefined: A null prototype creates an inert opaque timer handle.
+  const handle: NodeJS.Timeout = Object.create(null);
+  const { setTimeout, clearTimeout } = timers;
+  let held = false;
+  spyOn(timers, "setTimeout").mockImplementation((callback, milliseconds) => {
+    if (!held && milliseconds === delay) {
+      held = true;
+      scheduled(callback);
+      return handle;
+    }
+    return setTimeout(callback, milliseconds);
+  });
+  spyOn(timers, "clearTimeout").mockImplementation((timer) => {
+    if (timer !== handle) {
+      clearTimeout(timer);
+    }
+  });
+  return promise;
+}
 
 /**
  * Creates a controllable in-memory server with restorable process spies.
@@ -162,7 +192,7 @@ afterEach(async () => {
 });
 
 describe("StdioLanguageServerPool.get", () => {
-  test("should keep shared startup usable when one waiting caller cancels", async () => {
+  it("should keep shared startup usable when one waiting caller cancels", async () => {
     const server = fixture({ holdInitialize: true });
     const controller = new AbortController();
     const first = server.pool.get(server.config, controller.signal);
@@ -181,7 +211,7 @@ describe("StdioLanguageServerPool.get", () => {
     expect(server.stop).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     ["an oversized header", "x".repeat(OVERSIZED_HEADER_BYTES), "header"],
     ["an oversized message", "Content-Length: 999999999\r\n\r\n", "message"],
   ])(
@@ -200,10 +230,81 @@ describe("StdioLanguageServerPool.get", () => {
       });
     },
   );
+
+  it.each([
+    ["a non-object result", false, "invalid initialize result"],
+    [
+      "non-object capabilities",
+      { capabilities: [] },
+      "invalid initialize result",
+    ],
+    [
+      "a different position encoding",
+      { capabilities: { positionEncoding: "utf-8" } },
+      "unsupported position encoding: utf-8",
+    ],
+    [
+      "a nonnumeric synchronization kind",
+      { capabilities: { textDocumentSync: false } },
+      "invalid text synchronization capabilities",
+    ],
+    [
+      "an unknown synchronization change kind",
+      {
+        capabilities: { textDocumentSync: { change: INVALID_TEXT_SYNC_KIND } },
+      },
+      "invalid text synchronization options",
+    ],
+  ] as const)(
+    "should reject initialization and release the process when the peer returns %s",
+    async (_condition, result, error) => {
+      const server = fixture();
+      server.peer.onRequest<unknown, unknown>("initialize", () => result);
+      await expect(server.pool.get(server.config)).rejects.toThrow(error);
+      expect(server.pool.clients()).toEqual([]);
+      expect(server.stop).toHaveBeenCalledTimes(1);
+      expect(server.child.listenerCount("error")).toBe(0);
+      expect(server.stderr.listenerCount("data")).toBe(0);
+    },
+  );
+
+  it("should wait for a loaded rust workspace and completed indexing before returning a client", async () => {
+    const server = fixture();
+    server.config.command = "rust-analyzer";
+    server.config.workspaceReadyTimings = {
+      settleMs: 1,
+      pollMs: 1,
+    };
+    let clock = 0;
+    spyOn(Date, "now").mockImplementation(() => clock);
+    server.peer.onRequest<string, unknown>(
+      "rust-analyzer/analyzerStatus",
+      async () => {
+        clock++;
+        if (clock === 1) {
+          await server.peer.sendNotification("$/progress", {
+            token: 1,
+            value: { kind: "begin" },
+          });
+          return "No workspaces loaded";
+        }
+        await server.peer.sendNotification("$/progress", {
+          token: 1,
+          value: { kind: "end" },
+        });
+        return "Workspace loaded";
+      },
+    );
+    const client = await server.pool.get(server.config);
+    expect(clock).toBe(2);
+    expect(client.isAlive).toBe(true);
+    await client.syncFile("/project/main.rs", "fn main() {}");
+    expect(client.document("/project/main.rs")?.content).toBe("fn main() {}");
+  });
 });
 
 describe("StdioLanguageServerPool.dispose", () => {
-  test("should reject pending startup and release the process when disposed before initialization responds", async () => {
+  it("should reject pending startup and release the process when disposed before initialization responds", async () => {
     const server = fixture({ holdInitialize: true });
     const pending = server.pool.get(server.config);
     const rejected = pending.catch((error: unknown) => error);
@@ -219,7 +320,7 @@ describe("StdioLanguageServerPool.dispose", () => {
 });
 
 describe("LanguageServer.diagnostics", () => {
-  test("should reject unverified clean state when no diagnostic publication arrives", async () => {
+  it("should reject unverified clean state when no diagnostic publication arrives", async () => {
     const server = fixture();
     spyOn(fs, "readFile").mockResolvedValue("const value = 1;\n");
     const client = await server.pool.get(server.config);
@@ -235,7 +336,7 @@ describe("LanguageServer.diagnostics", () => {
     expect(client.isAlive).toBe(true);
   });
 
-  test("should discard a completed pull when the document changes while the request is in flight", async () => {
+  it("should discard a completed pull when the document changes while the request is in flight", async () => {
     const server = fixture({
       capabilities: {
         textDocumentSync: { openClose: true, change: 2 },
@@ -267,7 +368,7 @@ describe("LanguageServer.diagnostics", () => {
     });
   });
 
-  test("should ignore an old version publication rather than replace the current document report", async () => {
+  it("should ignore an old version publication rather than replace the current document report", async () => {
     const server = fixture();
     const text = "const value: string = 1;\n";
     spyOn(fs, "readFile").mockResolvedValue(text);
@@ -302,7 +403,7 @@ describe("LanguageServer.diagnostics", () => {
     });
   });
 
-  test("should mark a late unversioned empty report as unverified after the document changes", async () => {
+  it("should mark a late unversioned empty report as unverified after the document changes", async () => {
     const server = fixture();
     const current = "const value: string = 1;\n";
     spyOn(fs, "readFile").mockResolvedValue(current);
@@ -321,7 +422,7 @@ describe("LanguageServer.diagnostics", () => {
     });
   });
 
-  test("should withhold a versioned publication until peer work progress ends", async () => {
+  it("should withhold a versioned publication until peer work progress ends", async () => {
     const server = fixture();
     const file = "/project/example.ts";
     spyOn(fs, "readFile").mockResolvedValue("let value = 1;\n");
@@ -375,10 +476,112 @@ describe("LanguageServer.diagnostics", () => {
     resume?.();
     expect(await pending).toEqual({ items: [], freshness: "versioned" });
   });
+
+  it.each([
+    ["no report", false],
+    ["an unchanged report without a cached result", { kind: "unchanged" }],
+  ] as const)(
+    "should reject %s and recover when a complete pull report arrives",
+    async (_condition, report) => {
+      const server = fixture({
+        capabilities: {
+          textDocumentSync: 2,
+          diagnosticProvider: {
+            identifier: "semantic",
+            interFileDependencies: false,
+            workspaceDiagnostics: false,
+          },
+        },
+      });
+      spyOn(fs, "readFile").mockResolvedValue("let value = 1;");
+      server.peer.onRequest<unknown, unknown>(
+        "textDocument/diagnostic",
+        () => report,
+      );
+      const client = await server.pool.get(server.config);
+      const failure = await client
+        .diagnostics("/project/example.ts")
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).toMatchObject({
+        message: expect.stringContaining("no complete diagnostic report"),
+      });
+      expect(client.isAlive).toBe(true);
+      server.peer.onRequest("textDocument/diagnostic", () => ({
+        kind: "full",
+        items: [],
+      }));
+      expect(await client.diagnostics("/project/example.ts")).toEqual({
+        items: [],
+        freshness: "pull",
+      });
+    },
+  );
+
+  it("should reject malformed publications, recover, and invalidate cached diagnostics when refreshed", async () => {
+    const server = fixture();
+    const file = "/project/example.ts";
+    spyOn(fs, "readFile").mockResolvedValue("let value = 1;");
+    const client = await server.pool.get(server.config);
+    await client.syncFile(file, "let value = 1;");
+    const publication = {
+      uri: pathToFileURL(file).href,
+      version: client.document(file)?.version,
+      diagnostics: [],
+    };
+    await server.peer.sendNotification("textDocument/publishDiagnostics", {
+      ...publication,
+      diagnostics: [{ message: "missing range" }],
+    });
+    await server.peer.sendRequest("workspace/workspaceFolders");
+    const failure = await client
+      .diagnostics(file)
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      message: "Language server returned malformed diagnostics",
+    });
+    await server.peer.sendNotification(
+      "textDocument/publishDiagnostics",
+      publication,
+    );
+    for (const uri of [
+      "https://example.invalid/example.ts",
+      "file:///project/unopened.ts",
+    ]) {
+      await server.peer.sendNotification("textDocument/publishDiagnostics", {
+        uri,
+        diagnostics: [{ message: "not an open file" }],
+      });
+    }
+    await server.peer.sendRequest("workspace/workspaceFolders");
+    expect(await client.diagnostics(file)).toEqual({
+      items: [],
+      freshness: "versioned",
+    });
+    await server.peer.sendRequest("workspace/diagnostic/refresh");
+    const polling = holdTimeout(DIAGNOSTIC_POLL_MS);
+    let completed = false;
+    const pending = client.diagnostics(file).then((report) => {
+      completed = true;
+      return report;
+    });
+    const resume = await polling;
+    try {
+      expect(completed).toBe(false);
+      await server.peer.sendNotification(
+        "textDocument/publishDiagnostics",
+        publication,
+      );
+      await server.peer.sendRequest("workspace/workspaceFolders");
+    } finally {
+      resume();
+    }
+    expect(await pending).toEqual({ items: [], freshness: "versioned" });
+  });
 });
 
 describe("LanguageServer.capabilities", () => {
-  test("should overlay dynamic registrations and restore initialization capabilities when unregistered", async () => {
+  it("should overlay dynamic registrations and restore initialization capabilities when unregistered", async () => {
     const base: ServerCapabilities = { hoverProvider: false };
     const server = fixture({ capabilities: base });
     const client = await server.pool.get(server.config);
@@ -424,7 +627,7 @@ describe("LanguageServer.capabilities", () => {
     expect(client.capabilities).toEqual(base);
   });
 
-  test("should preserve registrations atomically when a registration or unregistration batch is invalid", async () => {
+  it("should preserve registrations atomically when a registration or unregistration batch is invalid", async () => {
     const server = fixture();
     const client = await server.pool.get(server.config);
     await server.peer.sendRequest("client/registerCapability", {
@@ -454,7 +657,7 @@ describe("LanguageServer.capabilities", () => {
 });
 
 describe("LanguageServer.request", () => {
-  test("should resolve exact and nested settings without exposing inherited configuration when the peer requests sections", async () => {
+  it("should resolve exact and nested settings without exposing inherited configuration when the peer requests sections", async () => {
     const server = fixture();
     server.config.settings = {
       "editor.tabSize": EXACT_TAB_SIZE,
@@ -491,12 +694,16 @@ describe("LanguageServer.request", () => {
     ).rejects.toMatchObject({ code: -32_602 });
   });
 
-  test("should report invalid edits and handler failures without applying malformed peer requests", async () => {
+  it("should report invalid edits and handler failures without applying malformed peer requests", async () => {
     const apply = mock<
       ConstructorParameters<typeof StdioLanguageServerPool>[0]["onApplyEdit"]
     >().mockRejectedValue(new Error("edit transaction refused"));
     const server = fixture({ onApplyEdit: apply });
     const client = await server.pool.get(server.config);
+    expect(await server.peer.sendRequest("workspace/applyEdit")).toEqual({
+      applied: false,
+      failureReason: "Invalid workspace edit",
+    });
     expect(
       await server.peer.sendRequest<unknown>("workspace/applyEdit", {
         // biome-ignore lint/plugin/biome-rules/use-undefined: This malformed peer edit tests rejection of external null.
@@ -519,7 +726,7 @@ describe("LanguageServer.request", () => {
     });
   });
 
-  test("should stop a peer that ignores request cancellation after the grace period", async () => {
+  it("should stop a peer that ignores request cancellation after the grace period", async () => {
     const server = fixture();
     const requested = Promise.withResolvers<void>();
     // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve the LSP nullable hover response.
@@ -582,10 +789,133 @@ describe("LanguageServer.request", () => {
       await canceled;
     }
   });
+
+  it.each([
+    ["missing configuration parameters", "workspace/configuration", undefined],
+    [
+      "a non-array configuration list",
+      "workspace/configuration",
+      { items: {} },
+    ],
+    ["missing registration parameters", "client/registerCapability", undefined],
+    [
+      "a non-array registration list",
+      "client/registerCapability",
+      { registrations: {} },
+    ],
+    [
+      "a non-object registration",
+      "client/registerCapability",
+      { registrations: [false] },
+    ],
+    [
+      "missing unregistration parameters",
+      "client/unregisterCapability",
+      undefined,
+    ],
+  ] as const)(
+    "should reject %s without losing active capabilities",
+    async (_condition, method, params) => {
+      const server = fixture({ capabilities: { hoverProvider: true } });
+      const client = await server.pool.get(server.config);
+      const failure = await server.peer
+        .sendRequest(method, params)
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ code: -32_602 });
+      expect(client.capabilities.hoverProvider).toBe(true);
+      expect(client.isAlive).toBe(true);
+    },
+  );
+});
+
+describe("LanguageServer.syncFile", () => {
+  it("should replace numeric incremental synchronization with a UTF-16 range across CRLF", async () => {
+    const server = fixture({ capabilities: { textDocumentSync: 2 } });
+    const changes = mock();
+    server.peer.onNotification("textDocument/didChange", changes);
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await client.syncFile(file, "a\r\n😀");
+    const priorVersion = client.document(file)?.version;
+    await client.syncFile(file, "replacement");
+    await client.request("test/echo", undefined);
+    expect(changes).toHaveBeenCalledWith({
+      textDocument: {
+        uri: pathToFileURL(file).href,
+        version: client.document(file)?.version,
+      },
+      contentChanges: [
+        {
+          text: "replacement",
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 1, character: 2 },
+          },
+        },
+      ],
+    });
+    expect(client.document(file)?.version).toBe((priorVersion ?? 0) + 1);
+  });
+
+  it("should close and reopen changed text when the peer only supports open-close synchronization", async () => {
+    const server = fixture({
+      capabilities: { textDocumentSync: { openClose: true, change: 0 } },
+    });
+    const opened = mock();
+    const closed = mock();
+    server.peer.onNotification("textDocument/didOpen", opened);
+    server.peer.onNotification("textDocument/didClose", closed);
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await client.syncFile(file, "before");
+    await client.syncFile(file, "after");
+    await client.request("test/echo", undefined);
+    expect(
+      opened.mock.calls.map(([params]) => params.textDocument.text),
+    ).toEqual(["before", "after"]);
+    expect(closed.mock.calls).toEqual([
+      [{ textDocument: { uri: pathToFileURL(file).href } }],
+    ]);
+    expect(client.document(file)?.content).toBe("after");
+  });
+
+  it("should retain the prior snapshot when changes are unsupported and allow a later reopen", async () => {
+    const server = fixture({ capabilities: { textDocumentSync: 0 } });
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await client.syncFile(file, "before");
+    const prior = client.document(file);
+    await expect(client.syncFile(file, "after")).rejects.toThrow(
+      "cannot synchronize changes",
+    );
+    expect(client.document(file)).toEqual(prior);
+    await client.closeFile(file);
+    await client.syncFile(file, "after");
+    expect(client.document(file)?.content).toBe("after");
+    expect(() => client.syncFile("example.ts", "content")).toThrow(
+      "LSP requires an absolute file path",
+    );
+  });
+
+  it("should reject a pre-cancelled synchronization without poisoning the document queue", async () => {
+    const server = fixture();
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await expect(
+      client.syncFile(
+        file,
+        "cancelled",
+        AbortSignal.abort("cancelled by caller"),
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(client.document(file)).toBeUndefined();
+    await client.syncFile(file, "accepted");
+    expect(client.document(file)?.content).toBe("accepted");
+  });
 });
 
 describe("LanguageServer.saved", () => {
-  test("should send current saved text and watched changes but stop saving a closed document", async () => {
+  it("should send current saved text and watched changes but stop saving a closed document", async () => {
     const server = fixture({
       capabilities: {
         textDocumentSync: {
@@ -631,7 +961,7 @@ describe("LanguageServer.saved", () => {
 });
 
 describe("LanguageServer.shutdown", () => {
-  test("should retain bounded stderr and release owned listeners when the server exits unexpectedly", async () => {
+  it("should retain bounded stderr and release owned listeners when the server exits unexpectedly", async () => {
     const server = fixture();
     const client = await server.pool.get(server.config);
     server.stderr.write(
@@ -655,7 +985,7 @@ describe("LanguageServer.shutdown", () => {
     expect(server.pool.clients()).toEqual([]);
   });
 
-  test("should retain transport and cleanup failures and release listeners when process termination rejects", async () => {
+  it("should retain transport and cleanup failures and release listeners when process termination rejects", async () => {
     const server = fixture();
     const client = await server.pool.get(server.config);
     const cleanupError = new Error("process group termination failed");
@@ -693,7 +1023,7 @@ describe("LanguageServer.shutdown", () => {
     }
   });
 
-  test("should reject pending work and clear owned documents without sending cancellation traffic when the owner shuts down", async () => {
+  it("should reject pending work and clear owned documents without sending cancellation traffic when the owner shuts down", async () => {
     const server = fixture();
     const requested = Promise.withResolvers<void>();
     // biome-ignore lint/plugin/biome-rules/use-undefined: Preserve the LSP nullable hover response.
@@ -738,10 +1068,35 @@ describe("LanguageServer.shutdown", () => {
       await client.shutdown();
     }
   });
+
+  it.each([
+    ["missing parameters", undefined],
+    ["a missing document URI", { diagnostics: [] }],
+  ] as const)(
+    "should stop a peer that publishes diagnostics with %s",
+    async (_condition, params) => {
+      const server = fixture();
+      const client = await server.pool.get(server.config);
+      const closed = Promise.withResolvers<void>();
+      server.child.once("close", () => closed.resolve());
+      await server.peer.sendNotification(
+        "textDocument/publishDiagnostics",
+        params,
+      );
+      await closed.promise;
+      await expect(client.diagnostics("/project/example.ts")).rejects.toThrow(
+        "published diagnostics without a document URI",
+      );
+      await client.shutdown();
+      expect(server.stop).toHaveBeenCalledTimes(1);
+      expect(server.pool.clients()).toEqual([]);
+      expect(server.stderr.listenerCount("data")).toBe(0);
+    },
+  );
 });
 
 describe("StdioLanguageServerPool.clients", () => {
-  test("should keep active requests alive and stop idle clients when the owned idle sweep runs", async () => {
+  it("should keep active requests alive and stop idle clients when the owned idle sweep runs", async () => {
     // biome-ignore lint/plugin/biome-rules/use-undefined: A null prototype creates an inert timer handle without inherited properties.
     const timerHandle: NodeJS.Timeout = Object.assign(Object.create(null), {
       unref: () => timerHandle,
@@ -797,7 +1152,7 @@ describe("StdioLanguageServerPool.clients", () => {
 });
 
 describe("StdioLanguageServerPool.stop", () => {
-  test("should leave a live client available when its name is not selected", async () => {
+  it("should leave a live client available when its name is not selected", async () => {
     const server = fixture();
     const client = await server.pool.get(server.config);
     await server.pool.stop(["another-server"]);
@@ -817,7 +1172,7 @@ describe("StdioLanguageServerPool.stop", () => {
 
 describe("startup transport failures", () => {
   describe("StdioLanguageServerPool.get", () => {
-    test.each([
+    it.each([
       ["a partial header", "Content-Len"],
       ["a partial body", "Content-Length: 20\r\n\r\n{"],
     ])(
@@ -837,7 +1192,7 @@ describe("startup transport failures", () => {
       },
     );
 
-    test("should reject startup with stderr context when stdout closes at a message boundary", async () => {
+    it("should reject startup with stderr context when stdout closes at a message boundary", async () => {
       const server = fixture({ holdInitialize: true });
       const pending = server.pool.get(server.config);
       const rejected = pending.catch((error: unknown) => error);
@@ -852,7 +1207,7 @@ describe("startup transport failures", () => {
       expect(server.stop).toHaveBeenCalledTimes(1);
     });
 
-    test("should reject startup and release its process when a framed message contains invalid JSON", async () => {
+    it("should reject startup and release its process when a framed message contains invalid JSON", async () => {
       const server = fixture({ holdInitialize: true });
       const pending = server.pool.get(server.config);
       const rejected = pending.catch((error: unknown) => error);
@@ -866,5 +1221,25 @@ describe("startup transport failures", () => {
       expect(server.pool.clients()).toEqual([]);
       expect(server.stop).toHaveBeenCalledTimes(1);
     });
+
+    it.each([
+      ["a missing length", "Content-Type: application/json\r\n\r\n"],
+      ["a nonnumeric length", "Content-Length: invalid\r\n\r\n"],
+    ])(
+      "should reject startup and release the process when the header has %s",
+      async (_condition, bytes) => {
+        const server = fixture({ holdInitialize: true });
+        const pending = server.pool
+          .get(server.config)
+          .catch((error: unknown) => error);
+        await server.initializing;
+        server.output.write(bytes);
+        expect(await pending).toMatchObject({
+          message: "Invalid LSP Content-Length header",
+        });
+        expect(server.stop).toHaveBeenCalledTimes(1);
+        expect(server.pool.clients()).toEqual([]);
+      },
+    );
   });
 });

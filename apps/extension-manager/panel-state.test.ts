@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { ExtensionCatalog } from "./catalog.ts";
 import { ExtensionManagerPanelState } from "./panel-state.ts";
 import { catalogRow, panelCatalogSeed } from "./panel-test-fixtures.ts";
@@ -51,7 +51,7 @@ const moveTabCases: [number, number, string][] = [
 ];
 
 describe("ExtensionManagerPanelState.listEntries", () => {
-  test.each(tabCases)(
+  it.each(tabCases)(
     "should group and filter entries for tab %i",
     (tabIndex: number, headers: string[], labels: string[], _kinds: ResourceKind[]) => {
       const state = panelState();
@@ -69,7 +69,7 @@ describe("ExtensionManagerPanelState.listEntries", () => {
 });
 
 describe("ExtensionManagerPanelState.moveTab", () => {
-  test.each(tabCases)(
+  it.each(tabCases)(
     "should select tab %i and expose only its resource kinds",
     (tabIndex: number, _headers: string[], _labels: string[], kinds: ResourceKind[]) => {
       const state = panelState();
@@ -81,7 +81,7 @@ describe("ExtensionManagerPanelState.moveTab", () => {
     },
   );
 
-  test.each(moveTabCases)(
+  it.each(moveTabCases)(
     "should wrap by %i to tab %i, close details, and keep selection %s",
     (delta: number, expectedIndex: number, expectedSelection: string) => {
       const state = panelState();
@@ -97,7 +97,7 @@ describe("ExtensionManagerPanelState.moveTab", () => {
 });
 
 describe("ExtensionManagerPanelState.moveSelection", () => {
-  test("should select the first row and clamp movement at both ends", () => {
+  it("should select the first row and clamp movement at both ends", () => {
     const state = panelState();
     expect(state.selectedId).toBe("alpha");
 
@@ -112,7 +112,7 @@ describe("ExtensionManagerPanelState.moveSelection", () => {
     expect(state.selectedId).toBe("beta");
   });
 
-  test("should keep selection empty when no rows match", () => {
+  it("should keep selection empty when no rows match", () => {
     const state = panelState();
     state.appendSearch("zzzzq");
 
@@ -123,7 +123,7 @@ describe("ExtensionManagerPanelState.moveSelection", () => {
 });
 
 describe("ExtensionManagerPanelState.select", () => {
-  test("should select only rows that are visible", () => {
+  it("should select only rows that are visible", () => {
     const state = panelState();
     state.appendSearch("npmkit beta");
 
@@ -137,7 +137,7 @@ describe("ExtensionManagerPanelState.select", () => {
 });
 
 describe("ExtensionManagerPanelState.appendSearch", () => {
-  test("should move selection to the sole visible row when the query changes", () => {
+  it("should move selection to the sole visible row when the query changes", () => {
     const state = panelState();
 
     state.appendSearch("npmkit beta");
@@ -145,7 +145,7 @@ describe("ExtensionManagerPanelState.appendSearch", () => {
     expect(state.selectedId).toBe("beta");
   });
 
-  test("should close details when the query changes", () => {
+  it("should close details when the query changes", () => {
     const state = panelState();
     state.detailsOpen = true;
 
@@ -154,7 +154,7 @@ describe("ExtensionManagerPanelState.appendSearch", () => {
     expect(state.detailsOpen).toBe(false);
   });
 
-  test("should fuzzy-search metadata and move selection into the results", () => {
+  it("should fuzzy-search metadata and move selection into the results", () => {
     const state = panelState();
     state.appendSearch("npmkit beta");
 
@@ -164,7 +164,7 @@ describe("ExtensionManagerPanelState.appendSearch", () => {
     expect(state.selectedRow()?.id).toBe("beta");
   });
 
-  test("should append astral characters to the query", () => {
+  it("should append astral characters to the query", () => {
     const state = panelState();
 
     state.appendSearch("na");
@@ -173,7 +173,7 @@ describe("ExtensionManagerPanelState.appendSearch", () => {
     expect(state.query).toBe("na\u{1f600}");
   });
 
-  test("should clear selection when no rows match", () => {
+  it("should clear selection when no rows match", () => {
     const state = panelState();
 
     state.appendSearch("zzzzq");
@@ -185,7 +185,7 @@ describe("ExtensionManagerPanelState.appendSearch", () => {
 });
 
 describe("ExtensionManagerPanelState.backspaceSearch", () => {
-  test("should drop one code point per backspace, including astral characters", () => {
+  it("should drop one code point per backspace, including astral characters", () => {
     const state = panelState();
     state.appendSearch("na");
     state.appendSearch("\u{1f600}");
@@ -199,7 +199,7 @@ describe("ExtensionManagerPanelState.backspaceSearch", () => {
 });
 
 describe("ExtensionManagerPanelState.clearSearch", () => {
-  test("should restore the first selection when clearing a query with no matches", () => {
+  it("should restore the first selection when clearing a query with no matches", () => {
     const state = panelState();
     state.appendSearch("zzzzq");
 

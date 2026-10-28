@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type { PathLike, PathOrFileDescriptor } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept live named filesystem imports without replacing pure discovery policy.
 import * as fs from "node:fs";
@@ -9,7 +9,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 // biome-ignore lint/performance/noNamespaceImport: Restore only host effect spies; frontmatter parsing and other host exports must remain real.
 import * as host from "@earendil-works/pi-coding-agent";
-import { discoverCatalog } from "./discovery.ts";
+import { discoverCatalog, PackageResolutionFailure } from "./discovery.ts";
 
 const agentDir = "/unit/agent";
 const cwd = "/unit/project";
@@ -107,7 +107,107 @@ function mockSkillDiscovery(preview: string) {
 }
 
 describe("discoverCatalog", () => {
-  test("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
+  it("should recover autoload rows and diagnose failed top-level and origin resolutions", async () => {
+    const { resolve, readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ skills: ["./skills/review", "-skills/other"] }),
+    );
+    resolve
+      .mockRejectedValueOnce(new Error("top-level unavailable"))
+      .mockRejectedValueOnce("extension autoload unavailable")
+      .mockRejectedValueOnce(new Error("declared skill unavailable"));
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]).toMatchObject({
+      name: "review-code",
+      source: "Auto-discovered",
+      origins: [{ label: `${agentDir}/skills (auto)`, source: "auto" }],
+    });
+    expect(catalog.diagnostics).toEqual([
+      {
+        scope: "global",
+        message: "Top-level discovery failed: top-level unavailable",
+      },
+      {
+        scope: "global",
+        message:
+          "Could not inspect auto-discovered extensions: extension autoload unavailable",
+      },
+      {
+        scope: "global",
+        message: "Could not inspect skills[0]: declared skill unavailable",
+      },
+    ]);
+  });
+
+  it("should preserve unrelated resources when locating and inspecting installed packages fail", async () => {
+    const { readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ packages: ["npm:missing", "npm:broken"] }),
+    );
+    spyOn(host.DefaultPackageManager.prototype, "getInstalledPath")
+      .mockImplementationOnce(() => {
+        throw new Error("cache unavailable");
+      })
+      .mockReturnValueOnce("/unit/broken");
+    spyOn(
+      host.DefaultPackageManager.prototype,
+      "resolveExtensionSources",
+    ).mockRejectedValue("manifest unreadable");
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]?.name).toBe("review-code");
+    expect(catalog.diagnostics).toEqual([
+      {
+        scope: "global",
+        source: "npm:missing",
+        message: "Could not locate npm:missing: cache unavailable",
+      },
+      {
+        scope: "global",
+        source: "npm:broken",
+        message: "Could not inspect npm:broken: manifest unreadable",
+      },
+    ]);
+  });
+
+  it("should expose an invalid global settings document without hiding autoload rows", async () => {
+    const { readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue("[]");
+
+    const catalog = await discoverCatalog(options);
+
+    expect(catalog.rows[0]?.name).toBe("review-code");
+    expect(catalog.diagnostics).toContainEqual({
+      scope: "global",
+      path: settingsPath,
+      message: "Settings root must be a JSON object",
+    });
+    expect(catalog.settings.get("global")?.error).toBe(
+      "Settings root must be a JSON object",
+    );
+  });
+
+  it("should preserve the aggregate resolver failure for malformed settings", async () => {
+    const { resolve, readSettings } = mockSkillDiscovery("# Review");
+    readSettings.mockReturnValue(
+      JSON.stringify({ extensions: 7, skills: [1], packages: {} }),
+    );
+    const cause = new TypeError("packages is not iterable");
+    resolve.mockRejectedValue(cause);
+
+    const result = discoverCatalog(options);
+
+    await expect(result).rejects.toBeInstanceOf(PackageResolutionFailure);
+    await expect(result).rejects.toMatchObject({
+      message: "Package resolution failed: packages is not iterable",
+      cause,
+    });
+  });
+
+  it("should retain separate settings origins without duplicate occurrence paths when a skill is declared twice", async () => {
     const { resource, resolve, readSettings } = mockSkillDiscovery("# Review");
     resolve.mockResolvedValue({
       extensions: [],
@@ -145,7 +245,7 @@ describe("discoverCatalog", () => {
     ]);
   });
 
-  test("should mark the global package as shadowed when a regular project entry has the same package identity", async () => {
+  it("should mark the global package as shadowed when a regular project entry has the same package identity", async () => {
     const { resolve, readSettings } = mockSkillDiscovery("");
     const globalRoot = `${agentDir}/npm/node_modules/kit`;
     const projectRoot = `${cwd}/.pi/npm/node_modules/kit`;
@@ -234,7 +334,7 @@ describe("discoverCatalog", () => {
     });
   });
 
-  test("should use loaded skill metadata and a safe body preview when the file contains frontmatter and terminal controls", async () => {
+  it("should use loaded skill metadata and a safe body preview when the file contains frontmatter and terminal controls", async () => {
     const { close } = mockSkillDiscovery(
       [
         "---",
@@ -262,7 +362,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test("should bound file reads and preview characters when a UTF-8 skill exceeds both budgets", async () => {
+  it("should bound file reads and preview characters when a UTF-8 skill exceeds both budgets", async () => {
     const { read, close } = mockSkillDiscovery(
       `${"é".repeat(previewByteLimit)}not part of the preview`,
     );
@@ -281,7 +381,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test("should retain skill metadata without a preview when the file cannot be opened", async () => {
+  it("should retain skill metadata without a preview when the file cannot be opened", async () => {
     const { open, close } = mockSkillDiscovery("unreadable");
     open.mockImplementation(() => {
       throw new Error("permission denied");
@@ -298,7 +398,7 @@ describe("discoverCatalog", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  test("should retain skill metadata and close the descriptor when reading the preview fails", async () => {
+  it("should retain skill metadata and close the descriptor when reading the preview fails", async () => {
     const { read, close } = mockSkillDiscovery("unreadable");
     read.mockImplementation(() => {
       throw new Error("read failed");
@@ -315,7 +415,7 @@ describe("discoverCatalog", () => {
     expect(close).toHaveBeenCalledWith(descriptor);
   });
 
-  test.each([
+  it.each([
     ["no text", ""],
     [
       "only frontmatter, whitespace, and controls",
@@ -334,7 +434,7 @@ describe("discoverCatalog", () => {
     },
   );
 
-  test("should forward diagnostics and use the directory name when skill loading returns no metadata", async () => {
+  it("should forward diagnostics and use the directory name when skill loading returns no metadata", async () => {
     const { loadSkills } = mockSkillDiscovery("# Still available");
     loadSkills.mockReturnValue({
       skills: [],

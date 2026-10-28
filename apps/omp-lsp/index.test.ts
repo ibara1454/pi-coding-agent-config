@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -123,7 +123,7 @@ const theme = {
 } as Parameters<NonNullable<ToolDefinition["renderCall"]>>[1];
 
 describe("lsp.execute", () => {
-  test("should clip sanitized output and preserve details when a workspace returns oversized text", async () => {
+  it("should clip sanitized output and preserve details when a workspace returns oversized text", async () => {
     const { workspace, execute } = fixture();
     workspace.execute.mockResolvedValue({
       text: `\u001b[31m${"x".repeat(OUTPUT_LIMIT + 1)}\u0007`,
@@ -143,7 +143,7 @@ describe("lsp.execute", () => {
     });
   });
 
-  test("should reject sanitized workspace failures when the requested command cannot complete", async () => {
+  it("should reject sanitized workspace failures when the requested command cannot complete", async () => {
     const { workspace, execute } = fixture();
     workspace.execute.mockResolvedValue({
       text: "\u001b[31mfailed\trequest\u0007",
@@ -156,7 +156,7 @@ describe("lsp.execute", () => {
 });
 
 describe("lsp.renderCall", () => {
-  test.each([
+  it.each([
     [
       {
         action: "hover\n\u0007",
@@ -189,7 +189,7 @@ describe("lsp.renderCall", () => {
 });
 
 describe("lsp.renderResult", () => {
-  test.each([
+  it.each([
     {
       condition: "a long result is collapsed",
       expanded: false,
@@ -247,7 +247,7 @@ describe("lsp.renderResult", () => {
 });
 
 describe("lsp.tool_result", () => {
-  test.each([
+  it.each([
     ["~", homedir()],
     ["~/source.ts", join(homedir(), "source.ts")],
     [pathToFileURL("/project/source.ts").href, "/project/source.ts"],
@@ -274,7 +274,7 @@ describe("lsp.tool_result", () => {
     },
   );
 
-  test("should preserve successful mutation content when optional feedback fails", async () => {
+  it("should preserve successful mutation content when optional feedback fails", async () => {
     const { workspace, emit } = fixture();
     workspace.afterMutation.mockRejectedValue(
       new Error("\u001b[31munavailable\tserver\u0007"),
@@ -296,7 +296,7 @@ describe("lsp.tool_result", () => {
     });
   });
 
-  test("should omit optional feedback when cancellation interrupts the mutation event", async () => {
+  it("should omit optional feedback when cancellation interrupts the mutation event", async () => {
     const { context, workspace, emit } = fixture();
     context.signal = AbortSignal.abort(new Error("cancelled"));
     expect(
@@ -311,7 +311,7 @@ describe("lsp.tool_result", () => {
 });
 
 describe("lsp.session_start", () => {
-  test("should notify initialization failure and allow recovery when workspace acquisition rejects", async () => {
+  it("should notify initialization failure and allow recovery when workspace acquisition rejects", async () => {
     const { create, emit, notifications, execute } = fixture();
     create.mockRejectedValueOnce(
       new Error("\u001b[31mconfiguration\tfailed\u0007"),
@@ -330,7 +330,7 @@ describe("lsp.session_start", () => {
 });
 
 describe("lsp.session_shutdown", () => {
-  test("should report sanitized disposal failures and release state when the session shuts down", async () => {
+  it("should report sanitized disposal failures and release state when the session shuts down", async () => {
     const { workspace, emit, notifications, execute } = fixture();
     await execute({ action: "status" });
     workspace.dispose.mockRejectedValueOnce(

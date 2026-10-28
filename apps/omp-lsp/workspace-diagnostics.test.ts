@@ -3,9 +3,9 @@ import {
   beforeEach,
   describe,
   expect,
+  it,
   mock,
   spyOn,
-  test,
 } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies must intercept the compiler probe's live named filesystem imports.
 import * as fs from "node:fs/promises";
@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => mock.restore());
 
 describe("runWorkspaceDiagnostics", () => {
-  test("should return compiler findings without treating a diagnostic exit as a tool failure", async () => {
+  it("should return compiler findings without treating a diagnostic exit as a tool failure", async () => {
     spyOn(processes, "runCommand").mockResolvedValue({
       stdout:
         "main.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.",
@@ -58,7 +58,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(result.text).toContain("TS2322");
   });
 
-  test("should reject a nonzero exit without output instead of claiming a clean workspace", async () => {
+  it("should reject a nonzero exit without output instead of claiming a clean workspace", async () => {
     spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "",
       stderr: "",
@@ -69,7 +69,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(result.text).not.toContain("No issues found");
   });
 
-  test("should report an unverified workspace without running a process when both TypeScript compilers are unavailable", async () => {
+  it("should report an unverified workspace without running a process when both TypeScript compilers are unavailable", async () => {
     spyOn(config, "resolveCommand").mockResolvedValue(undefined);
     const run = spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "",
@@ -85,7 +85,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     {
       condition: "invalid JSON",
       report: "{",
@@ -125,7 +125,7 @@ describe("runWorkspaceDiagnostics", () => {
     },
   );
 
-  test("should aggregate clean checks, findings and failures when a workspace has multiple languages", async () => {
+  it("should aggregate clean checks, findings and failures when a workspace has multiple languages", async () => {
     fixtureMarkers([
       "Cargo.toml",
       "tsconfig.json",
@@ -198,7 +198,7 @@ describe("runWorkspaceDiagnostics", () => {
     );
   });
 
-  test.each([
+  it.each([
     0,
     -1,
     Number.NaN,
@@ -221,7 +221,7 @@ describe("runWorkspaceDiagnostics", () => {
     },
   );
 
-  test("should report marker permission failures without launching a checker", async () => {
+  it("should report marker permission failures without launching a checker", async () => {
     spyOn(fs, "access").mockRejectedValue(
       Object.assign(new Error("permission denied"), { code: "EACCES" }),
     );
@@ -234,7 +234,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test("should report an unverified workspace when no supported project markers exist", async () => {
+  it("should report an unverified workspace when no supported project markers exist", async () => {
     fixtureMarkers([]);
     const run = spyOn(processes, "runCommand");
     const result = await runWorkspaceDiagnostics("/project");
@@ -244,7 +244,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test.each([
+  it.each([
     ["a non-object report", "null", "returned no workspace modules"],
     [
       "too many modules",
@@ -268,7 +268,7 @@ describe("runWorkspaceDiagnostics", () => {
     },
   );
 
-  test("should retain the Go discovery failure and skip the build when discovery exits nonzero", async () => {
+  it("should retain the Go discovery failure and skip the build when discovery exits nonzero", async () => {
     fixtureMarkers(["go.work"]);
     const run = spyOn(processes, "runCommand").mockResolvedValue({
       stdout: "",
@@ -283,7 +283,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  test("should stop before resolving commands when marker discovery exhausts the shared deadline", async () => {
+  it("should stop before resolving commands when marker discovery exhausts the shared deadline", async () => {
     spyOn(Date, "now")
       .mockReturnValueOnce(DISCOVERY_START_MS)
       .mockReturnValue(DISCOVERY_END_MS);
@@ -296,7 +296,7 @@ describe("runWorkspaceDiagnostics", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  test("should propagate caller cancellation instead of reporting completed diagnostics when a command aborts", async () => {
+  it("should propagate caller cancellation instead of reporting completed diagnostics when a command aborts", async () => {
     const controller = new AbortController();
     const reason = new Error("caller canceled diagnostics");
     spyOn(processes, "runCommand").mockImplementation(

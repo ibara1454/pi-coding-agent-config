@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,14 +114,14 @@ function createDummyPanelHost(): PanelHost {
 }
 
 describe("createDefaultRuntime", () => {
-  test("should return the package-manifest entry module as selfPath", () => {
+  it("should return the package-manifest entry module as selfPath", () => {
     const runtime = createDefaultRuntime();
 
     expect(runtime.selfPath).toBe(declaredEntryPath());
     expect(existsSync(runtime.selfPath)).toBe(true);
   });
 
-  test("should open the panel as a full-size top-left overlay", async () => {
+  it("should open the panel as a full-size top-left overlay", async () => {
     const runtime = createDefaultRuntime();
     const host = createDummyPanelHost();
 
@@ -145,7 +145,7 @@ describe("createDefaultRuntime", () => {
     await open;
   });
 
-  test("should return the panel result and tear the panel down once", async () => {
+  it("should return the panel result and tear the panel down once", async () => {
     const runtime = createDefaultRuntime();
     const host = createDummyPanelHost();
 
@@ -181,7 +181,7 @@ describe("createDefaultRuntime", () => {
     expect(host.teardowns()).toBe(1);
   });
 
-  test("should dispose only panels owned by the returned runtime", async () => {
+  it("should dispose only panels owned by the returned runtime", async () => {
     const first = createDefaultRuntime();
     const second = createDefaultRuntime();
     const firstHost = createDummyPanelHost();
@@ -214,7 +214,7 @@ describe("createDefaultRuntime", () => {
     expect(secondHost.teardowns()).toBe(1);
   });
 
-  test("should tear the panel down once when dispose is invoked repeatedly after closure", async () => {
+  it("should tear the panel down once when dispose is invoked repeatedly after closure", async () => {
     const runtime = createDefaultRuntime();
     const host = createDummyPanelHost();
     const open = runtime.openPanel(

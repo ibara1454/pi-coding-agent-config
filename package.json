@@ -13,15 +13,15 @@
   "license": "MIT",
   "author": "",
   "type": "module",
-  "packageManager": "bun@1.4.3",
+  "packageManager": "bun@1.4.4",
   "devDependencies": {
-    "@biomejs/biome": "2.6.2",
+    "@biomejs/biome": "2.6.3",
     "@earendil-works/pi-ai": "^0.84.1",
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@earendil-works/pi-tui": "^0.84.1",
-    "@types/bun": "1.4.3",
+    "@types/bun": "1.4.4",
     "biome-rules": "workspace:*",
-    "turbo": "^2.11.9"
+    "turbo": "^2.11.10"
   },
   "scripts": {
     "check": "turbo run lint typecheck",

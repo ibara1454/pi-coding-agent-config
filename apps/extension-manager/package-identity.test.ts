@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { packageIdentity } from "./package-identity.ts";
@@ -138,7 +138,7 @@ const identityCases: readonly IdentityCase[] = [
 ];
 
 describe("packageIdentity", () => {
-  test.each(identityCases.map((entry) => [entry.label, entry] as const))(
+  it.each(identityCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected identity for: %s",
     (_label, scenario) => {
       const identity = packageIdentity(
@@ -151,7 +151,7 @@ describe("packageIdentity", () => {
     },
   );
 
-  test("should keep a managed package identity stable across scopes", () => {
+  it("should keep a managed package identity stable across scopes", () => {
     const npmGlobal = packageIdentity("npm:kit", "global", cwd, agentDir);
     const npmProject = packageIdentity("npm:kit", "project", cwd, agentDir);
     const gitSource = "https://github.com/org/repo.git";
@@ -167,7 +167,7 @@ describe("packageIdentity", () => {
     expect(gitProject).toBe(gitGlobal);
   });
 
-  test("should scope a local package identity to its settings base directory", () => {
+  it("should scope a local package identity to its settings base directory", () => {
     const globalIdentity = packageIdentity("./pkg", "global", cwd, agentDir);
     const projectIdentity = packageIdentity("./pkg", "project", cwd, agentDir);
 

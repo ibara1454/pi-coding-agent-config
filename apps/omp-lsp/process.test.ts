@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies must intercept live named imports of Node's process launcher.
 import * as childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -110,7 +110,7 @@ afterEach(() => {
 });
 
 describe("runCommand", () => {
-  test("should reject incomplete stdout when a successful process exceeds the capture limit", async () => {
+  it("should reject incomplete stdout when a successful process exceeds the capture limit", async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const child: Pick<
@@ -154,7 +154,7 @@ describe("runCommand", () => {
     }
   });
 
-  test("should stop a noisy process once when overflow and cancellation overlap", async () => {
+  it("should stop a noisy process once when overflow and cancellation overlap", async () => {
     const { child, signals } = fixture();
     const controller = new AbortController();
     const result = runCommand("noisy", [], {
@@ -186,7 +186,7 @@ describe("runCommand", () => {
     );
   });
 
-  test("should capture complete UTF-8 streams and preserve nonzero status when stdin is supplied", async () => {
+  it("should capture complete UTF-8 streams and preserve nonzero status when stdin is supplied", async () => {
     const { child, signals } = fixture();
     const controller = new AbortController();
     const removed = spyOn(controller.signal, "removeEventListener");
@@ -222,7 +222,7 @@ describe("runCommand", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
-  test("should reject spawn failures and remove command listeners when the executable cannot start", async () => {
+  it("should reject spawn failures and remove command listeners when the executable cannot start", async () => {
     const { child } = fixture();
     const failure = Object.assign(new Error("executable missing"), {
       code: "ENOENT",
@@ -239,7 +239,7 @@ describe("runCommand", () => {
     expect(child.stderr.listenerCount("data")).toBe(0);
   });
 
-  test("should preserve exit status when the child closes stdin before consuming it", async () => {
+  it("should preserve exit status when the child closes stdin before consuming it", async () => {
     const { child, signals } = fixture();
     const pending = runCommand("early-exit", [], { cwd: "/project" });
     child.stdin.emit(
@@ -254,7 +254,7 @@ describe("runCommand", () => {
     expect(child.kill.mock.calls).toEqual([]);
   });
 
-  test("should stop the child and reject its input error when stdin fails for a reason other than a broken pipe", async () => {
+  it("should stop the child and reject its input error when stdin fails for a reason other than a broken pipe", async () => {
     const { child, signals } = fixture();
     const failure = Object.assign(new Error("input stream failed"), {
       code: "EIO",
@@ -277,7 +277,7 @@ describe("runCommand", () => {
     expect(child.stdin.listenerCount("error")).toBe(0);
   });
 
-  test("should reject the cancellation reason and remove its listener when a running command is aborted", async () => {
+  it("should reject the cancellation reason and remove its listener when a running command is aborted", async () => {
     const { child, signals } = fixture();
     const controller = new AbortController();
     const removed = spyOn(controller.signal, "removeEventListener");
@@ -301,7 +301,7 @@ describe("runCommand", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
-  test("should reject a deadline failure and stop once when the command timeout expires", async () => {
+  it("should reject a deadline failure and stop once when the command timeout expires", async () => {
     const { child, signals } = fixture();
     const scheduled = timers();
     const pending = runCommand("hung", [], {
@@ -322,7 +322,7 @@ describe("runCommand", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
-  test.each([
+  it.each([
     0,
     -1,
     NON_INTEGER_OUTPUT_LIMIT,
@@ -341,7 +341,7 @@ describe("runCommand", () => {
     },
   );
 
-  test("should reject an already-aborted caller before spawning a command", async () => {
+  it("should reject an already-aborted caller before spawning a command", async () => {
     const { spawn } = fixture();
     const failure = new Error("cancelled before launch");
     await expect(
@@ -356,7 +356,7 @@ describe("runCommand", () => {
 
 describe("stopProcess", () => {
   if (process.platform !== "win32") {
-    test("should fall back to the child signal when its process group has disappeared", async () => {
+    it("should fall back to the child signal when its process group has disappeared", async () => {
       const { child, processChild, signals } = fixture();
       signals.mockImplementation(() => {
         throw Object.assign(new Error("group disappeared"), { code: "ESRCH" });
@@ -371,7 +371,7 @@ describe("stopProcess", () => {
     });
   }
 
-  test("should reject signaling failures and remove its close listener when termination cannot be requested", async () => {
+  it("should reject signaling failures and remove its close listener when termination cannot be requested", async () => {
     const { child, processChild, signals, activeSignals } = fixture();
     const scheduled = timers();
     const failure = Object.assign(new Error("permission denied"), {
@@ -391,7 +391,26 @@ describe("stopProcess", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
-  test("should escalate to SIGKILL when graceful termination has not closed the child", async () => {
+  it("should reject force-kill signaling failures and release the pending exit listener", async () => {
+    const { child, processChild, activeSignals } = fixture();
+    const scheduled = timers();
+    const failure = Object.assign(new Error("force kill denied"), {
+      code: "EPERM",
+    });
+    activeSignals
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+    const pending = stopProcess(processChild).catch((error: unknown) => error);
+    scheduled[0]?.run();
+    expect(await pending).toBe(failure);
+    expect(activeSignals).toHaveBeenCalledTimes(2);
+    expect(scheduled).toHaveLength(1);
+    expect(child.listenerCount("close")).toBe(0);
+  });
+
+  it("should escalate to SIGKILL when graceful termination has not closed the child", async () => {
     const { child, processChild, signals } = fixture();
     const scheduled = timers();
     const pending = stopProcess(processChild);
@@ -422,7 +441,7 @@ describe("stopProcess", () => {
     expect(child.listenerCount("close")).toBe(0);
   });
 
-  test("should reject an unobserved exit when the force-kill deadline expires", async () => {
+  it("should reject an unobserved exit when the force-kill deadline expires", async () => {
     const { child, processChild, signals } = fixture();
     const scheduled = timers();
     const pending = stopProcess(processChild).catch((error: unknown) => error);

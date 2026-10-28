@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { lintRule } from "./test-utils.ts";
 
 const invalid = `
@@ -18,7 +18,7 @@ export const text = "value as unknown as Date";
 `;
 
 describe("no-double-type-assertion", () => {
-  test("should reject nested assertions when the intermediate type is unknown", () => {
+  it("should reject nested assertions when the intermediate type is unknown", () => {
     expect(lintRule("no-double-type-assertion", invalid)).toEqual(
       ["value as unknown", "(value as unknown)", "(((value as unknown)))"].map(
         (source) => ({ category: "plugin", severity: "error", source }),
@@ -26,7 +26,7 @@ describe("no-double-type-assertion", () => {
     );
   });
 
-  test("should allow assertions without an unknown intermediate type", () => {
+  it("should allow assertions without an unknown intermediate type", () => {
     expect(lintRule("no-double-type-assertion", valid)).toEqual([]);
   });
 });

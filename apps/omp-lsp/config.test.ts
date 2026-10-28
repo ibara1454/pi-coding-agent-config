@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies must intercept the loader's live named filesystem imports.
 import * as fs from "node:fs/promises";
 import { delimiter, join } from "node:path";
@@ -144,7 +144,7 @@ function fixture(
 }
 
 describe("loadLspConfig", () => {
-  test("should select installed servers without warnings when optional executables are missing", async () => {
+  it("should select installed servers without warnings when optional executables are missing", async () => {
     fixture();
     const config = await loadLspConfig(cwd, agentDir, true);
     expect(config.warnings).toEqual([]);
@@ -155,7 +155,7 @@ describe("loadLspConfig", () => {
     ).toEqual(["available"]);
   });
 
-  test("should report invalid user overrides while retaining an available server", async () => {
+  it("should report invalid user overrides while retaining an available server", async () => {
     fixture({ servers: { available: { args: "--stdio" } } });
     const config = await loadLspConfig(cwd, agentDir, true);
     expect(config.warnings).toHaveLength(1);
@@ -168,7 +168,7 @@ describe("loadLspConfig", () => {
     ).toEqual(["available"]);
   });
 
-  test("should apply flat server overrides without treating the idle timeout as a server", async () => {
+  it("should apply flat server overrides without treating the idle timeout as a server", async () => {
     fixture({
       idleTimeoutMs: 250,
       available: { args: ["--flat"] },
@@ -180,7 +180,7 @@ describe("loadLspConfig", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     { condition: "the document is an array", override: [] },
     { condition: "the server map is an array", override: { servers: [] } },
   ])(
@@ -203,7 +203,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test("should retain prior definitions and apply valid siblings when server entries are malformed", async () => {
+  it("should retain prior definitions and apply valid siblings when server entries are malformed", async () => {
     const files = fixture({
       servers: {
         // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject a null server entry from external JSON configuration.
@@ -231,7 +231,7 @@ describe("loadLspConfig", () => {
     });
   });
 
-  test("should merge valid layers and retain earlier values when project settings are invalid", async () => {
+  it("should merge valid layers and retain earlier values when project settings are invalid", async () => {
     const files = fixture({
       idleTimeoutMs: -1,
       servers: {
@@ -305,7 +305,7 @@ describe("loadLspConfig", () => {
     expect(serversForFile(config, join(cwd, "example.ts"))).toEqual([]);
   });
 
-  test("should load only agent settings and skip executable discovery when the project is untrusted", async () => {
+  it("should load only agent settings and skip executable discovery when the project is untrusted", async () => {
     const files = fixture({ servers: { available: { args: ["--project"] } } });
     files.set(
       join(agentDir, "settings.json"),
@@ -331,7 +331,7 @@ describe("loadLspConfig", () => {
     expect(filesystem.access).not.toHaveBeenCalled();
   });
 
-  test("should warn and preserve defaults when user settings and configuration cannot be parsed", async () => {
+  it("should warn and preserve defaults when user settings and configuration cannot be parsed", async () => {
     const files = fixture();
     files.set(join(agentDir, "settings.json"), "[]");
     files.set(projectConfig, "{");
@@ -349,7 +349,7 @@ describe("loadLspConfig", () => {
     ).toEqual(["available"]);
   });
 
-  test.each([
+  it.each([
     ["the command is blank", { command: " " }, "command must be"],
     ["the command contains a NUL", { command: "tool\0" }, "command must be"],
     [
@@ -406,7 +406,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test("should derive file types and a project root when a new server supplies extension languages", async () => {
+  it("should derive file types and a project root when a new server supplies extension languages", async () => {
     fixture({
       servers: {
         custom: {
@@ -429,7 +429,7 @@ describe("loadLspConfig", () => {
     ]);
   });
 
-  test.each([
+  it.each([
     ["the file is a directory", { regular: false }, "expected a regular file"],
     ["the file exceeds the byte limit", { size: 1_048_577 }, "exceeds 1 MiB"],
     ["the file grows after stat", { size: 1 }, "changed while being read"],
@@ -447,7 +447,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test.each([
+  it.each([
     [
       "access is denied",
       Object.assign(new Error("denied"), { code: "EACCES" }),
@@ -467,7 +467,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["YAML has duplicate keys", "servers: {}\nservers: {}\n", "unique"],
     ["YAML has an unsupported tag", "servers: !unknown {}\n", "Unresolved tag"],
     [
@@ -493,7 +493,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test("should reject excessive payload nesting while preserving the earlier definition", async () => {
+  it("should reject excessive payload nesting while preserving the earlier definition", async () => {
     // biome-ignore lint/plugin/biome-rules/use-undefined: Use a valid JSON null leaf to isolate excessive external payload nesting.
     let nested: unknown = null;
     for (let depth = 0; depth < excessivePayloadDepth; depth++) {
@@ -509,7 +509,7 @@ describe("loadLspConfig", () => {
     ).toBeUndefined();
   });
 
-  test.each([
+  it.each([
     ["the settings have no LSP section", {}, []],
     [
       "the LSP section is not an object",
@@ -527,7 +527,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test.each([
+  it.each([
     // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject a null bundled server map.
     ["the bundled map is missing", null, "must contain a server map"],
     [
@@ -548,7 +548,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["a literal marker is missing", ["missing.json"], [], false],
     [
       "a brace-expanded glob matches",
@@ -572,7 +572,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test("should warn without treating discovery as successful when the root scan exceeds its limit", async () => {
+  it("should warn without treating discovery as successful when the root scan exceeds its limit", async () => {
     fixture({ servers: { available: { rootMarkers: ["*.sln"] } } });
     const directory = Array.from(
       { length: excessiveRootEntries },
@@ -590,7 +590,7 @@ describe("loadLspConfig", () => {
     ).toBeUndefined();
   });
 
-  test("should report root-marker access failures without probing the server executable", async () => {
+  it("should report root-marker access failures without probing the server executable", async () => {
     fixture();
     const access = spyOn(filesystem, "access").mockRejectedValue(
       new Error("marker access failed"),
@@ -604,7 +604,7 @@ describe("loadLspConfig", () => {
     expect(filesystem.stat).not.toHaveBeenCalled();
   });
 
-  test("should substitute the current process identifier when launching OmniSharp", async () => {
+  it("should substitute the current process identifier when launching OmniSharp", async () => {
     fixture({
       servers: {
         omnisharp: {
@@ -621,7 +621,7 @@ describe("loadLspConfig", () => {
     ).toEqual(["--hostPID", String(process.pid), "literal"]);
   });
 
-  test.each([
+  it.each([
     ["the native package has no legacy tsserver", false, "typescript-native"],
     [
       "the package still ships legacy tsserver",
@@ -654,7 +654,7 @@ describe("loadLspConfig", () => {
     },
   );
 
-  test("should retain the conventional TypeScript server when candidate manifests do not identify native TypeScript", async () => {
+  it("should retain the conventional TypeScript server when candidate manifests do not identify native TypeScript", async () => {
     const files = fixture();
     files.set(
       fileURLToPath(new URL("./defaults.json", import.meta.url)),
@@ -672,7 +672,7 @@ describe("loadLspConfig", () => {
     ]);
   });
 
-  test("should report native selection failure and retain the conventional TypeScript server when realpath fails", async () => {
+  it("should report native selection failure and retain the conventional TypeScript server when realpath fails", async () => {
     const files = fixture();
     files.set(
       fileURLToPath(new URL("./defaults.json", import.meta.url)),
@@ -692,7 +692,7 @@ describe("loadLspConfig", () => {
 });
 
 describe("resolveCommand", () => {
-  test("should prefer project-local executables over PATH installations", async () => {
+  it("should prefer project-local executables over PATH installations", async () => {
     fixture();
     const local = join(cwd, "node_modules", ".bin", "tool");
     spyOn(filesystem, "stat").mockResolvedValue({ isFile: () => true });
@@ -705,7 +705,7 @@ describe("resolveCommand", () => {
     expect(filesystem.stat).toHaveBeenCalledTimes(1);
   });
 
-  test("should search PATH after skipping directories and non-executable local files", async () => {
+  it("should search PATH after skipping directories and non-executable local files", async () => {
     fixture();
     spyOn(filesystem, "stat").mockImplementation((target) =>
       Promise.resolve({ isFile: () => !target.includes("node_modules") }),
@@ -722,7 +722,7 @@ describe("resolveCommand", () => {
     ).toBe("/installed/tool");
   });
 
-  test.each(["ENOENT", "ENOTDIR", "EACCES"])(
+  it.each(["ENOENT", "ENOTDIR", "EACCES"])(
     "should return no executable when stat fails with %s",
     async (code) => {
       fixture();
@@ -735,7 +735,7 @@ describe("resolveCommand", () => {
     },
   );
 
-  test.each([new Error("I/O failure"), "unexpected host failure"])(
+  it.each([new Error("I/O failure"), "unexpected host failure"])(
     "should propagate unexpected executable discovery errors when the host returns %s",
     async (failure) => {
       fixture();
@@ -748,7 +748,7 @@ describe("resolveCommand", () => {
 });
 
 describe("serversForFile", () => {
-  test("should match case-insensitive filenames and extensions with semantic servers before linters", () => {
+  it("should match case-insensitive filenames and extensions with semantic servers before linters", () => {
     const semantic: ServerConfig = {
       name: "semantic",
       command: installed,
@@ -801,7 +801,7 @@ describe("serversForFile", () => {
 });
 
 describe("isCliLinter", () => {
-  test.each([
+  it.each([
     ["biome", true],
     ["swiftlint", true],
     ["typescript", false],

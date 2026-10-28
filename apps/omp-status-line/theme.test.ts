@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { color, getSeparator, sessionAccentAnsi } from "./theme.ts";
 
 const TRUECOLOR_PREFIX = "\x1b[38;2;";
@@ -6,7 +6,7 @@ const TRUECOLOR_CHANNELS = /^\d+;\d+;\d+m$/;
 const RGB_CHANNEL_MAX = 255;
 
 describe("getSeparator", () => {
-  test("should override powerline separators and caps when ASCII is enabled", () => {
+  it("should override powerline separators and caps when ASCII is enabled", () => {
     expect(getSeparator("powerline", true)).toEqual({
       left: ">",
       right: "<",
@@ -14,14 +14,14 @@ describe("getSeparator", () => {
     });
   });
 
-  test("should retain powerline separators and caps when ASCII is disabled", () => {
+  it("should retain powerline separators and caps when ASCII is disabled", () => {
     expect(getSeparator("powerline", false)).toEqual({
       left: "▶",
       right: "◀",
       endCaps: { left: "◀", right: "▶" },
     });
   });
-  test.each([
+  it.each([
     ["slash", "/"],
     ["pipe", "│"],
     ["block", "▌"],
@@ -39,7 +39,7 @@ describe("getSeparator", () => {
 });
 
 describe("sessionAccentAnsi", () => {
-  test.each([
+  it.each([
     ["empty", "", "224;226;101"],
     ["plain ASCII", "session-name", "226;101;140"],
     ["Unicode", "界é\u{1f680}", "224;101;226"],
@@ -69,7 +69,7 @@ describe("sessionAccentAnsi", () => {
 });
 
 describe("color", () => {
-  test("should reset only the foreground when wrapping text in a color", () => {
+  it("should reset only the foreground when wrapping text in a color", () => {
     const foreground = "\x1b[38;2;10;20;30m";
 
     expect(color(foreground, "status")).toBe(`${foreground}status\x1b[39m`);
