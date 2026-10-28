@@ -23,7 +23,7 @@
     "minimatch": "10.2.6",
     "typebox": "1.4.3",
     "vscode-jsonrpc": "10.0.0",
-    "vscode-languageserver-protocol": "3.18.4",
+    "vscode-languageserver-protocol": "3.18.5",
     "yaml": "^2.9.1"
   }
 }
