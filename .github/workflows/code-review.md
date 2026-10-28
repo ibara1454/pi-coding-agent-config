@@ -3,6 +3,7 @@ name: Code review
 inlined-imports: true
 imports:
     - shared/mcp/context7.md
+    - shared/pr-review-context.md
 on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
@@ -12,6 +13,7 @@ max-daily-ai-credits: 100
 max-ai-credits: 10
 permissions:
     contents: read
+    issues: read
     pull-requests: read
     actions: read
 # How do I supply pricing for a custom or private model?
@@ -88,10 +90,9 @@ timeout-minutes: 15
 # Review the pull request
 
 Review pull request #${{ github.event.pull_request.number }} in
-`${{ github.repository }}`. Read its title, description, and head/base branch names
-with `gh pr view --json title,body,headRefName,baseRefName`, and check that the
-changes match their stated scope and behavior. Report material mismatches or
-missing promised behavior.
+`${{ github.repository }}`. Use the pre-fetched PR metadata and discussion to
+check that the changes match their stated scope and behavior. Report material
+mismatches or missing promised behavior.
 
 Work in `$GITHUB_WORKSPACE`, the PR-head checkout. Use local Git to inspect the
 complete three-dot diff from base `${{ github.event.pull_request.base.sha }}`

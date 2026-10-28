@@ -1,5 +1,24 @@
 # Workflows
 
+## Automated PR review
+
+[Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
+to fetch PR metadata, comments, reviews, and complete threads before every review.
+
+Reuse in PR workflows:
+
+```yaml
+imports:
+    - shared/pr-review-context.md
+permissions:
+    issues: read
+    pull-requests: read
+```
+
+Callers must declare both permissions. Collection runs before local setup and
+preserves full bodies and thread context in a read-only snapshot. Fetch failures
+stop the agent; no review is submitted. Snapshot content remains untrusted.
+
 ## Code-review Context7
 
 [Code review](code-review.md) imports its Context7 server, network allowance, and
@@ -157,4 +176,3 @@ review-skill access inside the sandbox, not just a successful runner install.
 [Live verification](https://github.com/ibara1454/pi-coding-agent-config/actions/runs/40558618618):
 the sandboxed reviewer read the installed review skill and approved PR #87
 without interactive setup.
-
