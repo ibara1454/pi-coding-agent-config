@@ -19,8 +19,6 @@ Callers must declare both permissions. Collection runs before local setup and
 preserves full bodies and thread context in a read-only snapshot. Fetch failures
 stop the agent; no review is submitted. Snapshot content remains untrusted.
 
-Edit Markdown, not `.lock.yml`; [regenerate with the pinned compiler](#precedence-and-diagnostics).
-
 ## Code-review Context7
 
 [Code review](code-review.md) imports its Context7 server, network allowance, and
