@@ -6,7 +6,7 @@ imports:
     - shared/pr-review-context.md
 on:
     pull_request:
-        types: [opened, synchronize, reopened, ready_for_review, review_requested]
+        types: [opened, reopened, ready_for_review, review_requested]
 if: >-
     github.event.pull_request.draft == false &&
     (github.event.action != 'review_requested' ||

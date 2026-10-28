@@ -2,6 +2,10 @@
 
 ## Automated PR review
 
+Reviews run when a non-draft PR is opened or reopened, when a draft is marked ready
+for review, or when the configured reviewer is explicitly requested. Pushing
+commits does not trigger a review; request the reviewer explicitly afterward.
+
 [Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
 to fetch PR metadata, comments, reviews, and complete threads before every review.
 
@@ -40,9 +44,10 @@ Configure these before merging: **missing `CODE_REVIEW_TOKEN` blocks all reviews
    Paste the token at the secret prompt; use its owner's login without `@`.
    Never put this write token in `GH_AW_GITHUB_TOKEN` or the agent environment.
 
-After the account submits its first review, use **Reviewers → Re-request review**
-on the PR. Before merging this integration, confirm that clicking it produces a
-new workflow run and a new review without changing the PR head SHA.
+To obtain the first review, mark a draft PR ready or request the configured account
+under **Reviewers** on a non-draft PR. Then use **Re-request review** without
+pushing a commit. Before merging this integration, confirm that re-requesting
+produces a new workflow run and a new review at the same PR head SHA.
 
 Identity investigation and verification evidence: [#63](https://github.com/ibara1454/pi-coding-agent-config/issues/63).
 
@@ -121,9 +126,8 @@ privacy/eligibility requirements remain separate.
 
 ### Enforcement and limitations
 
-- All current triggers—`pull_request` actions `opened`, `synchronize`, `reopened`,
-  `ready_for_review`, and matching `review_requested` events—use daily admission
-  before the reviewer starts.
+- All configured `pull_request` triggers use daily admission before the reviewer
+  starts.
   Repeated reviews are new runs and contribute reviewer **and** detector usage.
   At recorded/estimated daily usage **≥ 100 AIC**, the reviewer, detector, and
   safe-output publication are skipped; no new APPROVE is submitted.
