@@ -12,6 +12,16 @@ if: >-
     (github.event.action != 'review_requested' ||
     (vars.CODE_REVIEW_REVIEWER != '' &&
     github.event.requested_reviewer.login == vars.CODE_REVIEW_REVIEWER))
+concurrency:
+    # Rejected requests must not cancel an active or pending agent review.
+    group: >-
+        gh-aw-${{ github.workflow }}-${{
+        github.event.pull_request.draft == false &&
+        (github.event.action != 'review_requested' ||
+        (vars.CODE_REVIEW_REVIEWER != '' &&
+        github.event.requested_reviewer.login == vars.CODE_REVIEW_REVIEWER)) &&
+        github.event.pull_request.number || format('ignored-{0}', github.run_id) }}
+    cancel-in-progress: true
 # AIC policy, trigger exemptions, and overshoot: .github/workflows/README.md#code-review-credit-budgets
 max-daily-ai-credits: 100
 max-ai-credits: 10

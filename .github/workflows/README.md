@@ -5,6 +5,7 @@
 Reviews run when a non-draft PR is opened or reopened, when a draft is marked ready
 for review, or when the configured reviewer is explicitly requested. Pushing
 commits does not trigger a review; request the reviewer explicitly afterward.
+Requests for other reviewers or teams do not start or cancel an agent review.
 
 [Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
 to fetch PR metadata, comments, reviews, and complete threads before every review.
