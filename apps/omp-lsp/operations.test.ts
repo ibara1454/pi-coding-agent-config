@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import fs from "node:fs/promises";
 import {
   type Diagnostic,
@@ -88,14 +88,14 @@ function mockEditorConfigFiles(files: Readonly<Record<string, string>>) {
 }
 
 describe("resolvePosition", () => {
-  test("should select the requested whole-identifier occurrence using UTF-16 columns", () => {
+  it("should select the requested whole-identifier occurrence using UTF-16 columns", () => {
     expect(resolvePosition("\u{1f600} foobar foo + foo", 1, "foo#2")).toEqual({
       line: 0,
       character: 16,
     });
   });
 
-  test("should fall back to case-insensitive matches only when no exact match exists", () => {
+  it("should fall back to case-insensitive matches only when no exact match exists", () => {
     expect(resolvePosition("FOO foo", 1, "foo")).toEqual({
       line: 0,
       character: 4,
@@ -106,13 +106,13 @@ describe("resolvePosition", () => {
     });
   });
 
-  test("should reject nonexistent occurrences and invalid lines instead of querying unrelated positions", () => {
+  it("should reject nonexistent occurrences and invalid lines instead of querying unrelated positions", () => {
     expect(() => resolvePosition("foo", 1, "foo#2")).toThrow("out of bounds");
     expect(() => resolvePosition("foo", 0, "foo")).toThrow("1-based");
     expect(() => resolvePosition("foo", 2, "foo")).toThrow("outside");
   });
 
-  test.each([
+  it.each([
     {
       condition: "the requested line is indented after CRLF",
       content: "first\r\n  next",
@@ -137,7 +137,7 @@ describe("resolvePosition", () => {
 });
 
 describe("normalizeDiagnostics", () => {
-  test("should merge equivalent server findings while retaining the most severe diagnostic", () => {
+  it("should merge equivalent server findings while retaining the most severe diagnostic", () => {
     const result = normalizeDiagnostics([
       { range, message: "Undefined variable", severity: 2, source: "lint" },
       { range, message: "Undefined variable", severity: 1, source: "semantic" },
@@ -147,7 +147,7 @@ describe("normalizeDiagnostics", () => {
     ]);
   });
 
-  test("should order findings by severity and then source position when servers return unsorted results", () => {
+  it("should order findings by severity and then source position when servers return unsorted results", () => {
     const diagnostics = [
       { range, message: "warning", severity: 2 },
       { range, message: "zeta" },
@@ -165,7 +165,7 @@ describe("normalizeDiagnostics", () => {
     ).toEqual(["earlier", "alpha", "zeta", "warning"]);
   });
 
-  test.each([
+  it.each([
     {
       condition: "the response is not an array",
       value: {},
@@ -210,7 +210,7 @@ describe("normalizeDiagnostics", () => {
 });
 
 describe("diagnosticsText", () => {
-  test("should label empty unversioned publications as unverified rather than clean", () => {
+  it("should label empty unversioned publications as unverified rather than clean", () => {
     const text = diagnosticsText("/project/a.ts", [], "/project", [
       "legacy-server",
     ]);
@@ -219,7 +219,7 @@ describe("diagnosticsText", () => {
     expect(text).not.toMatch(CLEAN_STATUS);
   });
 
-  test("should retain findings when their publication freshness cannot be verified", () => {
+  it("should retain findings when their publication freshness cannot be verified", () => {
     const diagnostics = [
       {
         range: {
@@ -238,7 +238,7 @@ describe("diagnosticsText", () => {
     expect(text).toContain("freshness-unverified");
   });
 
-  test("should count all findings but bound rendered details when the report exceeds its display limit", () => {
+  it("should count all findings but bound rendered details when the report exceeds its display limit", () => {
     const counts = {
       displayed: 200,
       total: 201,
@@ -267,14 +267,14 @@ describe("diagnosticsText", () => {
 });
 
 describe("symbols", () => {
-  test("should leave workspace symbol positions unresolved when the server omits their ranges", () => {
+  it("should leave workspace symbol positions unresolved when the server omits their ranges", () => {
     const result = symbols([
       { name: "Thing", kind: 5, location: { uri: "file:///project/a.ts" } },
     ]);
     expect(result[0]?.position).toBeUndefined();
   });
 
-  test("should flatten children in document order using selection ranges when document symbols are nested", () => {
+  it("should flatten children in document order using selection ranges when document symbols are nested", () => {
     const childRange = {
       start: { line: 2, character: 4 },
       end: { line: 2, character: 9 },
@@ -323,7 +323,7 @@ describe("symbols", () => {
 });
 
 describe("locations", () => {
-  test("should decode file paths and deduplicate equivalent targets when locations and links are mixed", () => {
+  it("should decode file paths and deduplicate equivalent targets when locations and links are mixed", () => {
     const targetUri = "file:///project/a%20b.ts";
     const broadRange = {
       start: { line: 0, character: 0 },
@@ -344,12 +344,12 @@ describe("locations", () => {
     ]);
   });
 
-  test("should return no navigation targets when the server returns null", () => {
+  it("should return no navigation targets when the server returns null", () => {
     // biome-ignore lint/plugin/biome-rules/use-undefined: LSP navigation uses null when no target exists.
     expect(locations(null)).toEqual([]);
   });
 
-  test.each([
+  it.each([
     {
       condition: "the URI is missing",
       value: { range },
@@ -377,7 +377,7 @@ describe("locations", () => {
 });
 
 describe("hoverText", () => {
-  test("should separate prose and fence language snippets when the hover combines marked strings and markup", () => {
+  it("should separate prose and fence language snippets when the hover combines marked strings and markup", () => {
     expect(
       hoverText({
         contents: [
@@ -391,11 +391,11 @@ describe("hoverText", () => {
     );
   });
 
-  test("should render no hover text when the server returns no value", () => {
+  it("should render no hover text when the server returns no value", () => {
     expect(hoverText(undefined)).toBe("");
   });
 
-  test("should reject malformed markup when its value is not text", () => {
+  it("should reject malformed markup when its value is not text", () => {
     expect(() =>
       hoverText({ contents: { kind: "markdown", value: false } }),
     ).toThrow("Invalid hover contents");
@@ -403,7 +403,7 @@ describe("hoverText", () => {
 });
 
 describe("diagnosticTargets", () => {
-  test.each([
+  it.each([
     {
       condition: "the literal exists with a glob character in its name",
       pattern: "a[1].ts",
@@ -435,7 +435,7 @@ describe("diagnosticTargets", () => {
     },
   );
 
-  test("should sort matching files and skip ignored trees when a glob traverses nested directories", async () => {
+  it("should sort matching files and skip ignored trees when a glob traverses nested directories", async () => {
     spyOn(filesystem, "stat").mockRejectedValue(
       Object.assign(new Error("Missing"), { code: "ENOENT" }),
     );
@@ -477,7 +477,7 @@ describe("diagnosticTargets", () => {
     ]);
   });
 
-  test("should mark the result incomplete when more than twenty files match", async () => {
+  it("should mark the result incomplete when more than twenty files match", async () => {
     const limits = { retained: 20, matching: 21, digits: 2 };
     spyOn(filesystem, "stat").mockResolvedValue({ isFile: () => false });
     spyOn(filesystem, "opendir")
@@ -501,7 +501,7 @@ describe("diagnosticTargets", () => {
     expect(result.files).not.toContain("/project/src/file-20.ts");
   });
 
-  test("should return no matches when the glob root is missing", async () => {
+  it("should return no matches when the glob root is missing", async () => {
     spyOn(filesystem, "stat").mockResolvedValue({ isFile: () => false });
     spyOn(filesystem, "opendir").mockRejectedValue(
       Object.assign(new Error("Directory unavailable"), { code: "ENOENT" }),
@@ -512,7 +512,7 @@ describe("diagnosticTargets", () => {
     });
   });
 
-  test("should preserve traversal errors when the glob root cannot be read", async () => {
+  it("should preserve traversal errors when the glob root cannot be read", async () => {
     const error = Object.assign(new Error("Directory unavailable"), {
       code: "EACCES",
     });
@@ -521,7 +521,7 @@ describe("diagnosticTargets", () => {
     await expect(diagnosticTargets("*.ts", "/project")).rejects.toBe(error);
   });
 
-  test("should preserve filesystem errors when probing a target fails without ENOENT", async () => {
+  it("should preserve filesystem errors when probing a target fails without ENOENT", async () => {
     const error = new Error("Storage unavailable");
     spyOn(filesystem, "stat").mockRejectedValue(error);
     const open = spyOn(filesystem, "opendir").mockResolvedValue(
@@ -531,7 +531,7 @@ describe("diagnosticTargets", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  test("should stop before opening a directory when glob traversal is already cancelled", async () => {
+  it("should stop before opening a directory when glob traversal is already cancelled", async () => {
     const reason = new Error("Cancelled");
     spyOn(filesystem, "stat").mockResolvedValue({ isFile: () => false });
     const open = spyOn(filesystem, "opendir").mockResolvedValue(
@@ -545,7 +545,7 @@ describe("diagnosticTargets", () => {
 });
 
 describe("formattingOptions", () => {
-  test.each([
+  it.each([
     {
       condition: "space-indented lines have different nesting depths",
       content: "top\n\n  one\n      three\n    two\n  \n",
@@ -566,7 +566,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test("should apply nearer files and later matching sections over inherited indentation", async () => {
+  it("should apply nearer files and later matching sections over inherited indentation", async () => {
     mockEditorConfigFiles({
       "/project/.editorconfig": "[*]\nindent_style=tab\nindent_size=8",
       "/project/src/.editorconfig": [
@@ -589,7 +589,7 @@ describe("formattingOptions", () => {
     ).toMatchObject({ tabSize: 4, insertSpaces: true });
   });
 
-  test.each([
+  it.each([
     {
       condition: "the nearest config declares root=true",
       preamble: "root = true\n",
@@ -614,7 +614,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test("should infer indentation again when a child unsets inherited width and style", async () => {
+  it("should infer indentation again when a child unsets inherited width and style", async () => {
     mockEditorConfigFiles({
       "/project/.editorconfig": "[*]\nindent_style=tab\nindent_size=8",
       "/project/src/.editorconfig":
@@ -625,7 +625,7 @@ describe("formattingOptions", () => {
     ).toMatchObject({ tabSize: 3, insertSpaces: true });
   });
 
-  test.each([
+  it.each([
     {
       condition: "a basename pattern matches a file in a subdirectory",
       pattern: "*.ts",
@@ -657,7 +657,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test.each([
+  it.each([
     {
       condition: "indent_size=tab selects the configured tab width",
       settings: "indent_style=tab\nindent_size=tab\ntab_width=6",
@@ -683,7 +683,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test.each(["0", "2.5", "invalid", "9007199254740992"])(
+  it.each(["0", "2.5", "invalid", "9007199254740992"])(
     "should retain inferred indentation when the configured width is %s",
     async (width) => {
       mockEditorConfigFiles({
@@ -695,7 +695,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test.each(["stat", "readFile"] as const)(
+  it.each(["stat", "readFile"] as const)(
     "should preserve filesystem errors when %s cannot access a config",
     async (operation) => {
       const filesystemSpies = mockEditorConfigFiles({
@@ -711,7 +711,7 @@ describe("formattingOptions", () => {
     },
   );
 
-  test("should retain ancestor settings when a child config disappears before reading", async () => {
+  it("should retain ancestor settings when a child config disappears before reading", async () => {
     const { readFile } = mockEditorConfigFiles({
       "/project/.editorconfig": "[*]\nindent_size=4",
       "/project/src/.editorconfig": "[*]\nindent_size=8",
@@ -724,7 +724,7 @@ describe("formattingOptions", () => {
     ).toMatchObject({ tabSize: 4, insertSpaces: true });
   });
 
-  test("should accept a config exactly at the one-MiB size limit", async () => {
+  it("should accept a config exactly at the one-MiB size limit", async () => {
     const limits = { bytes: 1_048_576 };
     const { stat } = mockEditorConfigFiles({
       "/project/.editorconfig": "[*]\nindent_size=4",
@@ -735,7 +735,7 @@ describe("formattingOptions", () => {
     ).toMatchObject({ tabSize: 4, insertSpaces: true });
   });
 
-  test("should reject an oversized config before reading its contents", async () => {
+  it("should reject an oversized config before reading its contents", async () => {
     const limits = { bytes: 1_048_576 };
     const { stat, readFile } = mockEditorConfigFiles({
       "/project/.editorconfig": "[*]\nindent_size=4",

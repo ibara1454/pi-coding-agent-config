@@ -1,15 +1,19 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies must intercept the extension's live named filesystem imports.
 import * as fs from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
+
+// Capture the pure estimator before Bun replaces live host-module exports.
+const realEstimateTokens = estimateTokens;
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
   // biome-ignore lint/style/useNamingConvention: host module export identity
   CustomEditor: class {},
-  estimateTokens: () => 0,
+  estimateTokens: realEstimateTokens,
 }));
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -184,7 +188,7 @@ async function loadExtension() {
   return (await import("./index.ts")).default;
 }
 
-test("should shrink the path before dropping context usage", async () => {
+it("should shrink the path before dropping context usage", async () => {
   const fixture = await createSettingsFixture({
     preset: "custom",
     leftSegments: ["model", "path", "context_pct"],
@@ -226,7 +230,7 @@ test("should shrink the path before dropping context usage", async () => {
   }
 });
 
-test("should ignore project settings when project is untrusted", async () => {
+it("should ignore project settings when project is untrusted", async () => {
   const fixture = await createSettingsFixture(
     {
       preset: "custom",
@@ -268,7 +272,7 @@ test("should ignore project settings when project is untrusted", async () => {
   }
 });
 
-test("should release owned resources without replacing newer UI", async () => {
+it("should release owned resources without replacing newer UI", async () => {
   const fixture = await createSettingsFixture({ preset: "default" });
   let commandSignal: AbortSignal | undefined;
   let unsubscribeCalls = 0;
@@ -507,7 +511,7 @@ async function createRenderedFixture(
 }
 
 describe("ompStatusLine", () => {
-  test("should release acquired resources and preserve the error when TUI setup fails", async () => {
+  it("should release acquired resources and preserve the error when TUI setup fails", async () => {
     const settings = await createSettingsFixture({ preset: "default" });
     const exec = mock(async () => ({
       stdout: "",
@@ -579,7 +583,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test.each([
+  it.each([
     "session_info_changed",
     "model_select",
     "thinking_level_select",
@@ -589,15 +593,31 @@ describe("ompStatusLine", () => {
     "should render the replacement context and invalidate the UI when %s fires",
     async (event) => {
       const fixture = await createRenderedFixture({
-        leftSegments: ["model"],
+        leftSegments: ["model", "context_pct"],
       });
+      const replacementContextWindow = 100;
       try {
         expect(fixture.top()).toContain("Test");
+        expect(fixture.top()).toContain("6.9%/272K");
         const nextContext = {
           ...fixture.harness.context,
           model: {
             ...fixture.harness.context.model,
             name: "Replacement",
+            contextWindow: replacementContextWindow,
+          },
+          getContextUsage: () => undefined,
+          getSystemPrompt: () => "context",
+          sessionManager: {
+            ...fixture.harness.context.sessionManager,
+            getBranch: () => [{ type: "compaction" }],
+            buildContextEntries: () => [
+              {
+                type: "message",
+                message: { role: "user", content: "Continue" },
+              },
+              { type: "compaction", summary: "Gist" },
+            ],
           },
         };
         fixture.requestRender.mockClear();
@@ -606,6 +626,7 @@ describe("ompStatusLine", () => {
 
         expect(fixture.requestRender).toHaveBeenCalledTimes(1);
         expect(fixture.top()).toContain("Replacement");
+        expect(fixture.top()).toContain("5.0%/100");
         expect(fixture.top()).not.toContain("Test");
       } finally {
         await fixture.cleanup();
@@ -613,7 +634,7 @@ describe("ompStatusLine", () => {
     },
   );
 
-  test.each(["message_update", "message_end"])(
+  it.each(["message_update", "message_end"])(
     "should render run metrics and invalidate the UI when %s supplies assistant output",
     async (event) => {
       const fixture = await createRenderedFixture({
@@ -653,7 +674,7 @@ describe("ompStatusLine", () => {
     },
   );
 
-  test("should keep hook statuses hidden but request renders on invalidation and refresh ticks when hook display is disabled", async () => {
+  it("should keep hook statuses hidden but request renders on invalidation and refresh ticks when hook display is disabled", async () => {
     const fixture = await createRenderedFixture(
       { leftSegments: ["model"], showHookStatus: false },
       { statuses: new Map([["ready", "Ready"]]) },
@@ -684,7 +705,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should drop right segments from the end before shortening the left path when both groups overflow", async () => {
+  it("should drop right segments from the end before shortening the left path when both groups overflow", async () => {
     const fixture = await createRenderedFixture({
       leftSegments: ["model", "path"],
       rightSegments: ["context_pct", "git"],
@@ -724,7 +745,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should shorten a wide-character path without dropping context or mutating its full rendering when cells overflow", async () => {
+  it("should shorten a wide-character path without dropping context or mutating its full rendering when cells overflow", async () => {
     const fixture = await createRenderedFixture(
       { leftSegments: ["model", "path", "context_pct"] },
       { cwd: "/project/界界界界界界/é.ts" },
@@ -746,7 +767,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should retain a short trailing path and drop the model when the path cannot shrink", async () => {
+  it("should retain a short trailing path and drop the model when the path cannot shrink", async () => {
     const fixture = await createRenderedFixture(
       { leftSegments: ["model", "path"] },
       { cwd: "/tiny" },
@@ -763,7 +784,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test.each(["/tiny", "/project/界界界界/é.ts"])(
+  it.each(["/tiny", "/project/界界界界/é.ts"])(
     "should omit the final path segment when %s cannot fit the editor cell budget",
     async (cwd) => {
       const fixture = await createRenderedFixture(
@@ -782,7 +803,7 @@ describe("ompStatusLine", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["empty or one-character lines", "\nX\n", []],
     [
       "index-only changes",
@@ -831,7 +852,7 @@ describe("ompStatusLine", () => {
     },
   );
 
-  test.each([
+  it.each([
     ["refresh", "write", undefined, ["*2"]],
     ["refresh", "edit", undefined, ["*2"]],
     ["refresh", "bash", { command: "git switch feature" }, ["*2"]],
@@ -875,7 +896,7 @@ describe("ompStatusLine", () => {
     },
   );
 
-  test("should clear old counts and show the new branch when the footer reports a branch change", async () => {
+  it("should clear old counts and show the new branch when the footer reports a branch change", async () => {
     let stdout = "UU conflict\n?? new\n";
     const fixture = await createRenderedFixture(
       { leftSegments: ["git"] },
@@ -909,7 +930,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should sanitize and truncate hook statuses by cells while omitting duplicates of configured segments", async () => {
+  it("should sanitize and truncate hook statuses by cells while omitting duplicates of configured segments", async () => {
     const fixture = await createRenderedFixture(
       { leftSegments: ["mode", "git"] },
       {
@@ -951,7 +972,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should coalesce git-changing shell events and release the pending refresh when the session shuts down", async () => {
+  it("should coalesce git-changing shell events and release the pending refresh when the session shuts down", async () => {
     const result = { stdout: "", stderr: "", code: 0, killed: false };
     const pendingPr = Promise.withResolvers<typeof result>();
     const prStarted = Promise.withResolvers<void>();
@@ -1040,7 +1061,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should render cached git and PR without starting commands when the cache lifetime expires", async () => {
+  it("should render cached git and PR without starting commands when the cache lifetime expires", async () => {
     let stdout = "M  staged\n?? new\n";
     const exec = mock(async (command: string) => ({
       stdout:
@@ -1085,7 +1106,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should release the prior TUI lifetime without waiting for git when a non-TUI session replaces it", async () => {
+  it("should release the prior TUI lifetime without waiting for git when a non-TUI session replaces it", async () => {
     const result = { stdout: "", stderr: "", code: 0, killed: false };
     const pendingGit = Promise.withResolvers<typeof result>();
     const commandStarted = Promise.withResolvers<void>();
@@ -1155,7 +1176,7 @@ describe("ompStatusLine", () => {
     }
   });
 
-  test("should replace TUI resources and keep rendering git when a prior session has a slow PR", async () => {
+  it("should replace TUI resources and keep rendering git when a prior session has a slow PR", async () => {
     const result = {
       stdout: "M  staged\n",
       stderr: "",

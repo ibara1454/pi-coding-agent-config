@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import fs from "node:fs/promises";
 import type {
   ExtensionAPI,
@@ -135,7 +135,7 @@ afterEach(async () => {
 });
 
 describe("lsp.execute", () => {
-  test("should reject navigation requests when the matching server is not installed", async () => {
+  it("should reject navigation requests when the matching server is not installed", async () => {
     const { execute } = fixture();
     await expect(
       execute({
@@ -147,14 +147,14 @@ describe("lsp.execute", () => {
     ).rejects.toThrow("No language server found");
   });
 
-  test("should reject diagnostics instead of reporting a clean file when the matching server is not installed", async () => {
+  it("should reject diagnostics instead of reporting a clean file when the matching server is not installed", async () => {
     const { execute } = fixture();
     await expect(
       execute({ action: "diagnostics", file: "example.ts" }),
     ).rejects.toThrow("No language server found");
   });
 
-  test("should discard cached configuration when project trust is revoked", async () => {
+  it("should discard cached configuration when project trust is revoked", async () => {
     const { context, execute, loadConfig, loaded } = fixture();
     await execute({ action: "status" });
     context.isProjectTrusted = () => false;
@@ -174,7 +174,7 @@ describe("lsp.execute", () => {
     ]);
   });
 
-  test("should replace stale configuration when the host changes workspace roots", async () => {
+  it("should replace stale configuration when the host changes workspace roots", async () => {
     const { context, execute, loadConfig, loaded } = fixture();
     await execute({ action: "status" });
     context.cwd = "/second-project";
@@ -201,7 +201,7 @@ describe("lsp.execute", () => {
     );
   });
 
-  test("should apply reloaded settings when configuration disables the extension", async () => {
+  it("should apply reloaded settings when configuration disables the extension", async () => {
     const { execute, loadConfig, loaded } = fixture();
     await execute({ action: "status" });
     loadConfig.mockResolvedValue({
@@ -221,7 +221,7 @@ describe("lsp.execute", () => {
     ).rejects.toThrow("disabled");
   });
 
-  test("should report a sanitized reload failure when no configured server is available", async () => {
+  it("should report a sanitized reload failure when no configured server is available", async () => {
     const { execute, loaded } = fixture();
     loaded.warnings.push("\u001b[31mmissing\tcommand\u0007\u001b[0m");
     const request = execute({ action: "reload" });
@@ -234,7 +234,7 @@ describe("lsp.execute", () => {
     });
   });
 
-  test("should preserve cached settings when reloading configuration fails", async () => {
+  it("should preserve cached settings when reloading configuration fails", async () => {
     const { execute, loadConfig } = fixture();
     const before = await execute({ action: "status" });
     loadConfig.mockRejectedValueOnce(new Error("configuration unreadable"));
@@ -244,7 +244,7 @@ describe("lsp.execute", () => {
     expect(await execute({ action: "status" })).toEqual(before);
   });
 
-  test("should retain a usable workspace when only the caller cancels a request", async () => {
+  it("should retain a usable workspace when only the caller cancels a request", async () => {
     const { execute, loadConfig } = fixture();
     const before = await execute({ action: "status" });
     const controller = new AbortController();
@@ -258,7 +258,7 @@ describe("lsp.execute", () => {
 });
 
 describe("lsp.session_start", () => {
-  test("should avoid reading configuration when the project is untrusted", async () => {
+  it("should avoid reading configuration when the project is untrusted", async () => {
     const { context, emit, loadConfig, notifications } = fixture();
     context.hasUI = true;
     context.isProjectTrusted = () => false;
@@ -267,7 +267,7 @@ describe("lsp.session_start", () => {
     expect(notifications).toEqual([]);
   });
 
-  test.each([
+  it.each([
     { mode: "interactive", hasUi: true, notificationCount: 1 },
     { mode: "non-interactive", hasUi: false, notificationCount: 0 },
   ])(
@@ -299,7 +299,7 @@ describe("lsp.session_start", () => {
     },
   );
 
-  test.each([
+  it.each([
     { mode: "interactive", hasUi: true, notificationCount: 1 },
     { mode: "non-interactive", hasUi: false, notificationCount: 0 },
   ])(
@@ -327,7 +327,7 @@ describe("lsp.session_start", () => {
 });
 
 describe("lsp.session_shutdown", () => {
-  test("should cancel pending initialization and allow a fresh session when shutdown occurs while configuration loads", async () => {
+  it("should cancel pending initialization and allow a fresh session when shutdown occurs while configuration loads", async () => {
     const { emit, execute, loadConfig, loaded } = fixture();
     const { promise: pending, resolve: finishLoading } =
       Promise.withResolvers<LspConfig>();
@@ -360,7 +360,7 @@ describe("lsp.session_shutdown", () => {
 });
 
 describe("lsp.tool_result", () => {
-  test.each([
+  it.each([
     {
       condition: "the host operation failed",
       toolName: "write",
@@ -407,7 +407,7 @@ describe("lsp.tool_result", () => {
     },
   );
 
-  test("should append safe feedback without failing a committed write when file inspection fails", async () => {
+  it("should append safe feedback without failing a committed write when file inspection fails", async () => {
     const { emit } = fixture();
     spyOn(filesystem, "stat").mockRejectedValueOnce(
       new Error("\u001b[31minspection\tdenied\u0007\u001b[0m"),
@@ -431,7 +431,7 @@ describe("lsp.tool_result", () => {
     expect(feedback?.text).not.toMatch(CONTROL_CHARACTER);
   });
 
-  test("should preserve committed host output when the mutation path uses an unsupported URI scheme", async () => {
+  it("should preserve committed host output when the mutation path uses an unsupported URI scheme", async () => {
     const { emit } = fixture();
     const content = [{ type: "text", text: "host edit succeeded" }];
     expect(
@@ -444,7 +444,7 @@ describe("lsp.tool_result", () => {
     ).toBeUndefined();
   });
 
-  test("should omit optional feedback when the host has already cancelled mutation work", async () => {
+  it("should omit optional feedback when the host has already cancelled mutation work", async () => {
     const { context, emit } = fixture();
     const controller = new AbortController();
     controller.abort(new Error("host cancelled"));
@@ -459,7 +459,7 @@ describe("lsp.tool_result", () => {
     ).toBeUndefined();
   });
 
-  test("should leave host output untouched when optional feedback is disabled", async () => {
+  it("should leave host output untouched when optional feedback is disabled", async () => {
     const { emit } = fixture();
     expect(
       await emit("tool_result", {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { validateTargetIdentity } from "./target-identity.ts";
@@ -71,7 +71,7 @@ const topLevelDrifts: [
 ];
 
 describe("validateTargetIdentity", () => {
-  test("should accept a package child that still resolves from its manifest", async () => {
+  it("should accept a package child that still resolves from its manifest", async () => {
     await withRoot(async (root) => {
       await expect(
         validateTargetIdentity(manifestPackage(root)),
@@ -79,7 +79,7 @@ describe("validateTargetIdentity", () => {
     });
   });
 
-  test("should accept a symlinked child under a raw package directory", async () => {
+  it("should accept a symlinked child under a raw package directory", async () => {
     await withRoot(async (root) => {
       await expect(
         validateTargetIdentity(symlinkedPackage(root)),
@@ -87,7 +87,7 @@ describe("validateTargetIdentity", () => {
     });
   });
 
-  test("should accept a shadowed raw child under a manifest directory", async () => {
+  it("should accept a shadowed raw child under a manifest directory", async () => {
     await withRoot(async (root) => {
       const packageRoot = join(root, "package");
       const extensions = join(packageRoot, "extensions");
@@ -115,14 +115,14 @@ describe("validateTargetIdentity", () => {
     });
   });
 
-  test("should accept every occurrence path of a collapsed canonical target", async () => {
+  it("should accept every occurrence path of a collapsed canonical target", async () => {
     await withRoot(async (root) => {
       await expect(
         validateTargetIdentity(topLevelTarget(root)),
       ).resolves.toBeUndefined();
     });
   });
-  test.each(packageDrifts)(
+  it.each(packageDrifts)(
     "should reject the target when %s",
     async (_label: string, prepare: (
       root: string,
@@ -139,7 +139,7 @@ describe("validateTargetIdentity", () => {
       });
     },
   );
-  test.each(topLevelDrifts)(
+  it.each(topLevelDrifts)(
     "should reject the target when %s",
     async (_label: string, drift: (
       target: TopLevelToggleTarget,
@@ -157,7 +157,7 @@ describe("validateTargetIdentity", () => {
     },
   );
 
-  test("should reject an occurrence when it left its discovered package", async () => {
+  it("should reject an occurrence when it left its discovered package", async () => {
     await withRoot(async (root) => {
       const target = topLevelTarget(root);
       const narrowed: TopLevelToggleTarget = {

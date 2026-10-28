@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { ExtensionCatalog } from "./catalog.ts";
 import type {
   CatalogDiagnostic,
@@ -371,7 +371,7 @@ function diagnosticCatalog(diagnostic: CatalogDiagnostic): ExtensionCatalog {
 }
 
 describe("ExtensionCatalog.stage", () => {
-  test("should project a staged toggle and clear it when restored", () => {
+  it("should project a staged toggle and clear it when restored", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
 
     catalog.stage("winner", false);
@@ -383,14 +383,14 @@ describe("ExtensionCatalog.stage", () => {
     expect(catalog.hasChanges()).toBe(false);
   });
 
-  test("should throw when staging an unknown catalog row", () => {
+  it("should throw when staging an unknown catalog row", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
     const message = "Unknown catalog row: missing";
 
     expect(() => catalog.stage("missing", true)).toThrow(message);
   });
 
-  test("should preserve resolution when staging a shadowed row", () => {
+  it("should preserve resolution when staging a shadowed row", () => {
     const catalog = catalogFor([
       row("winner", "project", true),
       row("loser", "global", true, "Project settings"),
@@ -411,7 +411,7 @@ describe("ExtensionCatalog.stage", () => {
 });
 
 describe("ExtensionCatalog.toggle", () => {
-  test("should toggle from the projected state", () => {
+  it("should toggle from the projected state", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
 
     catalog.toggle("winner");
@@ -420,7 +420,7 @@ describe("ExtensionCatalog.toggle", () => {
     expect(catalog.hasChanges()).toBe(true);
   });
 
-  test("should throw when toggling an unknown catalog row", () => {
+  it("should throw when toggling an unknown catalog row", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
     const message = "Unknown catalog row: missing";
 
@@ -429,7 +429,7 @@ describe("ExtensionCatalog.toggle", () => {
 });
 
 describe("ExtensionCatalog.discard", () => {
-  test("should discard every staged toggle", () => {
+  it("should discard every staged toggle", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
 
     catalog.toggle("winner");
@@ -441,7 +441,70 @@ describe("ExtensionCatalog.discard", () => {
 });
 
 describe("ExtensionCatalog.inspect", () => {
-  test("should return configured and resolved provenance", () => {
+  it.each([
+    {
+      label: "an autoload-disabled package is explicitly enabled",
+      autoloadDelta: true,
+      configured: false,
+      filters: [],
+      desired: true,
+      expectedFilters: ["+extensions/shared.ts"],
+      reason:
+        "Enabled by last matching autoload:false filter `+extensions/shared.ts`",
+    },
+    {
+      label: "the sole package exclusion is removed",
+      autoloadDelta: false,
+      configured: false,
+      filters: ["-extensions/shared.ts"],
+      desired: true,
+      expectedFilters: [],
+      reason: "Enabled by package autoload: no kind filter is configured",
+    },
+    {
+      label: "the sole package inclusion is removed",
+      autoloadDelta: false,
+      configured: true,
+      filters: ["extensions/shared.ts"],
+      desired: false,
+      expectedFilters: [],
+      reason: "Disabled by explicit empty package filter",
+    },
+  ])("should explain staged package filters when $label", (scenario) => {
+    const packagePath = "/global/pkg/extensions/shared.ts";
+    const catalog = catalogFor(
+      [
+        {
+          ...row("package", "global", scenario.configured),
+          path: packagePath,
+          canonicalPath: packagePath,
+          filters: scenario.filters,
+        },
+      ],
+      new Map([
+        [
+          "package",
+          {
+            ...packageTarget("package", "global", {
+              canonicalPath: packagePath,
+              autoloadDelta: scenario.autoloadDelta,
+            }),
+            hadFilterField: true,
+          },
+        ],
+      ]),
+    );
+
+    catalog.stage("package", scenario.desired);
+
+    expect(catalog.inspect("package")?.row).toMatchObject({
+      configured: scenario.desired,
+      filters: scenario.expectedFilters,
+      configurationReason: scenario.reason,
+    });
+  });
+
+  it("should return configured and resolved provenance", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
 
     const inspection = catalog.inspect("winner");
@@ -463,7 +526,7 @@ describe("ExtensionCatalog.inspect", () => {
     });
   });
 
-  test("should project staged top-level filters and their reason", () => {
+  it("should project staged top-level filters and their reason", () => {
     const projected = { ...target("winner", "project"), baseDir: "/repo" };
     const catalog = catalogFor(
       [row("winner", "project", true)],
@@ -484,7 +547,7 @@ describe("ExtensionCatalog.inspect", () => {
     });
   });
 
-  test("should project an explicit-empty package filter and its reason", () => {
+  it("should project an explicit-empty package filter and its reason", () => {
     const packagePath = "/global/pkg/extensions/shared.ts";
     const packageRow: CatalogRow = {
       ...row("package", "global", false),
@@ -517,7 +580,7 @@ describe("ExtensionCatalog.inspect", () => {
     });
   });
 
-  test.each(diagnosticCases.map((entry) => [entry.label, entry] as const))(
+  it.each(diagnosticCases.map((entry) => [entry.label, entry] as const))(
     "should project diagnostics for: %s",
     (_label, scenario) => {
       const catalog = diagnosticCatalog(scenario.diagnostic);
@@ -534,7 +597,7 @@ describe("ExtensionCatalog.inspect", () => {
 });
 
 describe("ExtensionCatalog.selfResolved", () => {
-  test.each(resolutionCases.map((entry) => [entry.label, entry] as const))(
+  it.each(resolutionCases.map((entry) => [entry.label, entry] as const))(
     "should match projected resolution for: %s",
     (_label, scenario) => {
       const catalog = resolutionCatalog(scenario.candidates);
@@ -545,7 +608,7 @@ describe("ExtensionCatalog.selfResolved", () => {
     },
   );
 
-  test("should follow the effective row across staged duplicate origins", () => {
+  it("should follow the effective row across staged duplicate origins", () => {
     const catalog = catalogFor([
       row("loser", "global", true, "Project settings"),
       row("winner", "project", true),
@@ -560,14 +623,14 @@ describe("ExtensionCatalog.selfResolved", () => {
 });
 
 describe("ExtensionCatalog.wouldDisableSelf", () => {
-  test("should canonicalize an equivalent path before projecting itself", () => {
+  it("should canonicalize an equivalent path before projecting itself", () => {
     const catalog = catalogFor([row("winner", "project", true)]);
     const equivalent = "/repo/extensions/../extensions/shared.ts";
 
     expect(catalog.wouldDisableSelf(equivalent, "winner", false)).toBe(true);
   });
 
-  test("should follow the effective row across duplicate origins", () => {
+  it("should follow the effective row across duplicate origins", () => {
     const catalog = catalogFor([
       row("loser", "global", true, "Project settings"),
       row("winner", "project", true),
@@ -579,7 +642,7 @@ describe("ExtensionCatalog.wouldDisableSelf", () => {
 });
 
 describe("ExtensionCatalog.commit", () => {
-  test("should hand the committer opaque documents and mutations", async () => {
+  it("should hand the committer opaque documents and mutations", async () => {
     const requests: CommitRequest[] = [];
     const result: CommitResult = {
       scopes: [
@@ -610,7 +673,7 @@ describe("ExtensionCatalog.commit", () => {
     expect(catalog.view().stagedCount).toBe(1);
   });
 
-  test.each(commitCases.map((entry) => [entry.label, entry] as const))(
+  it.each(commitCases.map((entry) => [entry.label, entry] as const))(
     "should apply the commit outcome for: %s",
     async (_label, scenario) => {
       const committed = scenario.status === "committed";

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { commitSettings, type PersistenceIo } from "./persistence.ts";
 import { parseSettingsDocument } from "./settings.ts";
 import type {
@@ -220,7 +220,7 @@ const committedResult: CommitResult = {
 };
 
 describe("commitSettings", () => {
-  test("should lock and prepare every scope before writing when mutations arrive in reverse scope order", async () => {
+  it("should lock and prepare every scope before writing when mutations arrive in reverse scope order", async () => {
     const input = request();
     const { io, events } = fakeIo();
 
@@ -244,7 +244,7 @@ describe("commitSettings", () => {
     ]);
   });
 
-  test("should release the earlier lock without reading when a later snapshot is missing", async () => {
+  it("should release the earlier lock without reading when a later snapshot is missing", async () => {
     const input = request();
     const { io, events } = fakeIo();
     const documents = new Map(input.documents);
@@ -268,7 +268,7 @@ describe("commitSettings", () => {
     expect(events).toEqual([`lock:${globalPath}`, `release:${globalPath}`]);
   });
 
-  test("should skip all preparation and release the earlier lock when the project lock fails", async () => {
+  it("should skip all preparation and release the earlier lock when the project lock fails", async () => {
     const { io, events } = fakeIo({ failLock: projectPath });
 
     expect(await commitSettings(request(), io)).toEqual({
@@ -293,7 +293,7 @@ describe("commitSettings", () => {
     ]);
   });
 
-  test("should perform no effects when no mutations are staged", async () => {
+  it("should perform no effects when no mutations are staged", async () => {
     const { io, events } = fakeIo();
 
     expect(
@@ -302,7 +302,7 @@ describe("commitSettings", () => {
     expect(events).toEqual([]);
   });
 
-  test.each(blockedProjects)(
+  it.each(blockedProjects)(
     "should block every write when %s",
     async (_label: string, scenario: BlockedProject) => {
       const { io, events } = fakeIo({
@@ -333,7 +333,7 @@ describe("commitSettings", () => {
     },
   );
 
-  test("should continue prevalidation and release both locks when a locked read rejects a non-Error value", async () => {
+  it("should continue prevalidation and release both locks when a locked read rejects a non-Error value", async () => {
     const { io, events } = fakeIo({ failRead: globalPath });
 
     expect(await commitSettings(request(), io)).toEqual({
@@ -354,7 +354,7 @@ describe("commitSettings", () => {
     ]);
   });
 
-  test.each(failedWrites)(
+  it.each(failedWrites)(
     "should report only successful writes and attempt both scopes when %s",
     async (_label, failedPath, expected) => {
       const { io, events } = fakeIo({ failWrite: failedPath });
@@ -369,7 +369,7 @@ describe("commitSettings", () => {
     },
   );
 
-  test("should exclude a scope from writes and committed scopes when its mutation changes nothing", async () => {
+  it("should exclude a scope from writes and committed scopes when its mutation changes nothing", async () => {
     const content = '{"extensions":["./extensions","-extensions/alpha.ts"]}\n';
     const { io, events } = fakeIo({ projectContent: content });
 
@@ -389,7 +389,7 @@ describe("commitSettings", () => {
     ]);
   });
 
-  test("should attempt the remaining releases without changing results when one lock release fails", async () => {
+  it("should attempt the remaining releases without changing results when one lock release fails", async () => {
     const { io, events } = fakeIo({ failRelease: projectPath });
 
     expect(await commitSettings(request(), io)).toEqual(committedResult);

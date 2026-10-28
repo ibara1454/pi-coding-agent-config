@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -165,7 +165,7 @@ const filterPathCases: readonly FilterPathCase[] = [
 ];
 
 describe("packageResourcePaths", () => {
-  test.each(manifestCases.map((entry) => [entry.label, entry] as const))(
+  it.each(manifestCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected paths for: %s",
     (_label, scenario) => {
       const fixture = aliasedPackage(scenario.content);
@@ -182,7 +182,7 @@ describe("packageResourcePaths", () => {
     },
   );
 
-  test("should enumerate extension entrypoints below a resource directory", () => {
+  it("should enumerate extension entrypoints below a resource directory", () => {
     const root = temporaryRoot();
     const actual = join(root, "extensions", "actual.ts");
     const nested = join(root, "extensions", "nested", "entry.ts");
@@ -209,7 +209,7 @@ describe("packageResourcePaths", () => {
     );
   });
 
-  test("should enumerate skill documents below a skill directory", () => {
+  it("should enumerate skill documents below a skill directory", () => {
     const root = temporaryRoot();
     const skills = join(root, "skills");
     const actual = join(skills, "actual", "SKILL.md");
@@ -231,7 +231,7 @@ describe("packageResourcePaths", () => {
     );
   });
 
-  test("should terminate when a directory symlink is self-referential", () => {
+  it("should terminate when a directory symlink is self-referential", () => {
     const root = temporaryRoot();
     const index = join(root, "index.ts");
     const nested = join(root, "nest", "index.ts");
@@ -249,7 +249,7 @@ describe("packageResourcePaths", () => {
 });
 
 describe("canonicalizeResourcePath", () => {
-  test("should resolve aliases and traversal without failing when files are absent", () => {
+  it("should resolve aliases and traversal without failing when files are absent", () => {
     const root = temporaryRoot();
     const actual = join(root, "extensions", "actual.ts");
     const linked = join(root, "extensions", "linked.ts");
@@ -267,7 +267,7 @@ describe("canonicalizeResourcePath", () => {
 });
 
 describe("resourceFilterPath", () => {
-  test.each(filterPathCases.map((entry) => [entry.label, entry] as const))(
+  it.each(filterPathCases.map((entry) => [entry.label, entry] as const))(
     "should return the expected filter path for: %s",
     (_label, scenario) => {
       const filterPath = resourceFilterPath(

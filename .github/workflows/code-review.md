@@ -1,10 +1,15 @@
 ---
 name: Code review
 inlined-imports: true
+imports:
+    - shared/mcp/context7.md
 on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
 if: github.event.pull_request.draft == false
+# AIC policy, trigger exemptions, and overshoot: .github/workflows/README.md#code-review-credit-budgets
+max-daily-ai-credits: 100
+max-ai-credits: 10
 permissions:
     contents: read
     issues: read
@@ -12,7 +17,6 @@ permissions:
     actions: read
 # How do I supply pricing for a custom or private model?
 # https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
-# OpenCode prices: https://opencode.ai/v2/docs/console/models/#pricing
 # Go Contributor prices and data use: https://opencode.ai/v2/docs/console/go
 # Meta terms: https://dev.meta.ai/docs/pricing-rate-limits#contributor-tier
 # USD/token: $0.10 input, $0.20 output, $0.002 cached input per million tokens.
@@ -31,11 +35,17 @@ checkout:
     fetch-depth: 0
 runtimes:
     bun:
-        version: "1.4.3"
+        version: "1.4.4"
+plugins:
+    # Official ponytail v5.3.2; keep hook trust below aligned with this revision.
+    - DietrichGebert/ponytail@16352ac229eb08a9598dcae48fe9f2b342567d86
 pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
       run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
+    - name: Install dependencies
+      working-directory: ${{ github.workspace }}
+      run: bun install --frozen-lockfile
     - name: Pre-fetch PR review context
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
@@ -215,7 +225,16 @@ pre-agent-steps:
               }
 engine:
     id: codex
+    version: "0.163.0"
     model: ${{ vars.OPENAI_MODEL }}
+    config: |
+        # Trust only the reviewed hooks from the pinned plugin, not all hooks.
+        [hooks.state."ponytail@gh-aw-plugin-0:hooks/claude-codex-hooks.json:session_start:0:0"]
+        trusted_hash = "sha256:55a39116e94ed8399271043701d3e9b8859aee77c30ef85529e7eab067d8acd9"
+        [hooks.state."ponytail@gh-aw-plugin-0:hooks/claude-codex-hooks.json:user_prompt_submit:0:0"]
+        trusted_hash = "sha256:29dcb3bf3cd3d77af301058521d2fd4e414c523345f8fe70942f7f30027acc94"
+        [hooks.state."ponytail@gh-aw-plugin-0:hooks/claude-codex-hooks.json:subagent_start:0:0"]
+        trusted_hash = "sha256:6e210f506560ddd14e490c7dd80623572d504b8f0cfcf8c64c4d4c2ab4d23ae1"
     env:
         OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         # Preserve the URL path when AWF resolves a runtime variable.
@@ -233,6 +252,9 @@ tools:
     # Codex cannot enforce per-command shell allowlists.
     bash: [":*"]
 safe-outputs:
+    threat-detection:
+        max-ai-credits: 5
+        continue-on-error: false
     submit-pull-request-review:
         allowed-events: [APPROVE, REQUEST_CHANGES]
         commit-id: ${{ github.event.pull_request.head.sha }}
@@ -277,6 +299,14 @@ approval criteria below.
 
 Focus on actionable correctness, security, and regression bugs introduced by
 this PR. Skip style preferences, speculative issues, and problems caught by CI.
+
+Read and apply the installed `ponytail:ponytail-review` skill before reviewing.
+Its minimal-change guidance supplements, but never overrides,
+`CODING_STANDARDS.md`, applicable repository instructions, the actionable-bug
+focus above, or the review format and approval/request-changes rules below.
+Do not turn lean-code suggestions into unsolicited refactoring or cleanup.
+If the plugin or its review skill cannot load inside the sandbox, the review
+is incomplete; name the missing evidence rather than approving.
 
 ## Submit the review
 

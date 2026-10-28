@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   applySettingsMutations,
   hasSettingsConflict,
@@ -77,7 +77,7 @@ const nonObjectRoots: [string, string][] = [
 ];
 
 describe("parseSettingsDocument", () => {
-  test.each(emptyDocuments)(
+  it.each(emptyDocuments)(
     "should return an empty value when input is %s",
     (_label: string, content: string | undefined) => {
       expect(
@@ -91,7 +91,7 @@ describe("parseSettingsDocument", () => {
     },
   );
 
-  test.each(nonObjectRoots)(
+  it.each(nonObjectRoots)(
     "should report an invalid root when input is %s",
     (_label: string, content: string) => {
       expect(
@@ -106,7 +106,7 @@ describe("parseSettingsDocument", () => {
     },
   );
 
-  test("should report a parser message when settings are unparsable", () => {
+  it("should report a parser message when settings are unparsable", () => {
     const parsed = parseSettingsDocument(
       "global",
       "/agent/settings.json",
@@ -118,7 +118,7 @@ describe("parseSettingsDocument", () => {
     expect(parsed.error).not.toBe("");
   });
 
-  test("should keep the parsed object beside its original content", () => {
+  it("should keep the parsed object beside its original content", () => {
     const content = '{\n  "extensions": ["./extensions"]\n}\n';
 
     expect(
@@ -179,7 +179,7 @@ const topLevelMutations: [string, JsonObject, boolean, JsonObject][] = [
 ];
 
 describe("applySettingsMutations", () => {
-  test.each(topLevelMutations)(
+  it.each(topLevelMutations)(
     "should produce the expected top-level filters for: %s",
     (_label: string, current: JsonObject, enabled: boolean, expected: JsonObject) => {
       expect(
@@ -188,7 +188,7 @@ describe("applySettingsMutations", () => {
     },
   );
 
-  test("should update only the Pi-winning path when a canonical target is collapsed", () => {
+  it("should update only the Pi-winning path when a canonical target is collapsed", () => {
     const target: TopLevelToggleTarget = {
       ...topTarget(),
       resolvedPath: "/repo/.pi/extensions/alpha-link.ts",
@@ -303,7 +303,7 @@ describe("applySettingsMutations", () => {
     ],
   ];
 
-  test.each(packageMutations)(
+  it.each(packageMutations)(
     "should produce the expected package filters for: %s",
     (_label: string, current: JsonObject, enabled: boolean, expected: JsonObject) => {
       expect(
@@ -312,7 +312,7 @@ describe("applySettingsMutations", () => {
     },
   );
 
-  test("should target only the requested duplicate package occurrence", () => {
+  it("should target only the requested duplicate package occurrence", () => {
     const next = applySettingsMutations(
       { packages: ["npm:kit", "npm:other", "npm:kit"] },
       [mutation(packageTarget(1), false)],
@@ -327,7 +327,7 @@ describe("applySettingsMutations", () => {
     });
   });
 
-  test.each(rejectedPackageMutations)(
+  it.each(rejectedPackageMutations)(
     "should reject %s",
     (_label: string, current: JsonObject, message: string) => {
       expect(() =>
@@ -336,7 +336,7 @@ describe("applySettingsMutations", () => {
     },
   );
 
-  test("should leave caller settings untouched", () => {
+  it("should leave caller settings untouched", () => {
     const current: JsonObject = { extensions: ["./extensions"] };
 
     applySettingsMutations(current, [mutation(topTarget(), false)]);
@@ -344,7 +344,7 @@ describe("applySettingsMutations", () => {
     expect(current).toEqual({ extensions: ["./extensions"] });
   });
 
-  test("should preserve unrelated package settings when disabling a selected package child", () => {
+  it("should preserve unrelated package settings when disabling a selected package child", () => {
     expect(
       applySettingsMutations(
         {
@@ -448,7 +448,7 @@ const unchangedOwners: [
 ];
 
 describe("hasSettingsConflict", () => {
-  test.each(changedOwners)(
+  it.each(changedOwners)(
     "should report a conflict when %s",
     (_label, snapshot, current, target) => {
       expect(
@@ -457,7 +457,7 @@ describe("hasSettingsConflict", () => {
     },
   );
 
-  test.each(unchangedOwners)(
+  it.each(unchangedOwners)(
     "should report no conflict when %s",
     (_label, snapshot, current, target) => {
       expect(
@@ -466,7 +466,7 @@ describe("hasSettingsConflict", () => {
     },
   );
 
-  test("should ignore all settings changes when no mutations select owners", () => {
+  it("should ignore all settings changes when no mutations select owners", () => {
     expect(
       hasSettingsConflict(
         { extensions: ["before"], packages: ["npm:kit"] },
@@ -476,7 +476,7 @@ describe("hasSettingsConflict", () => {
     ).toBe(false);
   });
 
-  test("should leave caller inputs untouched when multiple mutations share unchanged owners", () => {
+  it("should leave caller inputs untouched when multiple mutations share unchanged owners", () => {
     const snapshot: JsonObject = {
       extensions: ["./extensions"],
       packages: [{ source: "npm:kit", extensions: ["./extensions"] }],
@@ -494,7 +494,7 @@ describe("hasSettingsConflict", () => {
     expect({ snapshot, current, mutations }).toEqual(before);
   });
 
-  test("should report a conflict when one of several selected owners changes", () => {
+  it("should report a conflict when one of several selected owners changes", () => {
     expect(
       hasSettingsConflict(
         { extensions: ["./extensions"], packages: ["npm:kit"] },

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { lintRule } from "./test-utils.ts";
 
 const invalid = `
@@ -19,7 +19,7 @@ other.describe("unrelated function", async () => {});
 `;
 
 describe("no-async-describe-callback", () => {
-  test("should reject asynchronous callbacks on describe chains", () => {
+  it("should reject asynchronous callbacks on describe chains", () => {
     expect(lintRule("no-async-describe-callback", invalid)).toEqual(
       [
         "async () => {}",
@@ -30,7 +30,7 @@ describe("no-async-describe-callback", () => {
     );
   });
 
-  test("should allow asynchronous tests and hooks inside synchronous groups", () => {
+  it("should allow asynchronous tests and hooks inside synchronous groups", () => {
     expect(lintRule("no-async-describe-callback", valid)).toEqual([]);
   });
 });

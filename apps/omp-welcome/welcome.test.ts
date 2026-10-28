@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import type { WelcomeExtension, WelcomeSession } from "./data.ts";
 import { sanitizeInline, truncateToWidth, visibleWidth } from "./terminal.ts";
 import { pickStartupTip, WelcomeHeader } from "./welcome.ts";
@@ -60,7 +60,7 @@ function sectionIndex(lines: readonly string[], heading: string): number {
 }
 
 describe("wide welcome box", () => {
-  test("should render OMP geometry, gradient logo, Pi tips, and ordered sections", () => {
+  it("should render OMP geometry, gradient logo, Pi tips, and ordered sections", () => {
     const extensions: WelcomeExtension[] = [
       { name: "project.ts", scope: "project" },
       { name: "user.ts", scope: "user" },
@@ -119,7 +119,7 @@ describe("wide welcome box", () => {
     component.dispose();
   });
 
-  test("should omit model details, keep list entries on separate rows, and use one-row vertical padding", () => {
+  it("should omit model details, keep list entries on separate rows, and use one-row vertical padding", () => {
     const extensions: WelcomeExtension[] = [
       { name: "first", scope: "user" },
       { name: "second", scope: "project" },
@@ -156,7 +156,7 @@ describe("wide welcome box", () => {
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
-  test("should preserve three extension names and overflow when the wide header must scroll", () => {
+  it("should preserve three extension names and overflow when the wide header must scroll", () => {
     const extensions = Array.from({ length: 6 }, (_, index) => ({
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
@@ -177,7 +177,7 @@ describe("wide welcome box", () => {
 });
 
 describe("narrow welcome box", () => {
-  test("should stack left content then all named sections in one rounded box", () => {
+  it("should stack left content then all named sections in one rounded box", () => {
     const lines = rawLines(
       header({
         extensions: [{ name: "local.ts", scope: "project" }],
@@ -214,7 +214,7 @@ describe("narrow welcome box", () => {
     expect(boxRows.at(-2)?.replace(/[│ ]/g, "") ?? "").not.toBe("");
   });
 
-  test("should preserve three extension names and overflow when the stacked header must scroll", () => {
+  it("should preserve three extension names and overflow when the stacked header must scroll", () => {
     const extensions = Array.from({ length: 6 }, (_, index) => ({
       name: `extension-${index + 1}.ts`,
       scope: "user" as const,
@@ -233,7 +233,7 @@ describe("narrow welcome box", () => {
     expect(lines.some((line) => line.includes("… +3 more"))).toBe(true);
   });
 
-  test("should show empty section rows and truncate values before trailing metadata", () => {
+  it("should show empty section rows and truncate values before trailing metadata", () => {
     const lines = rawLines(
       header({
         extensions: [
@@ -273,7 +273,7 @@ describe("narrow welcome box", () => {
 });
 
 describe("terminal-cell-safe rendering", () => {
-  test("should count graphemes in cells and close ANSI state before ellipsis", () => {
+  it("should count graphemes in cells and close ANSI state before ellipsis", () => {
     const source = "\x1b[35m界e\u0301👩‍💻abcdef";
     const truncated = truncateToWidth(source, GRAPHEME_TRUNCATION_WIDTH);
 
@@ -283,7 +283,7 @@ describe("terminal-cell-safe rendering", () => {
     expect(truncated.endsWith("\x1b[0m")).toBe(true);
   });
 
-  test("should keep every box row within its terminal-cell budget for wide Unicode", () => {
+  it("should keep every box row within its terminal-cell budget for wide Unicode", () => {
     const component = header({
       extensions: [{ name: "拡張👩‍💻-長い名前.ts", scope: "user" }],
       recentSessions: [
@@ -308,7 +308,7 @@ describe("terminal-cell-safe rendering", () => {
     component.dispose();
   });
 
-  test("should sanitize every rendered option string before terminal output", () => {
+  it("should sanitize every rendered option string before terminal output", () => {
     const component = header({
       version: "\x1b[31m0.84.1\x1b[0m\nsafe",
       extensions: [
@@ -338,7 +338,7 @@ describe("terminal-cell-safe rendering", () => {
 });
 
 describe("dynamic welcome behavior", () => {
-  test("should use the 256-color logo fallback", () => {
+  it("should use the 256-color logo fallback", () => {
     const component = header({ theme: identityTheme("256color") });
     const rendered = component.render(WIDE_TERMINAL_WIDTH).join("\n");
 
@@ -348,7 +348,7 @@ describe("dynamic welcome behavior", () => {
 });
 
 describe("WelcomeHeader.invalidate", () => {
-  test("should rebuild unchanged resting rows when cached output is invalidated", () => {
+  it("should rebuild unchanged resting rows when cached output is invalidated", () => {
     const component = header();
     try {
       const initial = component.render(WIDE_TERMINAL_WIDTH);
@@ -366,7 +366,7 @@ describe("WelcomeHeader.invalidate", () => {
 });
 
 describe("WelcomeHeader.render", () => {
-  test("should animate the logo then cache resting rows and stop render requests when disposed", () => {
+  it("should animate the logo then cache resting rows and stop render requests when disposed", () => {
     const timing = { start: 100, moving: 850, complete: 3100 };
     const completedRenderRequests = 3;
     const now = spyOn(performance, "now").mockReturnValue(timing.start);
@@ -424,7 +424,7 @@ describe("WelcomeHeader.render", () => {
 });
 
 describe("pickStartupTip", () => {
-  test("should clamp to the final startup tip when randomness reaches its upper bound", () => {
+  it("should clamp to the final startup tip when randomness reaches its upper bound", () => {
     const finalTip = pickStartupTip(() => 1 - Number.EPSILON);
 
     expect(pickStartupTip(() => 1)).toBe(finalTip);

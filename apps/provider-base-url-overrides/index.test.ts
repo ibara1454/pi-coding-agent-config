@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the extension's live warning import.
 import * as console from "node:console";
 import process from "node:process";
@@ -348,7 +348,7 @@ async function triggerSessionStart(
 }
 
 describe("providerBaseUrlOverrides", () => {
-  test("should remain inactive when only vendor-specific environment variables are set", () => {
+  it("should remain inactive when only vendor-specific environment variables are set", () => {
     for (const name of [
       "ANTHROPIC_BASE_URL",
       "OPENAI_BASE_URL",
@@ -364,7 +364,7 @@ describe("providerBaseUrlOverrides", () => {
     }
   });
 
-  test("should disable silently when PROVIDER_BASE_URL is missing or blank", () => {
+  it("should disable silently when PROVIDER_BASE_URL is missing or blank", () => {
     for (const value of [undefined, "", "   \t\n"]) {
       const harness = runExtension(
         // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
@@ -377,7 +377,7 @@ describe("providerBaseUrlOverrides", () => {
     }
   });
 
-  test("should warn once and remain inactive when PROVIDER_BASE_URL is invalid", () => {
+  it("should warn once and remain inactive when PROVIDER_BASE_URL is invalid", () => {
     const invalidValues = [
       "proxy.test/path",
       "ftp://proxy.test/path",
@@ -399,7 +399,7 @@ describe("providerBaseUrlOverrides", () => {
     }
   });
 
-  test("should install only session_start and wrap represented providers when session_start occurs with a valid base URL", async () => {
+  it("should install only session_start and wrap represented providers when session_start occurs with a valid base URL", async () => {
     const baseUrl = " HTTPS://user:pass@proxy.test:8443/shared/path ";
     const alphaModel = makeModel(
       "alpha",
@@ -460,7 +460,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(betaModel.baseUrl).toBe("https://origin.test/beta-one");
   });
 
-  test("should silently skip providers that are absent from the registry", async () => {
+  it("should silently skip providers that are absent from the registry", async () => {
     const missingModel = makeModel(
       "missing",
       "missing",
@@ -486,7 +486,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(harness.warnings).toEqual([]);
   });
 
-  test("should build and delegate from captured Provider values when fields are accessors", async () => {
+  it("should build and delegate from captured Provider values when fields are accessors", async () => {
     const model = makeModel(
       "snapshot-provider",
       "model",
@@ -541,7 +541,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(streamReads).toBe(1);
   });
 
-  test("should continue session startup and wrap remaining providers when provider registration fails", async () => {
+  it("should continue session startup and wrap remaining providers when provider registration fails", async () => {
     const alphaModel = makeModel("alpha", "alpha", "https://origin.test/alpha");
     const betaModel = makeModel("beta", "beta", "https://origin.test/beta");
     const alpha = makeProvider("alpha", [alphaModel]);
@@ -578,7 +578,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(harness.warnings).toEqual([]);
   });
 
-  test("should delegate captured model routing fields when fields are accessors", async () => {
+  it("should delegate captured model routing fields when fields are accessors", async () => {
     const originalModel = makeModel(
       "model-snapshot",
       "model",
@@ -635,7 +635,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(baseUrlReads).toBe(1);
   });
 
-  test("should propagate the original error when a delegated Provider stream throws", async () => {
+  it("should propagate the original error when a delegated Provider stream throws", async () => {
     const model = makeModel(
       "failing-provider",
       "model",
@@ -670,7 +670,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(thrown).toBe(failure);
   });
 
-  test("should route supported APIs and preserve unrelated URLs after session_start", async () => {
+  it("should route supported APIs and preserve unrelated URLs after session_start", async () => {
     const providerBaseUrl = "https://proxy.test/root";
     const models = [
       makeModel(
@@ -763,7 +763,7 @@ describe("providerBaseUrlOverrides", () => {
     }
   });
 
-  test("should keep exact roots and append one suffix separator when PROVIDER_BASE_URL has a trailing slash", async () => {
+  it("should keep exact roots and append one suffix separator when PROVIDER_BASE_URL has a trailing slash", async () => {
     const providerBaseUrl = " https://proxy.test/root/ ";
     const anthropicModel = makeModel(
       "routing",
@@ -808,7 +808,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(required(routedModels[3]).baseUrl).toBe(providerBaseUrl.trim());
   });
 
-  test("should preserve metadata and omit absent methods when a provider has no optional methods", async () => {
+  it("should preserve metadata and omit absent methods when a provider has no optional methods", async () => {
     const model = makeModel("metadata", "model", "https://origin.test/model");
     const { provider } = makeProvider("metadata", [model]);
     const harness = runExtension({
@@ -831,7 +831,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(wrapped.cancelDeferred).toBeUndefined();
   });
 
-  test("should delegate stream methods with routed models and unchanged options when API is not Azure", async () => {
+  it("should delegate stream methods with routed models and unchanged options when API is not Azure", async () => {
     const originalModel = makeModel(
       "transport",
       "model",
@@ -894,7 +894,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(originalModel.baseUrl).toBe("https://origin.test/model");
   });
 
-  test("should delegate catalog methods with routed models and the original receiver when optional methods are present", async () => {
+  it("should delegate catalog methods with routed models and the original receiver when optional methods are present", async () => {
     const model = makeModel(
       "catalog",
       "model",
@@ -963,7 +963,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(filtered?.[0]).not.toBe(model);
   });
 
-  test("should delegate deferred methods with routed models and unchanged options when API is not Azure", async () => {
+  it("should delegate deferred methods with routed models and unchanged options when API is not Azure", async () => {
     const originalModel = makeModel(
       "deferred",
       "model",
@@ -1028,7 +1028,7 @@ describe("providerBaseUrlOverrides", () => {
     expect(originalModel.baseUrl).toBe("https://origin.test/model");
   });
 
-  test("should override Azure endpoints without mutating caller options when transports are delegated", async () => {
+  it("should override Azure endpoints without mutating caller options when transports are delegated", async () => {
     const originalModel = makeModel(
       "azure",
       "model",
@@ -1125,7 +1125,7 @@ describe("providerBaseUrlOverrides", () => {
     });
   });
 
-  test("should delegate captured Azure options and env values when fields are accessors", async () => {
+  it("should delegate captured Azure options and env values when fields are accessors", async () => {
     const model = makeModel(
       "azure-snapshot",
       "model",
