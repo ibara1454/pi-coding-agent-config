@@ -64,6 +64,7 @@ engine:
         [hooks.state."ponytail@gh-aw-plugin-0:hooks/claude-codex-hooks.json:subagent_start:0:0"]
         trusted_hash = "sha256:6e210f506560ddd14e490c7dd80623572d504b8f0cfcf8c64c4d4c2ab4d23ae1"
     env:
+        CODE_REVIEW_REVIEWER: ${{ vars.CODE_REVIEW_REVIEWER }}
         OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         # Preserve the URL path when AWF resolves a runtime variable.
         OPENAI_BASE_URL_ENV: OPENAI_BASE_URL
@@ -93,6 +94,9 @@ timeout-minutes: 15
 <!-- Keep this workflow concise; consider skills for reusable instructions. -->
 
 # Review the pull request
+
+Read `$CODE_REVIEW_REVIEWER` from your environment to identify the account that
+publishes your safe-output review. Your GitHub tools remain read-only.
 
 Review pull request #${{ github.event.pull_request.number }} in
 `${{ github.repository }}`. Use the pre-fetched PR metadata and discussion to
