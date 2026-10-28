@@ -2,7 +2,8 @@
 
 Configure these before merging: **missing `CODE_REVIEW_TOKEN` blocks all reviews**.
 
-1. Use a dedicated machine-user account, not a GitHub App bot or the PR author.
+1. Use a separate, ordinary GitHub user account dedicated to automated reviews,
+   not a GitHub App bot or the PR author's account.
    Enable 2FA, invite it as a repository collaborator, and accept the invitation.
 2. As that account, create an expiring classic PAT with **`public_repo`** scope.
    Fine-grained PATs currently [do not support repository collaborators](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations).
