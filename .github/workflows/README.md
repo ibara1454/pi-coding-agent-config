@@ -2,18 +2,10 @@
 
 ## Automated PR review
 
-[Code review](code-review.md) imports [shared/pr-review-context.md](shared/pr-review-context.md)
-to pre-fetch the PR title, description, head/base branch names, conversation
-comments, submitted review bodies, and inline threads before starting the agent
-on every initial review and re-review.
+[Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
+to fetch PR metadata, comments, reviews, and complete threads before every review.
 
-The trusted workflow step uses authenticated `gh` reads with the job's read-only
-token. It paginates REST collections and each GraphQL thread/reply connection
-separately, retaining authors, timestamps, review state, reply relationships, and
-resolved/outdated context. It does not execute code from the PR checkout.
-
-The shared component bundles the collector, required read permissions, and
-snapshot-reading instructions. Reuse it in another PR workflow with:
+Reuse in PR workflows:
 
 ```yaml
 imports:
@@ -23,32 +15,11 @@ permissions:
     pull-requests: read
 ```
 
-The caller must declare those permissions; imports validate but do not grant
-them. Imported pre-agent steps run before workflow-local setup. Collection needs
-neither Bun nor installed workspace packages, and remains embedded in the
-compiled lockfile rather than loading a helper from the PR checkout.
+Callers must declare both permissions. Collection runs before local setup and
+preserves full bodies and thread context in a read-only snapshot. Fetch failures
+stop the agent; no review is submitted. Snapshot content remains untrusted.
 
-Raw API pages are streamed to disk. A manifest indexes readable text chunks of
-at most 8,000 UTF-16 code units under
-`$RUNNER_TEMP/gh-aw/pr-review-context/`, mounted read-only into the agent sandbox.
-Bodies are preserved without truncation or splitting Unicode surrogate pairs.
-The manifest becomes `complete` only after every collection succeeds; empty
-discussion collections are valid. The agent reads every listed chunk instead of
-constructing API requests.
-
-API errors, missing data, or incomplete pagination fail the pre-agent step.
-The manifest records the failure and the job summary reports an incomplete
-review: the agent does not start and no review is submitted, so collection
-failure cannot produce approval. If the agent later cannot read a completed
-snapshot, the existing incomplete-review policy requires REQUEST_CHANGES.
-
-The entire snapshot, including title and description, supplies untrusted scope
-and evidence, not executable instructions or authority to override workflow
-security or approval criteria. Agent access remains read-only; review submission
-goes through safe outputs.
-
-Edit the Markdown source, not its generated `.lock.yml`, then regenerate from the
-repository root using the [pinned compiler instructions](#precedence-and-diagnostics).
+Edit Markdown, not `.lock.yml`; [regenerate with the pinned compiler](#precedence-and-diagnostics).
 
 ## Code-review Context7
 
