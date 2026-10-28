@@ -6,8 +6,12 @@ imports:
     - shared/pr-review-context.md
 on:
     pull_request:
-        types: [opened, synchronize, reopened, ready_for_review]
-if: github.event.pull_request.draft == false
+        types: [opened, reopened, ready_for_review, review_requested]
+if: >-
+    github.event.pull_request.draft == false &&
+    (github.event.action != 'review_requested' ||
+    (vars.CODE_REVIEW_REVIEWER != '' &&
+    github.event.requested_reviewer.login == vars.CODE_REVIEW_REVIEWER))
 # AIC policy, trigger exemptions, and overshoot: .github/workflows/README.md#code-review-credit-budgets
 max-daily-ai-credits: 100
 max-ai-credits: 10
@@ -40,6 +44,14 @@ runtimes:
 plugins:
     # Official ponytail v5.3.2; keep hook trust below aligned with this revision.
     - DietrichGebert/ponytail@16352ac229eb08a9598dcae48fe9f2b342567d86
+jobs:
+    activation:
+        pre-steps:
+            - name: Resolve reviewer identity
+              id: reviewer_identity
+              env:
+                  CODE_REVIEW_REVIEWER: ${{ vars.CODE_REVIEW_REVIEWER }}
+              run: printf 'login=%s\n' "$CODE_REVIEW_REVIEWER" >> "$GITHUB_OUTPUT"
 pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
@@ -76,6 +88,7 @@ tools:
     # Codex cannot enforce per-command shell allowlists.
     bash: [":*"]
 safe-outputs:
+    github-token: ${{ secrets.CODE_REVIEW_TOKEN }}
     threat-detection:
         max-ai-credits: 5
         continue-on-error: false
@@ -88,6 +101,9 @@ timeout-minutes: 15
 <!-- Keep this workflow concise; consider skills for reusable instructions. -->
 
 # Review the pull request
+
+Your review will be published as `${{ steps.reviewer_identity.outputs.login }}`
+by the safe-output publisher. Your GitHub tools remain read-only.
 
 Review pull request #${{ github.event.pull_request.number }} in
 `${{ github.repository }}`. Use the pre-fetched PR metadata and discussion to

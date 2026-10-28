@@ -2,6 +2,10 @@
 
 ## Automated PR review
 
+Reviews run when a non-draft PR is opened or reopened, when a draft is marked ready
+for review, or when the configured reviewer is explicitly requested. Pushing
+commits does not trigger a review; request the reviewer explicitly afterward.
+
 [Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
 to fetch PR metadata, comments, reviews, and complete threads before every review.
 
@@ -18,6 +22,35 @@ permissions:
 Callers must declare both permissions. Collection runs before local setup and
 preserves full bodies and thread context in a read-only snapshot. Fetch failures
 stop the agent; no review is submitted. Snapshot content remains untrusted.
+
+### Reviewer account setup
+
+Configure these before merging: **missing `CODE_REVIEW_TOKEN` blocks all reviews**.
+
+1. Use a separate, ordinary GitHub user account dedicated to automated reviews,
+   not a GitHub App bot or the PR author's account.
+   Enable 2FA, invite it as a repository collaborator, and accept the invitation.
+2. As that account, create an expiring classic PAT with **`public_repo`** scope.
+   Fine-grained PATs currently [do not support repository collaborators](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations).
+   This token is not review-only: keep the account's access limited to this
+   repository and rotate the token before expiry.
+3. As the repository owner, set the Actions secret and variable:
+
+   ```sh
+   gh secret set CODE_REVIEW_TOKEN
+   gh variable set CODE_REVIEW_REVIEWER --body 'YOUR-MACHINE-USER-LOGIN'
+   ```
+
+   Paste the token at the secret prompt; use its owner's login without `@`.
+   The agent receives the reviewer login directly in its prompt, not the token.
+   Never put this write token in `GH_AW_GITHUB_TOKEN` or the agent environment.
+
+To obtain the first review, mark a draft PR ready or request the configured account
+under **Reviewers** on a non-draft PR. Then use **Re-request review** without
+pushing a commit. Before merging this integration, confirm that re-requesting
+produces a new workflow run and a new review at the same PR head SHA.
+
+Identity investigation and verification evidence: [#63](https://github.com/ibara1454/pi-coding-agent-config/issues/63).
 
 ## Code-review Context7
 
@@ -94,8 +127,8 @@ privacy/eligibility requirements remain separate.
 
 ### Enforcement and limitations
 
-- All current triggers—`pull_request` actions `opened`, `synchronize`, `reopened`,
-  and `ready_for_review`—use daily admission before the reviewer starts.
+- All configured `pull_request` triggers use daily admission before the reviewer
+  starts.
   Repeated reviews are new runs and contribute reviewer **and** detector usage.
   At recorded/estimated daily usage **≥ 100 AIC**, the reviewer, detector, and
   safe-output publication are skipped; no new APPROVE is submitted.
