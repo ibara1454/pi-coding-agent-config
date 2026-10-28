@@ -19,6 +19,20 @@ Callers must declare both permissions. Collection runs before local setup and
 preserves full bodies and thread context in a read-only snapshot. Fetch failures
 stop the agent; no review is submitted. Snapshot content remains untrusted.
 
+## Code-review runner trial
+
+`code-review.md` sets `runs-on-slim: ubuntu-latest` to move pre-activation,
+activation, review publication, and conclusion from `ubuntu-slim` to the standard
+4-CPU runner. Reviewer and threat-detection jobs already use `ubuntu-latest`.
+Standard runners are free for this public repository; no paid larger runners are
+enabled.
+
+Before this trial, the latest 10 successful runs that executed the reviewer
+(2026-10-26–28) had a median end-to-end duration of 6m 27s, ranging from 4m 45s
+to 8m 44s. Compare several new eligible PR runs against that baseline, excluding
+skipped, gated, and cancelled runs. Local compilation validates runner selection,
+not hosted startup time or a speedup.
+
 ## Code-review Context7
 
 [Code review](code-review.md) imports its Context7 server, network allowance, and

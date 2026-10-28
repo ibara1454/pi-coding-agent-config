@@ -8,6 +8,7 @@ on:
     pull_request:
         types: [opened, synchronize, reopened, ready_for_review]
 if: github.event.pull_request.draft == false
+runs-on-slim: ubuntu-latest
 # AIC policy, trigger exemptions, and overshoot: .github/workflows/README.md#code-review-credit-budgets
 max-daily-ai-credits: 100
 max-ai-credits: 10
