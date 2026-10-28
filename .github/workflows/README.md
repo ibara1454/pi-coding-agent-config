@@ -42,6 +42,7 @@ Configure these before merging: **missing `CODE_REVIEW_TOKEN` blocks all reviews
    ```
 
    Paste the token at the secret prompt; use its owner's login without `@`.
+   The agent receives the reviewer login directly in its prompt, not the token.
    Never put this write token in `GH_AW_GITHUB_TOKEN` or the agent environment.
 
 To obtain the first review, mark a draft PR ready or request the configured account

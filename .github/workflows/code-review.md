@@ -44,6 +44,14 @@ runtimes:
 plugins:
     # Official ponytail v5.3.2; keep hook trust below aligned with this revision.
     - DietrichGebert/ponytail@16352ac229eb08a9598dcae48fe9f2b342567d86
+jobs:
+    activation:
+        pre-steps:
+            - name: Resolve reviewer identity
+              id: reviewer_identity
+              env:
+                  CODE_REVIEW_REVIEWER: ${{ vars.CODE_REVIEW_REVIEWER }}
+              run: printf 'login=%s\n' "$CODE_REVIEW_REVIEWER" >> "$GITHUB_OUTPUT"
 pre-agent-steps:
     # AWF hides ~/.bun; /usr/local/bin is mounted read-only inside the sandbox.
     - name: Expose Bun to AWF
@@ -64,7 +72,6 @@ engine:
         [hooks.state."ponytail@gh-aw-plugin-0:hooks/claude-codex-hooks.json:subagent_start:0:0"]
         trusted_hash = "sha256:6e210f506560ddd14e490c7dd80623572d504b8f0cfcf8c64c4d4c2ab4d23ae1"
     env:
-        CODE_REVIEW_REVIEWER: ${{ vars.CODE_REVIEW_REVIEWER }}
         OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
         # Preserve the URL path when AWF resolves a runtime variable.
         OPENAI_BASE_URL_ENV: OPENAI_BASE_URL
@@ -95,8 +102,8 @@ timeout-minutes: 15
 
 # Review the pull request
 
-Read `$CODE_REVIEW_REVIEWER` from your environment to identify the account that
-publishes your safe-output review. Your GitHub tools remain read-only.
+Your review will be published as `${{ steps.reviewer_identity.outputs.login }}`
+by the safe-output publisher. Your GitHub tools remain read-only.
 
 Review pull request #${{ github.event.pull_request.number }} in
 `${{ github.repository }}`. Use the pre-fetched PR metadata and discussion to
