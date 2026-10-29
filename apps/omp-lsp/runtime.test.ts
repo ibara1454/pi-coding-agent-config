@@ -829,6 +829,41 @@ describe("LanguageServer.request", () => {
 });
 
 describe("LanguageServer.syncFile", () => {
+  it("should cancel an in-flight read and synchronize the next queued update without retaining stale text", async () => {
+    const server = fixture();
+    const client = await server.pool.get(server.config);
+    const file = "/project/example.ts";
+    await client.syncFile(file, "original");
+    const version = client.document(file)?.version;
+    const started = Promise.withResolvers<void>();
+    const reading = Promise.withResolvers<string>();
+    const read = spyOn(fs, "readFile").mockImplementation(((
+      ..._args: Parameters<typeof fs.readFile>
+    ): ReturnType<typeof fs.readFile> => {
+      started.resolve();
+      return reading.promise;
+    }) as typeof fs.readFile);
+    const controller = new AbortController();
+    const pending = client.syncFile(file, undefined, controller.signal);
+    const canceled = pending.catch((error: unknown) => error);
+    await started.promise;
+    const next = client.syncFile(file, "updated");
+    const reason = new Error("document read canceled");
+    controller.abort(reason);
+    reading.resolve("stale disk text");
+    const [failure] = await Promise.all([canceled, next, reading.promise]);
+
+    expect(failure).toBe(reason);
+    expect(read.mock.calls[0]?.[1]).toMatchObject({
+      signal: { aborted: true },
+    });
+    expect(client.document(file)).toEqual({
+      version: (version ?? 0) + 1,
+      content: "updated",
+    });
+    expect(client.isAlive).toBe(true);
+    expect(server.stop).not.toHaveBeenCalled();
+  });
   it("should replace numeric incremental synchronization with a UTF-16 range across CRLF", async () => {
     const server = fixture({ capabilities: { textDocumentSync: 2 } });
     const changes = mock();

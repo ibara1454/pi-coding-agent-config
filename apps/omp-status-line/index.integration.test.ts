@@ -5,16 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { estimateTokens } from "@earendil-works/pi-coding-agent";
-
-// Capture the pure estimator before Bun replaces live host-module exports.
-const realEstimateTokens = estimateTokens;
-
-mock.module("@earendil-works/pi-coding-agent", () => ({
-  // biome-ignore lint/style/useNamingConvention: host module export identity
-  CustomEditor: class {},
-  estimateTokens: realEstimateTokens,
-}));
+import ompStatusLine from "./index.ts";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const STATUS_LINE_LEADING_BORDER = "╭──";
@@ -183,11 +174,6 @@ function createHarness(options: {
   };
 }
 
-async function loadExtension() {
-  // Load after the Pi-host runtime module is mocked.
-  return (await import("./index.ts")).default;
-}
-
 it("should shrink the path before dropping context usage", async () => {
   const fixture = await createSettingsFixture({
     preset: "custom",
@@ -203,7 +189,6 @@ it("should shrink the path before dropping context usage", async () => {
   const harness = createHarness({ cwd: fixture.projectDir, trusted: true });
 
   try {
-    const ompStatusLine = await loadExtension();
     ompStatusLine(harness.pi as never);
     await harness.handlers.get("session_start")?.({}, harness.context);
 
@@ -250,7 +235,6 @@ it("should ignore project settings when project is untrusted", async () => {
   });
 
   try {
-    const ompStatusLine = await loadExtension();
     ompStatusLine(harness.pi as never);
     await harness.handlers.get("session_start")?.({}, harness.context);
 
@@ -300,7 +284,6 @@ it("should release owned resources without replacing newer UI", async () => {
   });
 
   try {
-    const ompStatusLine = await loadExtension();
     ompStatusLine(harness.pi as never);
     await harness.handlers.get("session_start")?.({}, harness.context);
 
@@ -446,7 +429,6 @@ async function createRenderedFixture(
   };
 
   try {
-    const ompStatusLine = await loadExtension();
     ompStatusLine(harness.pi as never);
     await harness.handlers.get("session_start")?.({}, harness.context);
     const editorFactory = harness.getEditorFactory();
@@ -552,7 +534,6 @@ describe("ompStatusLine", () => {
       throw failure;
     });
     try {
-      const ompStatusLine = await loadExtension();
       ompStatusLine(harness.pi as never);
 
       await expect(
