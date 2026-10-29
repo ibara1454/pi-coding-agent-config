@@ -1,5 +1,11 @@
 # Workflows
 
+## OSS dependency scanning
+
+[OSV-Scanner](osv-scanner.yml) scans `bun.lock` and
+`config/pi/npm/package-lock.json` daily at **06:00 UTC** or via manual dispatch.
+Findings are report-only and appear under **Security → Code scanning**.
+
 ## Automated PR review
 
 [Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)
