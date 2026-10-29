@@ -41,10 +41,10 @@ component_management:
       name: provider-base-url-overrides
       paths:
         - apps/provider-base-url-overrides/**
-    - component_id: sandbox
-      name: sandbox
+    - component_id: openshell-sandbox
+      name: openshell-sandbox
       paths:
-        - apps/sandbox/**
+        - apps/openshell-sandbox/**
     - component_id: biome-rules
       name: biome-rules
       paths:

@@ -28,7 +28,7 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - Status line: `apps/omp-status-line/index.ts` reads global and project settings, aggregates session/context/git state, renders declarative segments, then wraps the editor and footer. `segments.ts` is the segment-rendering interface; `types.ts`, `presets.ts`, and `theme.ts` define its contracts and presentation data.
 - Welcome UI: `apps/omp-welcome/index.ts` collects extension/session data and installs a responsive header. `data.ts` handles discovery/settings snapshots; `welcome.ts` renders; `resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
 - Provider base URL overrides: `apps/provider-base-url-overrides/index.ts` validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
-- Sandbox: `apps/sandbox/index.ts` layers defaults, global, and project policy before replacing Pi's bash tool with `SandboxManager` operations.
+- OpenShell sandbox: `apps/openshell-sandbox/index.ts` registers fail-closed model Bash; scoped modules own session lifecycle, native configuration, SDK resources, and direct-child gateway cleanup. User Bash remains host-side.
 - Agent configuration: `config/pi/settings.json` loads extension packages through `../../apps`; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
 
 ## Key Directories
@@ -37,10 +37,9 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - `apps/omp-status-line/` — self-contained ESM status-line/editor-chrome extension and Bun test package.
 - `apps/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
 - `apps/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
-- `apps/sandbox/` — OS-level sandboxing for Pi's Bash tool.
+- `apps/openshell-sandbox/` — OpenShell-backed model Bash with colocated unit and integration tests.
 - `packages/biome-rules/` — custom GritQL rules with colocated Bun integration tests.
-- `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, npm package state, and sandbox policy.
-- `config/pi/schemas/` — JSON Schema assets, currently `sandbox.schema.json` for `config/pi/sandbox.json`.
+- `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, and npm package state.
 - `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
 
 ## Development Commands
@@ -62,7 +61,7 @@ bun test apps/extension-manager
 bun test apps/provider-base-url-overrides
 bun test apps/omp-status-line
 bun test apps/omp-welcome
-bun test apps/sandbox
+bun test apps/openshell-sandbox
 bun test packages/biome-rules
 ```
 
@@ -71,11 +70,10 @@ bun test packages/biome-rules
 - `README.md` — repository purpose and root setup entry point.
 - `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
 - `config/pi/settings.json` — tracked, non-secret Pi defaults and extension references.
-- `config/pi/sandbox.json` and `config/pi/schemas/sandbox.schema.json` — sandbox policy and its strict schema.
 - `apps/extension-manager/index.ts` — extension-manager host entry point.
 - `apps/omp-status-line/index.ts` — status-line integration entry point.
 - `apps/omp-welcome/index.ts` — welcome integration entry point.
-- `apps/sandbox/index.ts` — sandbox tool/policy entry point.
+- `apps/openshell-sandbox/index.ts` — OpenShell sandbox Pi factory.
 - `apps/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
 - `.gitignore` and `config/pi/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
 
@@ -91,4 +89,4 @@ Use the default five canonical triage labels. See `docs/agents/triage-labels.md`
 
 ### Domain docs
 
-Single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+For package-specific terminology, context discovery, and ADR locations, see `docs/agents/domain.md`.

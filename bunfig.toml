@@ -2,6 +2,13 @@
 preload = ["./test/setup.ts"]
 coverageReporter = ["text", "lcov"]
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["**/test/setup.ts", "**/*-test-fixtures.ts", "**/apps/sandbox/**"]
+coveragePathIgnorePatterns = [
+  "**/test/setup.ts",
+  "**/*-test-fixtures.ts",
+  "**/apps/openshell-sandbox/**/test/*.helper.ts",
+]
 # Per-file floors; keep headroom for incremental tests rather than chasing full coverage.
 coverageThreshold = 0.95
+
+[install.scopes]
+"@nvidia" = { url = "https://npm.pkg.github.com/", token = "$NVIDIA_NPM_TOKEN" }
