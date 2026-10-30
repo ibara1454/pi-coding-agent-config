@@ -65,7 +65,7 @@ function hasExpired(expiresAt: number): boolean {
 
 - Test suites use `bun:test`; there is no Jest or Vitest.
 - Add tests beside their implementation and exercise observable behavior: rendered output, terminal-cell budgets, configuration precedence, fail-open compatibility guards, and lifecycle cleanup.
-- Pi-host modules are available in Pi at runtime. Host-facing integration tests should mock Pi runtime modules before dynamically importing the extension, as `apps/omp-status-line/index.integration.test.ts` does.
+- Host-facing integration tests use real Pi exports and lightweight fake contexts or scoped, restored spies, as `apps/omp-status-line/index.integration.test.ts` does. Avoid global `mock.module(...)` overrides: they persist across suites.
 - Root `bunfig.toml` preloads `test/setup.ts` for direct Bun test runs; the preload restores spies and clears mock calls after each test but does not undo `mock.module(...)` overrides.
 
 ## Workspace manifests and tooling

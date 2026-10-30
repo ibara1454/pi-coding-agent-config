@@ -1,6 +1,8 @@
 node_modules/
 .turbo/
 coverage/
+# Local npm configuration may contain authentication tokens.
+.npmrc
 # The tracked Pi configuration lives under config/pi.
 /settings.json
 # OS and editor files

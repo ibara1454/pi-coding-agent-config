@@ -25,6 +25,11 @@ Callers must declare both permissions. Collection runs before local setup and
 preserves full bodies and thread context in a read-only snapshot. Fetch failures
 stop the agent; no review is submitted. Snapshot content remains untrusted.
 
+The pre-agent dependency installation downloads OpenShell's SDK from GitHub
+Packages. Keep `permissions.packages: read` and the installation step's
+`NVIDIA_NPM_TOKEN: ${{ github.token }}` binding together. Keep this credential
+step-local; do not move it into workflow, job, or engine environment variables.
+
 ## Code-review runner trial
 
 `code-review.md` sets `runs-on-slim: ubuntu-latest` to move pre-activation,

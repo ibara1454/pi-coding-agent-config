@@ -12,21 +12,21 @@ This repository contains personal configuration and customized extensions for
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
 
-`config/pi/settings.json` loads every extension package in `apps/` through
-`"extensions": ["../../apps"]`. Keep non-extension applications out of `apps/`.
-Before introducing one, replace that directory-wide setting with explicit paths
-to the Pi extension packages.
-
 ## Installation
 
 Install [Pi](https://github.com/earendil-works/pi) and [Bun](https://bun.com/)
-separately, then choose one of the following setups.
+separately, then choose a setup below.
 
 ### Use the entire repository
 
+Before installing dependencies, follow the OpenShell
+[prerequisites and private-registry authentication](apps/openshell-sandbox/README.md#installation-and-prerequisites);
+complete its [project-policy setup](apps/openshell-sandbox/README.md#configure-trusted-inputs)
+before normal model use.
+
 1. Copy or clone the entire repository to local storage and open its root
    directory. Keep `apps/` and `config/pi/` in their existing relative locations.
-2. Install the workspace dependencies:
+2. Install workspace dependencies:
 
    ```sh
    bun install --frozen-lockfile
@@ -70,10 +70,11 @@ Use this option to keep an existing Pi configuration independent of this
 repository.
 
 1. Copy each desired **complete package directory** from `apps/` into your Pi
-   configuration's `extensions/` directory. For example, copy `apps/sandbox/` to
-   `~/.pi/agent/extensions/sandbox/`. If `PI_CODING_AGENT_DIR` is already set, use
+   configuration's `extensions/` directory. For example, copy `apps/omp-status-line/` to
+   `~/.pi/agent/extensions/omp-status-line/`. If `PI_CODING_AGENT_DIR` is already set, use
    its `extensions/` directory instead. Include `package.json`, the entrypoint,
    supporting source files, and assets; omit generated `node_modules/` directories.
+   For OpenShell, include its `bunfig.toml` and follow the linked prerequisites.
 2. Open each copied package directory and install its runtime dependencies there:
 
    ```sh
@@ -85,7 +86,6 @@ repository.
    into your independent configuration.
 
 Copying only `index.ts` is insufficient for extensions with supporting modules.
-Sandbox users must also meet its [platform requirements](apps/sandbox/README.md#install).
 
 For a one-off run from the repository root after installing workspace dependencies:
 
@@ -106,7 +106,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
 | [`extension-manager`](apps/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/extension-manager` |
-| [`sandbox`](apps/sandbox/README.md) | Replaces Pi's bash tool with schema-backed sandbox policy. | `bun test apps/sandbox` |
+| [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Tests and native limits](apps/openshell-sandbox/README.md#automatic-tests) |
 | [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
 ## Validation
@@ -145,18 +145,18 @@ Run all workspace tests with coverage through Turborepo:
 bun run test
 ```
 
-Use the focused `bun test apps/...` commands above while iterating on one extension.
+Use `bun test` for all Bun suites in one process, or `bun test apps/...` for one extension.
 
 ## Testing
 
-A normal run (`bun run test`, or a focused `bun test apps/...`) executes the
-declared suite: the direct unit suites, the panel and rendering suites, and the
-command-level integration suites.
+A direct `bun test` run executes all Bun unit and integration suites together.
+`bun run test` additionally enforces workspace-specific per-file coverage floors
+in separate workspace processes.
 
 Every tested workspace preloads the shared `test/setup.ts` seam, which restores spies
-and clears mock call state after each test. That cleanup does not revert
-`mock.module()` overrides, so the few files that must override host modules install
-them at the top level and stay isolated to their own file.
+and clears mock call state after each test. Use real host exports or restorable
+per-test spies: `mock.module()` overrides survive that cleanup and can contaminate
+other suites in a direct root run.
 
 Narrow a run to one file while working on the extension manager panel:
 
@@ -170,8 +170,6 @@ bun test apps/extension-manager/panel.test.ts
 ```bash
 bun run test
 ```
-
-`apps/sandbox/**` is excluded.
 
 Each workspace writes `coverage/lcov.info`.
 

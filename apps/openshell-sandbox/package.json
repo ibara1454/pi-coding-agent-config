@@ -1,0 +1,29 @@
+{
+  "name": "openshell-sandbox",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write --error-on-warnings .",
+    "test": "bun test --cwd=../.. ./apps/openshell-sandbox --coverage --coverage-dir=./apps/openshell-sandbox/coverage --only-failures",
+    "test:unit": "bun test --cwd=../.. ./apps/openshell-sandbox --path-ignore-patterns='**/*.integration.test.ts' --only-failures",
+    "typecheck": "bun check --project tsconfig.json"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@nvidia/openshell-sdk": "0.0.116",
+    "yaml": "^2.8.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

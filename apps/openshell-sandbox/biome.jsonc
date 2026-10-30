@@ -1,0 +1,67 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
+  "root": false,
+  "extends": "//",
+  "linter": {
+    "rules": {
+      "complexity": {
+        // Explicit defaults replace the root's higher rollout limits.
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 15 }
+        },
+        "noExcessiveLinesPerFunction": {
+          "level": "error",
+          "options": { "maxLines": 50 }
+        }
+      },
+      "performance": {
+        "noAwaitInLoops": "error"
+      },
+      "style": {
+        "noContinue": "error",
+        "noExcessiveClassesPerFile": "error",
+        "noExcessiveLinesPerFile": "error",
+        "noIncrementDecrement": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["index.ts", "!src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            // Pi loads extension entrypoints through their default-exported factories.
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            // Keep cases together under their production owner's test filename.
+            "noExcessiveLinesPerFile": {
+              "level": "error",
+              "options": { "maxLines": 1000 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**/index.ts", "src/**/test/index.helper.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            // Module index files define explicit package interfaces.
+            "noBarrelFile": "off"
+          }
+        }
+      }
+    }
+  ]
+}

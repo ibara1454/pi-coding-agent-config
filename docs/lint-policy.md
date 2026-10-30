@@ -33,6 +33,17 @@ callbacks; lower them as owning operations are simplified rather than splitting
 cohesive code solely to meet a metric. `noMagicNumbers` is enforced in both production and test code,
 using named constants for flagged numeric literals without changing their values.
 
+## OpenShell sandbox package overrides
+
+`apps/openshell-sandbox/biome.jsonc` uses Biome's default limits of **15** for
+`noExcessiveCognitiveComplexity` and **50** for `noExcessiveLinesPerFunction`,
+both at **Error** severity. It also sets `noAwaitInLoops`, `noContinue`,
+`noIncrementDecrement`, `noExcessiveLinesPerFile` (default: **300** lines), and
+`noExcessiveClassesPerFile` (default: **1** class) to **Error**.
+
+These overrides apply only to this package. Other packages retain the root
+policy described below.
+
 ## Conditional expressions and loops
 
 All rules in this section use the `lint/style/` prefix.

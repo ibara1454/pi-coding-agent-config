@@ -17,6 +17,7 @@ permissions:
     issues: read
     pull-requests: read
     actions: read
+    packages: read
 # How do I supply pricing for a custom or private model?
 # https://github.github.com/gh-aw/reference/faq/#how-do-i-supply-pricing-for-a-custom-or-private-model
 # Go Contributor prices and data use: https://opencode.ai/v2/docs/console/go
@@ -47,6 +48,8 @@ pre-agent-steps:
       run: sudo install -m 755 "$HOME/.bun/bin/bun" /usr/local/bin/bun
     - name: Install dependencies
       working-directory: ${{ github.workspace }}
+      env:
+          NVIDIA_NPM_TOKEN: ${{ github.token }}
       run: bun install --frozen-lockfile
 engine:
     id: codex
