@@ -84,6 +84,28 @@ describe("cleanupGeneration", () => {
     expect(setup.fixture.sdk.deleteCount).toBe(0);
     expect(setup.release).not.toHaveBeenCalled();
   });
+  it("should preserve a same-name replacement when ownership changes during stop", async () => {
+    const setup = acknowledgedCleanup();
+    const { stopSandbox } = setup.fixture.sdk.client.raw;
+    setup.fixture.sdk.client.raw.stopSandbox = mock(
+      async (...args: Parameters<typeof stopSandbox>) => {
+        const response = await stopSandbox(...args);
+        setup.fixture.native.sandboxId = "replacement";
+        return response;
+      },
+    );
+    await expect(
+      cleanupGeneration({
+        tasksFinished: Promise.resolve(),
+        snapshot: () => setup.owned,
+        effects: setup.fixture.effects,
+      }),
+    ).rejects.toMatchObject({ failure: { operation: "identity" } });
+    expect(setup.fixture.sdk.stopCount).toBe(1);
+    expect(setup.fixture.sdk.deleteCount).toBe(0);
+    expect(setup.fixture.native.sandboxPresent).toBe(true);
+    expect(setup.release).not.toHaveBeenCalled();
+  });
 
   it("should accept SDK not-found only after matching sandbox creation was acknowledged", async () => {
     const setup = acknowledgedCleanup();

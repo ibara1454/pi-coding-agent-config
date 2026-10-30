@@ -1,6 +1,7 @@
-import { describe, expect, test as it } from "bun:test";
+import { describe, expect, test as it, spyOn } from "bun:test";
 import type { SpawnOptions, spawn } from "node:child_process";
 import type { OwnedResource } from "../host/index.ts";
+import { nativeResponseChild } from "../host/test/index.helper.ts";
 import {
   type RuntimeFixture,
   unitRuntimeFixture as runtimeFixture,
@@ -60,6 +61,39 @@ const CREATE_ARGS = [
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createGatewayNetwork", () => {
+  it("should preserve the network and allow a later release when the Docker daemon identity changes", async () => {
+    const fixture = runtimeFixture();
+    const spawnEffect = spyOn(fixture.effects.host.processEffects, "spawn");
+    try {
+      const captured: OwnedResource[] = [];
+      await createGatewayNetwork(
+        fixture.effects.host,
+        network,
+        fixture.activation.signal,
+        (item) => captured.push(item),
+      );
+      const [owned] = captured;
+      if (!owned) {
+        throw new Error("Network ownership was not captured.");
+      }
+      spawnEffect.mockImplementationOnce((() =>
+        nativeResponseChild("different-daemon-identity")) as typeof spawn);
+      await expect(owned.release()).rejects.toThrow(
+        "Docker daemon identity changed",
+      );
+      expect(fixture.native.networkPresent).toBe(true);
+      expect(
+        fixture.native.calls.some(
+          (args) => args[2] === "network" && args[3] === "rm",
+        ),
+      ).toBe(false);
+      await owned.release();
+      expect(fixture.native.networkPresent).toBe(false);
+    } finally {
+      spawnEffect.mockRestore();
+      fixture.clock.restore();
+    }
+  });
   it("should capture labelled intent before submission and acknowledge only the exact native network ID", async () => {
     const fixture = runtimeFixture();
     try {

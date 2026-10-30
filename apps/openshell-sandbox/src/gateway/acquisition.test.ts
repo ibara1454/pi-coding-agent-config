@@ -1,5 +1,6 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import type { SpawnOptions, spawn } from "node:child_process";
+import process from "node:process";
 import type { OwnedResource } from "../host/index.ts";
 import { nativeResponseChild } from "../host/test/index.helper.ts";
 import {
@@ -22,6 +23,34 @@ const RESERVED_PORT = 43_123;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("startPrivateGateway", () => {
+  it("should reject admission without acquiring resources when Node is older than the supported release", async () => {
+    const fixture = runtimeFixture();
+    const nodeVersion = Object.getOwnPropertyDescriptor(
+      process.versions,
+      "node",
+    );
+    if (!nodeVersion) {
+      throw new Error("Node version descriptor is unavailable.");
+    }
+    try {
+      Object.defineProperty(process.versions, "node", { value: "20.0.0" });
+      const captured: OwnedResource[] = [];
+      await expect(
+        startPrivateGateway(
+          fixture.effects.host,
+          fixture.activation.signal,
+          (item) => captured.push(item),
+          () => undefined,
+        ),
+      ).rejects.toThrow("Private OpenShell gateway preparation failed");
+      expect(captured).toEqual([]);
+      expect(fixture.native.calls).toEqual([]);
+      expect(fixture.filesystem.files.size).toBe(0);
+    } finally {
+      Object.defineProperty(process.versions, "node", nodeVersion);
+      fixture.clock.restore();
+    }
+  });
   it.each([
     ["unsupported platform", { platform: "win32" }],
     ["unsupported architecture", { architecture: "riscv64" }],

@@ -15,13 +15,40 @@ import {
   withRead,
   withStats,
 } from "./test/acquisition-effects.helper.ts";
-import { GATEWAY_TEST_CERTIFICATES } from "./test/tls-certificates.helper.ts";
+import {
+  GATEWAY_TEST_CERTIFICATES,
+  MISSING_SAN_TEST_CERTIFICATES,
+} from "./test/tls-certificates.helper.ts";
 import type { GatewayHostContext as HostContext } from "./types.ts";
 
 const FOREIGN_UID = 1001;
 const FAILED_EXIT_CODE = 1;
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("prepareGatewayTls", () => {
+  it("should reject signed matching TLS material when private callback SANs are missing", async () => {
+    const fixture = runtimeFixture();
+    try {
+      const state = await createGatewayState(
+        fixture.effects.host,
+        () => undefined,
+        () => undefined,
+      );
+      const host = withRead(fixture.effects.host, (path, value) => {
+        const leaf = path.slice(state.tlsDirectory.length + 1);
+        const replacement = MISSING_SAN_TEST_CERTIFICATES[leaf];
+        return replacement ? Buffer.from(replacement) : value;
+      });
+      try {
+        await expect(
+          prepareGatewayTls(host, state, fixture.activation.signal),
+        ).rejects.toThrow("Private TLS certificate SANs are incomplete");
+      } finally {
+        await state.close();
+      }
+    } finally {
+      fixture.clock.restore();
+    }
+  });
   it("should return verified synthetic mTLS credentials without reading JWT secrets", async () => {
     const fixture = runtimeFixture();
     try {

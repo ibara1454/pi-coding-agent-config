@@ -1,4 +1,4 @@
-import { describe, expect, test as it, mock } from "bun:test";
+import { describe, expect, test as it, mock, spyOn } from "bun:test";
 import type { Stats } from "node:fs";
 import type { ManagedProcess, OwnedResource } from "../host/index.ts";
 import { HostProcessError } from "../host/index.ts";
@@ -226,6 +226,65 @@ describe("createGatewayState", () => {
       await expect(
         fixture.effects.host.filesystem.lstat(directory),
       ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      fixture.clock.restore();
+    }
+  });
+  it("should retain releasable state and redact filesystem details when a private environment directory cannot be created", async () => {
+    const fixture = runtimeFixture();
+    const mkdir = spyOn(fixture.effects.host.filesystem, "mkdir");
+    try {
+      const captured: OwnedResource[] = [];
+      const failure = await createGatewayState(
+        fixture.effects.host,
+        (item) => captured.push(item),
+        () => {
+          mkdir.mockRejectedValueOnce(new Error("secret filesystem details"));
+        },
+      ).catch((error: unknown) => error);
+      expect(String(failure)).toContain(
+        "Private gateway directory preparation failed",
+      );
+      expect(String(failure)).not.toContain("secret filesystem details");
+      expect(captured.map((item) => item.kind)).toEqual(["state"]);
+      expect(
+        (await fixture.effects.host.filesystem.lstat(directory)).isDirectory(),
+      ).toBe(true);
+      const [owned] = captured;
+      if (!owned) {
+        throw new Error("State ownership was not captured.");
+      }
+      await owned.release();
+      await expect(
+        fixture.effects.host.filesystem.lstat(directory),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      mkdir.mockRestore();
+      fixture.clock.restore();
+    }
+  });
+  it("should preserve a later directory when an already released state capability is retried", async () => {
+    const fixture = runtimeFixture();
+    try {
+      const captured: OwnedResource[] = [];
+      const state = await createGatewayState(
+        fixture.effects.host,
+        (item) => captured.push(item),
+        () => undefined,
+      );
+      const [owned] = captured;
+      if (!owned) {
+        throw new Error("State ownership was not captured.");
+      }
+      await state.close();
+      await fixture.effects.host.filesystem.mkdir(directory);
+      const marker = `${directory}/replacement.txt`;
+      await fixture.effects.host.filesystem.writeFile(marker, "later owner");
+      await owned.release();
+      expect(
+        await fixture.effects.host.filesystem.readFile(marker, "utf8"),
+      ).toBe("later owner");
+      await fixture.effects.host.filesystem.rm(directory, { recursive: true });
     } finally {
       fixture.clock.restore();
     }

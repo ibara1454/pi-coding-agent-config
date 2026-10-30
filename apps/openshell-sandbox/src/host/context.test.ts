@@ -1,4 +1,4 @@
-import { describe, expect, test as it } from "bun:test";
+import { describe, expect, test as it, spyOn } from "bun:test";
 import {
   plannedRealpath,
   runtimeFixture,
@@ -190,19 +190,25 @@ describe("resolveDockerHost", () => {
     expect(fixture.native.calls).toHaveLength(0);
   });
 
-  it("should reject an explicit remote endpoint before spawning when DOCKER_HOST is selected", async () => {
+  it("should reject a captured remote endpoint without launching native processes", async () => {
     const fixture = runtimeFixture();
+    const launch = spyOn(fixture.effects.host.processEffects, "spawn");
+    const context = captureHostContext({
+      homedir: () => "/home/person",
+      ["randomUUID"]: () => "activation-id",
+      process: {
+        platform: "linux",
+        arch: "x64",
+        env: { ["DOCKER_HOST"]: "tcp://remote:2375" },
+      },
+      filesystem: fixture.effects.host.filesystem,
+      processEffects: fixture.effects.host.processEffects,
+    });
+    expect(context.paths.dockerSocket).toBe("/var/run/docker.sock");
     await expect(
-      resolveDockerHost(
-        {
-          ...fixture.effects.host,
-          dockerEndpoint: "tcp://remote:2375",
-          environment: { ["DOCKER_HOST"]: "tcp://remote:2375" },
-        },
-        new AbortController().signal,
-      ),
+      resolveDockerHost(context, new AbortController().signal),
     ).rejects.toThrow("local Unix");
-    expect(fixture.native.calls).toHaveLength(0);
+    expect(launch).not.toHaveBeenCalled();
   });
   it.each([
     ["active context", {}],

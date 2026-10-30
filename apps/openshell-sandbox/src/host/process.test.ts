@@ -86,6 +86,32 @@ describe("runHostProcess", () => {
     await expect(operation).rejects.toBeInstanceOf(HostProcessError);
     expect(scenario.signals).toEqual(["SIGTERM"]);
   });
+
+  it("should close the acquired child when cancellation occurs during spawn", async () => {
+    const controller = new AbortController();
+    const scenario = processScenario(() => undefined);
+    const effects: ProcessEffects = {
+      ...scenario.effects,
+      spawn: (() => {
+        controller.abort();
+        return scenario.child;
+      }) as typeof spawn,
+    };
+    await expect(
+      runHostProcess(
+        "/native",
+        [],
+        {
+          environment: {},
+          mode: "managed",
+          timeoutMs: TEST_DEADLINE_MS,
+          signal: controller.signal,
+        },
+        effects,
+      ),
+    ).rejects.toBeInstanceOf(HostProcessError);
+    expect(scenario.signals).toEqual(["SIGTERM"]);
+  });
   it("should retain uncertain process ownership instead of reporting successful cancellation", async () => {
     const controller = new AbortController();
     const scenario = processScenario(() => controller.abort(), false);
@@ -302,6 +328,40 @@ describe("runHostProcess", () => {
     expect(await managed.closed).toEqual({ exitCode: null, signal: "SIGKILL" });
     await managed.terminate();
     expect(scenario.signals).toHaveLength(2);
+  });
+
+  it("should accept observed close before escalation when the termination grace expires", async () => {
+    const scenario = processScenario(() => undefined, false);
+    let closeTimer: NodeJS.Timeout | undefined;
+    const effects: ProcessEffects = {
+      ...scenario.effects,
+      setTimer(callback, milliseconds) {
+        const timer = scenario.effects.setTimer(callback, milliseconds);
+        if (milliseconds !== TEST_DEADLINE_MS) {
+          closeTimer = timer;
+        }
+        return timer;
+      },
+      clearTimer(timer) {
+        if (timer === closeTimer) {
+          queueMicrotask(() =>
+            scenario.child.emit("close", scenario.child.exitCode, "SIGTERM"),
+          );
+        }
+      },
+    };
+    const managed = await runHostProcess(
+      "/native",
+      [],
+      { environment: {}, mode: "managed", timeoutMs: TEST_DEADLINE_MS },
+      effects,
+    );
+    await managed.terminate();
+    expect(await managed.closed).toEqual({
+      exitCode: scenario.child.exitCode,
+      signal: "SIGTERM",
+    });
+    expect(scenario.signals).toEqual(["SIGTERM"]);
   });
   it("should retain process ownership until close after a termination signal throws", async () => {
     const scenario = processScenario(() => undefined);
