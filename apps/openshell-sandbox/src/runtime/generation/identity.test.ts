@@ -2,9 +2,7 @@ import { describe, expect, test as it } from "bun:test";
 import { runtimeFixture } from "../test/index.helper.ts";
 import { randomIdentity } from "./identity.ts";
 
-const INVALID_IDENTITY = /Invalid random identity/u;
 const RANDOM_BYTES = 10;
-const INVALID_RANDOM_BYTES = 9;
 const FULL_BYTE = 255;
 
 describe("randomIdentity", () => {
@@ -23,14 +21,5 @@ describe("randomIdentity", () => {
           Uint8Array.from({ length: RANDOM_BYTES }, () => FULL_BYTE),
       }),
     ).toBe("7777777777777777");
-  });
-  it("should reject an invalid entropy source before creating an identity", () => {
-    const fixture = runtimeFixture();
-    expect(() =>
-      randomIdentity({
-        ...fixture.effects,
-        randomBytes: () => new Uint8Array(INVALID_RANDOM_BYTES),
-      }),
-    ).toThrow(INVALID_IDENTITY);
   });
 });

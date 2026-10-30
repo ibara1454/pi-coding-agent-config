@@ -111,7 +111,7 @@ bun run --filter openshell-sandbox test:unit
 bun run --filter openshell-sandbox test
 ```
 
-The unit command excludes `*.integration.test.ts`. The full package command writes `coverage/lcov.info` and enforces the unchanged 95% per-file coverage floor. Codecov separately requires 95% changed-line coverage in CI. Behavior-bearing TypeScript has colocated tests; barrels, type declarations, fixtures and thin wiring do not get artificial suites. Docker/native effects are controlled in automatic tests; filesystem/process integrations use owned fixtures. These checks do not establish native default-image or macOS acceptance.
+The unit command excludes `*.integration.test.ts`. The full package command writes `coverage/lcov.info` and enforces the 95% per-file coverage floor. Codecov separately requires 95% changed-line coverage in CI. Behavior-bearing TypeScript has colocated tests; barrels, type declarations, fixtures and thin wiring do not get artificial suites. Docker/native effects are controlled in automatic tests; filesystem/process integrations use owned fixtures. These checks do not establish native default-image or macOS acceptance.
 
 Name tests after their implementation owner: `foo.test.ts` for direct behavior and `foo.integration.test.ts` for cross-module or real-I/O behavior. Keep suites beside implementation, not inside helper-only `test/` directories, and keep themed cases in those owner suites. Helpers are excluded from coverage; production files are not.
 

@@ -5,31 +5,17 @@ import { HostProcessError } from "../host/index.ts";
 import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { createGatewayState } from "./state.ts";
 import { directory, withStats } from "./test/acquisition-effects.helper.ts";
+import type { GatewayRecoveryCoordinates } from "./types.ts";
 
 const FOREIGN_UID = 1001;
 const PUBLIC_DIRECTORY_MODE = 0o4_0755;
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createGatewayState", () => {
-  it("should reject invalid instance identity before touching state root", async () => {
-    const fixture = runtimeFixture();
-    try {
-      await expect(
-        createGatewayState(
-          { ...fixture.effects.host, instanceId: "../foreign" },
-          () => undefined,
-        ),
-      ).rejects.toThrow("instance identity");
-      expect(fixture.filesystem.files.size).toBe(0);
-    } finally {
-      fixture.clock.restore();
-    }
-  });
-
   it.each([
     ["foreign owner", { uid: FOREIGN_UID }],
     ["public access", { mode: PUBLIC_DIRECTORY_MODE }],
     ["non-directory", { isDirectory: () => false }],
-    ["symbolic link", { isSymbolicLink: () => true }],
+    ["symbolic link", { isDirectory: () => false, isSymbolicLink: () => true }],
   ] as [string, Partial<Stats>][])(
     "should reject unsafe state root when it has %s",
     async (_condition, changed) => {
@@ -38,28 +24,45 @@ describe("createGatewayState", () => {
         const host = withStats(fixture.effects.host, (path, stat) =>
           path === "/state" ? ({ ...stat, ...changed } as Stats) : stat,
         );
-        await expect(createGatewayState(host, () => undefined)).rejects.toThrow(
-          "owner-only",
-        );
+        await expect(
+          createGatewayState(
+            host,
+            () => undefined,
+            () => undefined,
+          ),
+        ).rejects.toThrow("owner-only");
       } finally {
         fixture.clock.restore();
       }
     },
   );
-  it("should retain provisional state when directory identity cannot be recorded", async () => {
+  it("should publish recovery coordinates and retain provisional state when initial identity readback fails", async () => {
     const fixture = runtimeFixture();
     try {
       const captured: OwnedResource[] = [];
+      const coordinates: GatewayRecoveryCoordinates[] = [];
+      let observedAtRead: unknown;
       const host = withStats(fixture.effects.host, (path, stat) => {
         if (path === directory) {
+          observedAtRead = {
+            resources: captured.map((item) => item.kind),
+            coordinates: [...coordinates],
+          };
           throw new Error("identity unavailable");
         }
         return stat;
       });
       await expect(
-        createGatewayState(host, (item) => captured.push(item)),
+        createGatewayState(
+          host,
+          (item) => captured.push(item),
+          (known) => coordinates.push(known),
+        ),
       ).rejects.toThrow("identity unavailable");
-      expect(captured.map((item) => item.kind)).toEqual(["state"]);
+      expect(observedAtRead).toEqual({
+        resources: ["state"],
+        coordinates: [{ tlsDirectory: `${directory}/tls` }],
+      });
       const [provisional] = captured;
       if (!provisional) {
         throw new Error("Provisional state was not captured.");
@@ -78,8 +81,10 @@ describe("createGatewayState", () => {
     const fixture = runtimeFixture();
     try {
       const captured: OwnedResource[] = [];
-      const state = await createGatewayState(fixture.effects.host, (item) =>
-        captured.push(item),
+      const state = await createGatewayState(
+        fixture.effects.host,
+        (item) => captured.push(item),
+        () => undefined,
       );
       const release = mock(
         (): Promise<void> => Promise.reject(new Error("unresolved")),
@@ -112,6 +117,7 @@ describe("createGatewayState", () => {
     try {
       const state = await createGatewayState(
         fixture.effects.host,
+        () => undefined,
         () => undefined,
       );
       const order: string[] = [];
@@ -149,6 +155,7 @@ describe("createGatewayState", () => {
           environment: { ["PATH"]: "", ["SECRET_TOKEN"]: "host-secret" },
         },
         (item) => captured.push(item),
+        () => undefined,
       );
       expect(state.environment).toEqual({
         ["PATH"]: "/usr/local/bin:/usr/bin:/bin",
@@ -188,8 +195,10 @@ describe("createGatewayState", () => {
           return Promise.resolve();
         },
       };
-      const state = await createGatewayState(fixture.effects.host, (item) =>
-        captured.push(item),
+      const state = await createGatewayState(
+        fixture.effects.host,
+        (item) => captured.push(item),
+        () => undefined,
       );
       state.capture({
         kind: "network",

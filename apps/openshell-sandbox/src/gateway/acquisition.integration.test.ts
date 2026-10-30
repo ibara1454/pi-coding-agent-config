@@ -12,7 +12,6 @@ import type {
 
 const NATIVE_ID_LENGTH = 64;
 const SECOND_PORT = 43_124;
-const MAX_PORT_PLUS_ONE = 65_536;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("startPrivateGateway", () => {
@@ -248,37 +247,6 @@ describe("startPrivateGateway", () => {
     expect(fixture.native.networkPresent).toBe(false);
     expect(fixture.filesystem.files.size).toBe(0);
   });
-  it.each([0, MAX_PORT_PLUS_ONE, Number.NaN])(
-    "should release acquired gateway resources when reserved port %s is invalid",
-    async (port) => {
-      const fixture = runtimeFixture();
-      const effects = fixture.effects.host.gatewayEffects;
-      if (!effects) {
-        throw new Error("Expected synthetic gateway effects.");
-      }
-      const host: HostContext = {
-        ...fixture.effects.host,
-        gatewayEffects: {
-          ...effects,
-          reservePort: () => Promise.resolve(port),
-        },
-      };
-      const captured: OwnedResource[] = [];
-      await expect(
-        startPrivateGateway(
-          host,
-          fixture.activation.signal,
-          (item) => captured.push(item),
-          () => undefined,
-        ),
-      ).rejects.toThrow("Private OpenShell gateway preparation failed");
-      expect(captured.some((item) => item.kind === "network")).toBe(true);
-      expect(fixture.native.networkPresent).toBe(false);
-      await expect(
-        host.filesystem.lstat("/state/pi-openshell-abcdefghijklmnop"),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-    },
-  );
   it("should release launched gateway and state when authenticated connection fails", async () => {
     const fixture = runtimeFixture();
     const effects = fixture.effects.host.gatewayEffects;

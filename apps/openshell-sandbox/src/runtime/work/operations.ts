@@ -21,6 +21,7 @@ export type Deadline = Readonly<{
 }>;
 /** Owns a bounded timer and returns a nonnegative, floored integer millisecond budget.
  * Flooring never extends native RPC or SDK waits beyond the monotonic deadline.
+ * @param milliseconds - Positive timeout budget validated by the caller.
  * @example with 4.8ms left, deadline(effects, 1000).remaining() returns 4.
  */
 export function deadline(
@@ -35,7 +36,7 @@ export function deadline(
       controller.abort(
         new RuntimeFailure("timeout", "deadline", "Command timed out"),
       ),
-    Math.max(0, milliseconds),
+    milliseconds,
   );
   return Object.freeze({
     signal: AbortSignal.any([...signals, controller.signal]),

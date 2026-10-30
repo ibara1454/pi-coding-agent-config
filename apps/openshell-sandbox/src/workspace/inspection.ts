@@ -1,5 +1,4 @@
 import type * as fs from "node:fs/promises";
-import { normalize } from "node:path";
 import type { HostPaths } from "../host/index.ts";
 import { nativeFailure } from "../host/index.ts";
 import { inspectGitMetadata } from "./git.ts";
@@ -62,7 +61,6 @@ export async function inspectWorkspace(
         if (targets.some((target) => containsPath(path, target))) {
           throw new Error("Overlapping workspace mounts");
         }
-        validateMountPath(path, paths);
         targets.push(path);
       }
     }
@@ -89,6 +87,7 @@ export async function inspectWorkspace(
 
 /** Map a command directory using captured canonical facts only, without changing grants or mounts.
  * Both lexical and resolved cwd must stay inside the project; internal symlinks remain usable.
+ * @param resolvedCwd - Canonical command directory returned by native realpath.
  * @throws If either cwd escapes the project or uses unsupported path spelling.
  * @example mapCommandDirectory(workspace, '/repo/link', '/repo/src') returns '/repo/link'.
  */
@@ -100,9 +99,10 @@ export function mapCommandDirectory(
   validateAbsolutePath(requestedCwd);
   validateAbsolutePath(resolvedCwd);
   if (
-    normalize(resolvedCwd) !== resolvedCwd ||
-    !containsPath(workspace.projectRoot, requestedCwd) ||
-    !containsPath(workspace.projectRoot, resolvedCwd)
+    !(
+      containsPath(workspace.projectRoot, requestedCwd) &&
+      containsPath(workspace.projectRoot, resolvedCwd)
+    )
   ) {
     throw new Error(
       "Command directory must remain inside the canonical project root",

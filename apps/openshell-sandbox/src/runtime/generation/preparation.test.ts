@@ -4,40 +4,32 @@ import { prepareGeneration } from "./preparation.ts";
 import { gateway, input } from "./test/generation.helper.ts";
 import type { GenerationEvent } from "./types.ts";
 
-const INVALID_ENTROPY_LENGTH = 9;
-
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("prepareGeneration", () => {
-  it.each([
-    [
-      "throws",
-      () => {
-        throw new Error("private entropy failure");
-      },
-    ],
-    ["returns too few bytes", () => new Uint8Array(INVALID_ENTROPY_LENGTH)],
-  ] as const)(
-    "should allocate no preparation lifetime when entropy %s",
-    async (_condition, randomBytes) => {
-      const fixture = unitRuntimeFixture();
-      const events: GenerationEvent[] = [];
-      try {
-        expect(() =>
-          prepareGeneration(
-            input(fixture),
-            { ...fixture.effects, randomBytes },
-            (event) => events.push(event),
-          ),
-        ).toThrow();
-        await Promise.resolve();
-        expect(fixture.clock.pending()).toBe(0);
-        expect(events).toEqual([]);
-        expect(fixture.native.launches).toBe(0);
-      } finally {
-        fixture.clock.restore();
-      }
-    },
-  );
+  it("should allocate no preparation lifetime when entropy throws", async () => {
+    const fixture = unitRuntimeFixture();
+    const events: GenerationEvent[] = [];
+    try {
+      expect(() =>
+        prepareGeneration(
+          input(fixture),
+          {
+            ...fixture.effects,
+            randomBytes: () => {
+              throw new Error("private entropy failure");
+            },
+          },
+          (event) => events.push(event),
+        ),
+      ).toThrow();
+      await Promise.resolve();
+      expect(fixture.clock.pending()).toBe(0);
+      expect(events).toEqual([]);
+      expect(fixture.native.launches).toBe(0);
+    } finally {
+      fixture.clock.restore();
+    }
+  });
   it("should assign unique immutable sandbox names before queued setup begins", async () => {
     const fixture = unitRuntimeFixture();
     try {

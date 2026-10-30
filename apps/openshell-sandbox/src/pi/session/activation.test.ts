@@ -1,10 +1,6 @@
 import { describe, expect, test as it, mock, spyOn } from "bun:test";
 import { setImmediate } from "node:timers/promises";
-import type {
-  RuntimeEffects,
-  RuntimeObserver,
-  SandboxRuntime,
-} from "../../runtime/index.ts";
+import type { RuntimeEffects, SandboxRuntime } from "../../runtime/index.ts";
 // biome-ignore lint/performance/noNamespaceImport: Scoped spies replace runtime acquisition without native effects.
 import * as runtime from "../../runtime/index.ts";
 import { cachedStatus, piUnitFixture } from "../test/index.helper.ts";
@@ -171,7 +167,7 @@ describe("AdapterActivation.startRuntime", () => {
   });
   it("should dispose a late runtime and report failed cleanup when retired during creation", async () => {
     const f = piUnitFixture();
-    const entered = Promise.withResolvers<RuntimeObserver>();
+    const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<SandboxRuntime>();
     const status = cachedStatus({
       recovery: { sandboxName: "late-owned-sandbox" },
@@ -190,17 +186,16 @@ describe("AdapterActivation.startRuntime", () => {
       f.runtime.effects,
     );
     const factory = spyOn(runtime, "createSandboxRuntime").mockImplementation(
-      (_environment, _effects, observer) => {
-        entered.resolve(observer);
+      () => {
+        entered.resolve();
         return release.promise;
       },
     );
     const activation = new AdapterActivation(f.context, f.native);
     const starting = activation.startRuntime(f.pi, f.runtime.environment);
     try {
-      const observer = await entered.promise;
+      await entered.promise;
       await activation.dispose(f.pi);
-      observer.progress(status);
       release.resolve(created);
       await starting;
       expect(activation.runtime).toBeUndefined();

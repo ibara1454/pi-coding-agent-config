@@ -190,26 +190,6 @@ describe("connectGateway", () => {
       fixture.clock.restore();
     }
   });
-  it("should abort authenticated preparation when the managed process completion rejects", async () => {
-    const fixture = runtimeFixture();
-    try {
-      const closed = Promise.withResolvers<Awaited<ManagedProcess["closed"]>>();
-      fixture.sdk.client.raw.health = () => {
-        closed.reject(new Error("secret process completion"));
-        return Promise.reject(new Error("not ready"));
-      };
-      await expect(
-        connectGateway(
-          fixture.effects.host,
-          { endpoint: "https://127.0.0.1:43123", tls },
-          { ...child, closed: closed.promise },
-          fixture.activation.signal,
-        ),
-      ).rejects.toThrow("authenticated readiness failed");
-    } finally {
-      fixture.clock.restore();
-    }
-  });
 });
 const RESERVED_PORT = 43_123;
 // Server.address() reads initial in-memory state; this server is never listened on.

@@ -97,33 +97,23 @@ export function publishFailure(
   return new Error(message);
 }
 
-/** Binds observer effects to one activation; stale native callbacks cannot alter new UI.
- * @example An old activation's late readiness notification is ignored after shutdown.
+/** Binds Pi publication effects; the runtime owns observer detachment and callback errors.
+ * @example Progress updates the footer while failure also publishes a persistent transcript.
  */
 export function createRuntimeObserver(
   pi: ExtensionAPI,
   context: ExtensionContext,
-  isCurrent: () => boolean,
 ): RuntimeObserver {
   return {
     progress(status) {
-      if (!isCurrent()) {
-        return;
-      }
       const label =
         status.phase === "preparing" && status.preparationStep
           ? PREPARATION_LABELS[status.preparationStep]
           : `OpenShell · ${status.phase}`;
-      try {
-        context.ui.setStatus("openshell-sandbox", label);
-      } catch {
-        /* Status rendering is optional; required failures use persistent messages. */
-      }
+      context.ui.setStatus("openshell-sandbox", label);
     },
     failure(failure) {
-      if (isCurrent()) {
-        publishFailure(pi, context, failure, { operation: failure.operation });
-      }
+      publishFailure(pi, context, failure, { operation: failure.operation });
     },
   };
 }

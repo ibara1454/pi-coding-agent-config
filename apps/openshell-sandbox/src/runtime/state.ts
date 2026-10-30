@@ -27,16 +27,13 @@ export function selectGeneration(
 }
 
 /** Calculates complete phase variants from generation facts, never adopting ownership or publishing UI.
- * @example a stale ready event leaves a closing state unchanged.
+ * @example a late ready event leaves a closing state unchanged.
  */
 function transitionGeneration(
   state: RuntimeState,
   event: GenerationEvent,
   live: boolean,
 ): RuntimeState {
-  if (!("generation" in state) || state.generation !== event.generation) {
-    return state;
-  }
   switch (event.kind) {
     case "progress":
       return state.phase === "preparing" && live

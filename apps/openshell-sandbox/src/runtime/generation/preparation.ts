@@ -1,8 +1,4 @@
-import {
-  failureError,
-  RuntimeFailure,
-  safeFailure,
-} from "../../diagnostics/index.ts";
+import { failureError, safeFailure } from "../../diagnostics/index.ts";
 import type { OwnedResource } from "../../host/index.ts";
 import { HostProcessError } from "../../host/index.ts";
 import { assertLive, deadline, SETUP_TIMEOUT_MS } from "../work/index.ts";
@@ -31,7 +27,7 @@ import type {
  * @param effects - External acquisition capabilities whose raw work stays owned through settlement.
  * @param report - Synchronous runtime state facts; no UI observer is captured.
  * @returns Shared readiness handle with idempotent native cleanup.
- * @throws Invalid entropy rejects before allocating deadlines, readiness work or native resources.
+ * @throws Entropy generation failure rejects before allocating deadlines, readiness work or native resources.
  * @example concurrent requests share the same generation readiness promise.
  */
 export function prepareGeneration(
@@ -104,14 +100,6 @@ class GenerationPreparation {
    * @example a pending create cannot become quiescent when preparation times out.
    */
   async step<T>(operation: () => Promise<T>): Promise<T> {
-    assertLive(this.controller.signal);
-    if (this.pendingTasks === 0) {
-      throw new RuntimeFailure(
-        "admission",
-        "preparation",
-        "Generation setup already settled.",
-      );
-    }
     assertLive(this.preparation.signal);
     return await this.trackTask(operation);
   }

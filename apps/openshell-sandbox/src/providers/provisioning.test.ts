@@ -181,12 +181,17 @@ describe("provisionProviders", () => {
     }
   });
   it.each([
-    ["missing imported identity", []],
-    ["unexpected imported identity", [profile("other")]],
-    ["duplicate imported identity", [profile(), profile()]],
+    ["missing imported identity", [], [profile()]],
+    ["unexpected imported identity", [profile("other")], [profile()]],
+    ["duplicate imported identity", [profile(), profile()], [profile()]],
+    [
+      "same-length duplicate imported identity",
+      [profile(), profile()],
+      [profile(), profile("extra")],
+    ],
   ])(
     "should reject %s before looking up any credentials",
-    async (_condition, imported) => {
+    async (_condition, imported, selected) => {
       const { handle, calls, capture } = gateway();
       Object.assign(handle.client.raw, {
         importProviderProfiles: () => {
@@ -203,7 +208,12 @@ describe("provisionProviders", () => {
       await expect(
         provisionProviders(
           handle,
-          environment(),
+          {
+            ...environment(),
+            profiles: [
+              { sourcePath: "/profiles/selected.yaml", sdkProfiles: selected },
+            ],
+          },
           () => {
             credentialReads += 1;
             return "secret";
@@ -287,7 +297,7 @@ describe("provisionProviders", () => {
     expect(calls).not.toContain("create");
   });
 
-  it("should reject a missing native profile response without exposing its original failure", async () => {
+  it("should reject native profile lookup without exposing its original failure", async () => {
     const { handle, calls, capture } = gateway({
       lookup: () => Promise.reject(new Error("RAW-NATIVE-SECRET")),
     });

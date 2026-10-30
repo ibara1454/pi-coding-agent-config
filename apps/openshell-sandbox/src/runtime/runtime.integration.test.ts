@@ -92,7 +92,6 @@ async function lostProviderAcknowledgmentFixture() {
 }
 
 const NATIVE_TIMEOUT_EXIT = 124;
-const NONINTEGER_EXIT = 1.5;
 const HOST_TIMER_OVERFLOW_SECONDS = 2_147_484;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
@@ -845,13 +844,6 @@ describe("createSandboxRuntime", () => {
         await Promise.resolve();
         yield { type: "exit" as const, exitCode: 0 };
         yield { stream: "stdout" as const, data: Buffer.from("late") };
-      },
-    ],
-    [
-      "noninteger terminal exit",
-      async function* () {
-        await Promise.resolve();
-        yield { type: "exit" as const, exitCode: NONINTEGER_EXIT };
       },
     ],
   ])(

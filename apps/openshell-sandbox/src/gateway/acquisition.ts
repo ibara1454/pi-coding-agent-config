@@ -17,7 +17,6 @@ import type {
 } from "./types.ts";
 
 const MIN_NODE_MAJOR = 22;
-const MAX_PORT = 65_535;
 const NATIVE_VERSION = /\b0\.0\.116\b/;
 
 /** Capture an uncertain child before bounded cleanup and redact native errors at the gateway boundary.
@@ -100,8 +99,7 @@ export async function startPrivateGateway(
     if (version.exitCode !== 0 || !NATIVE_VERSION.test(version.stdout)) {
       throw new Error("OpenShell native release must be 0.0.116.");
     }
-    state = await createGatewayState(host, capture);
-    reportCoordinates(Object.freeze({ tlsDirectory: state.tlsDirectory }));
+    state = await createGatewayState(host, capture, reportCoordinates);
     return await prepareGateway(host, state, signal, reportCoordinates);
   } catch (error) {
     return recoverGatewayPreparation(state, capture, error);
@@ -165,9 +163,6 @@ async function prepareGateway(
   signal.throwIfAborted();
   const tls = await prepareGatewayTls(scopedHost, state, signal);
   const port = await (host.gatewayEffects?.reservePort ?? reserveGatewayPort)();
-  if (!Number.isSafeInteger(port) || port < 1 || port > MAX_PORT) {
-    throw new Error("Private gateway port is invalid.");
-  }
   const endpoint = `https://127.0.0.1:${port}`;
   reportCoordinates(
     Object.freeze({ ...coordinates, gatewayEndpoint: endpoint }),

@@ -1,11 +1,4 @@
-import {
-  dirname,
-  isAbsolute,
-  normalize,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { HostPaths } from "../host/index.ts";
 import type { WorkspaceFilesystem } from "./inspection.ts";
 
@@ -127,7 +120,6 @@ export function validateMountPath(path: string, paths: HostPaths): void {
   const overlap = (other: string): boolean =>
     containsPath(path, other) || containsPath(other, path);
   if (
-    normalize(path) === sep ||
     containsPath(path, paths.home) ||
     containsPath(path, "/sandbox") ||
     [...reserved, ...protectedPaths].some(overlap)

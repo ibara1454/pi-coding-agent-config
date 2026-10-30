@@ -62,7 +62,6 @@ describe("selectGeneration", () => {
   });
 });
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("projectGenerationEvent", () => {
   it("should publish matching readiness and required workspace paths", () => {
     const progress = project(preparing, {
@@ -83,13 +82,7 @@ describe("projectGenerationEvent", () => {
     expect(ready.requiredPaths).toEqual(workspace.requiredNativeReadWritePaths);
   });
 
-  it("should ignore stale or canceled readiness and keep the current workspace", () => {
-    const stale = project(preparing, {
-      kind: "ready",
-      resources,
-      generation: { ...generation },
-    });
-    expect(stale.state).toBe(preparing);
+  it("should ignore canceled readiness and keep the current workspace", () => {
     const canceled = project(
       preparing,
       { kind: "ready", resources, generation },
@@ -121,12 +114,6 @@ describe("projectGenerationEvent", () => {
       generation,
       failure,
     }).state;
-    expect(
-      project(recovering, {
-        kind: "stopped",
-        generation: { ...generation },
-      }).state,
-    ).toBe(recovering);
     expect(project(recovering, { kind: "stopped", generation }).state).toEqual({
       phase: "recovery-required",
       scope: "session",

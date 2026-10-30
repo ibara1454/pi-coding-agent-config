@@ -7,7 +7,11 @@ import {
   TEST_NETWORK,
 } from "../runtime/test/index.helper.ts";
 import { startPrivateGateway } from "./acquisition.ts";
-import { withDockerOutput } from "./test/acquisition-effects.helper.ts";
+import {
+  directory,
+  withDockerOutput,
+  withStats,
+} from "./test/acquisition-effects.helper.ts";
 import { failedGatewayLaunch } from "./test/process.helper.ts";
 import type {
   GatewayHostContext,
@@ -15,8 +19,6 @@ import type {
 } from "./types.ts";
 
 const RESERVED_PORT = 43_123;
-const OUT_OF_RANGE_PORT = 65_536;
-const FRACTIONAL_PORT = 1.5;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("startPrivateGateway", () => {
@@ -99,6 +101,43 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
+  it("should retain recovery coordinates and provisional state when initial identity readback fails", async () => {
+    const fixture = runtimeFixture();
+    try {
+      const captured: OwnedResource[] = [];
+      const coordinates: GatewayRecoveryCoordinates[] = [];
+      const host = withStats(fixture.effects.host, (path, stat) => {
+        if (path === directory) {
+          throw new Error("identity unavailable");
+        }
+        return stat;
+      });
+      await expect(
+        startPrivateGateway(
+          host,
+          fixture.activation.signal,
+          (item) => captured.push(item),
+          (known) => coordinates.push(known),
+        ),
+      ).rejects.toThrow("Private OpenShell gateway preparation failed");
+      expect(coordinates).toEqual([{ tlsDirectory: `${directory}/tls` }]);
+      expect(Object.isFrozen(coordinates[0])).toBe(true);
+      expect(captured.map((item) => item.kind)).toEqual(["state"]);
+      const [provisional] = captured;
+      if (!provisional) {
+        throw new Error("Provisional state was not captured.");
+      }
+      await expect(provisional.release()).rejects.toThrow(
+        "cleanup could not be confirmed",
+      );
+      expect(
+        (await fixture.effects.host.filesystem.lstat(directory)).isDirectory(),
+      ).toBe(true);
+      expect(fixture.native.calls).toEqual([["--version"]]);
+    } finally {
+      fixture.clock.restore();
+    }
+  });
   it("should derive immutable owned namespace labels and scope the native environment independently of host secrets", async () => {
     const fixture = runtimeFixture();
     const nativeSpawn = spyOn(fixture.effects.host.processEffects, "spawn");
@@ -156,45 +195,6 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
-  it.each([0, -1, OUT_OF_RANGE_PORT, FRACTIONAL_PORT, Number.NaN])(
-    "should refuse launch and release acquired infrastructure when candidate port is %s",
-    async (port) => {
-      const fixture = runtimeFixture();
-      const coordinates: GatewayRecoveryCoordinates[] = [];
-      try {
-        const host: GatewayHostContext = {
-          ...fixture.effects.host,
-          gatewayEffects: {
-            reservePort: async () => port,
-            connect: () =>
-              Promise.reject(new Error("unexpected SDK connection")),
-          },
-        };
-        await expect(
-          startPrivateGateway(
-            host,
-            fixture.activation.signal,
-            () => undefined,
-            (known) => coordinates.push(known),
-          ),
-        ).rejects.toThrow("Private OpenShell gateway preparation failed");
-        expect(coordinates).toEqual([
-          { tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls" },
-          {
-            tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls",
-            networkId: TEST_NETWORK,
-          },
-        ]);
-        expect(fixture.native.launches).toBe(0);
-        expect(fixture.native.networkPresent).toBe(false);
-        await expect(
-          host.filesystem.lstat("/state/pi-openshell-abcdefghijklmnop"),
-        ).rejects.toMatchObject({ code: "ENOENT" });
-      } finally {
-        fixture.clock.restore();
-      }
-    },
-  );
   it("should retain captured recovery capabilities and redact connection payloads when infrastructure cleanup cannot prove ownership", async () => {
     const fixture = runtimeFixture();
     try {

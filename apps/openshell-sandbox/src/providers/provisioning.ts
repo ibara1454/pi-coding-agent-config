@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { ProviderProfileResponse } from "@nvidia/openshell-sdk/raw";
 import type {
   ProviderConfiguration,
   SandboxEnvironment,
@@ -17,25 +16,21 @@ interface ProviderSelection {
 }
 
 /** Fetches and validates native binding facts before any secret lookup.
- * @throws Safe errors on missing/mismatched profiles or unsupported declarations.
+ * @throws Safe errors on failed lookup, missing/mismatched profiles, or invalid bindings.
  * @example A logical credential name cannot substitute for its declared ENV key.
  */
 async function selectProvider(
   gateway: ManagedGateway,
   provider: ProviderConfiguration,
 ): Promise<ProviderSelection> {
-  let response: ProviderProfileResponse | undefined;
-  try {
-    response = await gateway.client.raw.getProviderProfile(
+  const response = await gateway.client.raw
+    .getProviderProfile(
       { id: provider.profile, workspace: "default" },
       { signal: gateway.signal, timeoutMs: 30_000 },
-    );
-  } catch {
-    response = undefined;
-  }
-  if (!response) {
-    throw new Error("Unable to load the selected native provider profile.");
-  }
+    )
+    .catch(() => {
+      throw new Error("Unable to load the selected native provider profile.");
+    });
   if (response.profile?.id !== provider.profile) {
     throw new Error("Native provider profile identity mismatch.");
   }
@@ -97,6 +92,7 @@ export async function provisionProviders(
 
 /** Imports selected native profiles and requires exact acknowledgement before secret lookup.
  * Native import performs its own validation; partial profile state belongs to the gateway.
+ * @param environment Frozen settings snapshot with unique selected profile IDs.
  * @example Empty custom profiles perform no import RPC.
  */
 async function importProfiles(
@@ -120,7 +116,6 @@ async function importProfiles(
     if (
       result.imported !== true ||
       actual.length !== expected.length ||
-      new Set(actual).size !== actual.length ||
       expected.some((id) => !actual.includes(id))
     ) {
       throw new Error("invalid");

@@ -31,7 +31,6 @@ function credential(native: ProviderProfile) {
   return first;
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("validateProvider", () => {
   it("should freeze selected native keys while omitting unselected optional credentials", () => {
     const native = profile();
@@ -46,18 +45,6 @@ describe("validateProvider", () => {
     expect(Object.isFrozen(keys)).toBe(true);
   });
 
-  it.each([
-    ["an absent mapping", {}],
-    ["an invalid environment key", { ["BAD-TOKEN"]: "WORK_TOKEN" }],
-    ["an invalid host source name", { ["TOKEN"]: "BAD-NAME" }],
-  ])(
-    "should reject %s before selecting native credentials",
-    (_condition, credentialsFromEnv) => {
-      expect(() =>
-        validateProvider(profile(), { ...provider, credentialsFromEnv }),
-      ).toThrow();
-    },
-  );
   it("should reject undeclared keys rather than using a logical credential name as an alias", () => {
     expect(() =>
       validateProvider(profile(), {

@@ -1,8 +1,6 @@
 import type { FailureCode, SafeFailure } from "./types.ts";
 
 const CONTROL_CHARACTER = /\p{Cc}/gu;
-const SAFE_MESSAGE_LENGTH = 1024;
-const RECOVERY_LENGTH = 2048;
 
 /** Clips untrusted display text and removes terminal controls without exposing native payloads.
  * @example safeText("a\\nsecret", 1) returns "a".
@@ -14,7 +12,8 @@ export function safeText(value: string, maxLength: number): string {
 /** An allowlisted runtime failure never embeds native errors or credential-bearing payloads. */
 export class RuntimeFailure extends Error {
   readonly failure: SafeFailure;
-  /** Creates an allowlisted error; only an already sanitized RuntimeFailure may be its cause.
+  /** Creates an error from already allowlisted message and recovery text.
+   * Only an already sanitized RuntimeFailure may be its cause.
    * @example new RuntimeFailure("timeout", "deadline", "Command timed out").name is "Error".
    */
   constructor(
@@ -23,18 +22,13 @@ export class RuntimeFailure extends Error {
     safeMessage: string,
     options: Readonly<{ recovery?: string; cause?: RuntimeFailure }> = {},
   ) {
-    super(
-      safeText(safeMessage, SAFE_MESSAGE_LENGTH),
-      options.cause ? { cause: options.cause } : undefined,
-    );
+    super(safeMessage, options.cause ? { cause: options.cause } : undefined);
     this.name = code === "aborted" ? "AbortError" : "Error";
     this.failure = Object.freeze({
       code,
       operation,
       safeMessage: this.message,
-      ...(options.recovery
-        ? { recovery: safeText(options.recovery, RECOVERY_LENGTH) }
-        : {}),
+      ...(options.recovery ? { recovery: options.recovery } : {}),
     });
   }
 }

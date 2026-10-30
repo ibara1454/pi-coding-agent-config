@@ -12,20 +12,15 @@ export async function settleRuntimeDisposal(
     generation: SandboxGeneration | undefined;
     rawRequests: ReadonlySet<Promise<unknown>>;
     prepared: () => PreparedGateway | undefined;
-    generationStopped: () => boolean;
   }>,
 ): Promise<void> {
-  const { effects, generation, rawRequests, prepared, generationStopped } =
-    input;
+  const { effects, generation, rawRequests, prepared } = input;
   const limit = deadline(effects, CLEANUP_TIMEOUT_MS);
   try {
     if (generation) {
       await waitBounded(generation.invalidate(), limit.signal);
     }
     await waitBounded(Promise.allSettled([...rawRequests]), limit.signal);
-    if (generation && !generationStopped()) {
-      throw new Error("Generation cleanup unconfirmed.");
-    }
     const gateway = prepared();
     if (gateway) {
       await gateway.providerResources

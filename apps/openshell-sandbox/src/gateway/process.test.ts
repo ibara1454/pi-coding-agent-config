@@ -24,7 +24,11 @@ describe("launchGateway", () => {
           ...fixture.effects.host,
           processEffects: scenario.effects,
         };
-        const state = await createGatewayState(host, () => undefined);
+        const state = await createGatewayState(
+          host,
+          () => undefined,
+          () => undefined,
+        );
         try {
           const stateDirectory = join(state.directory, component);
           await launchGateway(
@@ -57,8 +61,10 @@ describe("launchGateway", () => {
         closed = true;
       });
       const captured: OwnedResource[] = [];
-      const state = await createGatewayState(setup.host, (item) =>
-        captured.push(item),
+      const state = await createGatewayState(
+        setup.host,
+        (item) => captured.push(item),
+        () => undefined,
       );
       try {
         await expect(
@@ -104,8 +110,10 @@ describe("launchGateway", () => {
         processEffects: scenario.effects,
       };
       const captured: OwnedResource[] = [];
-      const state = await createGatewayState(host, (item) =>
-        captured.push(item),
+      const state = await createGatewayState(
+        host,
+        (item) => captured.push(item),
+        () => undefined,
       );
       try {
         const child = await launchGateway(

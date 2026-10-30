@@ -2,9 +2,11 @@ import type { Stats } from "node:fs";
 import { join } from "node:path";
 import type { AcquisitionCapture, OwnedResource } from "../host/index.ts";
 import { HostProcessError, nativeFailure } from "../host/index.ts";
-import type { GatewayHostContext as HostContext } from "./types.ts";
+import type {
+  GatewayRecoveryCoordinates,
+  GatewayHostContext as HostContext,
+} from "./types.ts";
 
-const INSTANCE_ID = /^[a-z0-9-]{16,80}$/;
 const OWNER_DIR_MODE = 0o700;
 const PUBLIC_MODE_BITS = 0o077;
 const RELEASE_PRIORITY: Readonly<Record<string, number>> = {
@@ -22,17 +24,17 @@ export interface GatewayState {
 }
 
 /** Allocates owner-only operational state; later acquisitions fence directory removal.
- * @example const state = await createGatewayState(host, capture)
+ * @param host - Captured randomUUID identity and owner-scoped filesystem capabilities.
+ * @param reportCoordinates - Publishes non-owning recovery facts after capture, before identity readback.
+ * @example const state = await createGatewayState(host, capture, reportCoordinates)
  * @throws On unsafe enclosing directories or failed allocation; never adopts old state.
  */
 export async function createGatewayState(
   host: HostContext,
   capture: AcquisitionCapture,
+  reportCoordinates: (coordinates: GatewayRecoveryCoordinates) => void,
 ): Promise<GatewayState> {
   const fs = host.filesystem;
-  if (!INSTANCE_ID.test(host.instanceId)) {
-    throw new Error("Private gateway instance identity is invalid.");
-  }
   await fs.mkdir(host.paths.stateRoot, {
     recursive: true,
     mode: OWNER_DIR_MODE,
@@ -40,7 +42,6 @@ export async function createGatewayState(
   const root = await fs.lstat(host.paths.stateRoot);
   if (
     !root.isDirectory() ||
-    root.isSymbolicLink() ||
     root.uid !== host.uid ||
     (root.mode & PUBLIC_MODE_BITS) !== 0
   ) {
@@ -51,7 +52,12 @@ export async function createGatewayState(
     `pi-openshell-${host.instanceId}`,
   );
   await fs.mkdir(directory, { mode: OWNER_DIR_MODE });
-  const ownership = await ownGatewayState(host, directory, capture);
+  const ownership = await ownGatewayState(
+    host,
+    directory,
+    capture,
+    reportCoordinates,
+  );
   const environment: Record<string, string> = {
     ["PATH"]: host.environment["PATH"] || "/usr/local/bin:/usr/bin:/bin",
     ["LANG"]: "C.UTF-8",
@@ -77,7 +83,7 @@ export async function createGatewayState(
   }
   return {
     directory,
-    tlsDirectory: join(directory, "tls"),
+    tlsDirectory: ownership.tlsDirectory,
     environment: Object.freeze(environment),
     capture: ownership.capture,
     close: ownership.close,
@@ -126,12 +132,16 @@ function wrapResource(
 }
 
 /** Fence state deletion behind every captured gateway resource and exact file identity.
- * @example await ownGatewayState(host, path, capture) records intent before verified inode.
+ * @param reportCoordinates - Receives the known TLS path even if initial identity readback fails.
+ * @returns Captured ownership and its published TLS directory.
+ * @throws On failed identity readback, retaining state without deletion authority.
+ * @example await ownGatewayState(host, path, capture, reportCoordinates) publishes captured state.
  */
 async function ownGatewayState(
   host: HostContext,
   directory: string,
   capture: AcquisitionCapture,
+  reportCoordinates: (coordinates: GatewayRecoveryCoordinates) => void,
 ) {
   const pending = new Set<OwnedResource>();
   let identity: Stats | undefined;
@@ -151,7 +161,6 @@ async function ownGatewayState(
     const current = await host.filesystem.lstat(directory);
     if (
       !current.isDirectory() ||
-      current.isSymbolicLink() ||
       current.dev !== identity.dev ||
       current.ino !== identity.ino ||
       current.uid !== host.uid
@@ -167,8 +176,10 @@ async function ownGatewayState(
     kind: "state",
     release,
   });
+  const tlsDirectory = join(directory, "tls");
+  reportCoordinates(Object.freeze({ tlsDirectory }));
   identity = await host.filesystem.lstat(directory);
-  return { capture: own, close: () => releasePending(pending) };
+  return { tlsDirectory, capture: own, close: () => releasePending(pending) };
 }
 
 /** Release processes before the network, then state, including late captured cleanup children.

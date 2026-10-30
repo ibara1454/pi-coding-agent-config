@@ -131,44 +131,13 @@ describe("publishFailure", () => {
   });
 });
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createRuntimeObserver", () => {
-  it("should leave current UI untouched when an activation becomes stale", () => {
+  it("should publish persistent failures when notification UI throws", () => {
     const f = adapterFixture();
-    let current = true;
-    const observer = createRuntimeObserver(f.pi, f.context, () => current);
-    observer.progress(
-      cachedStatus({ phase: "preparing", preparationStep: "gateway" }),
-    );
-    observer.progress(cachedStatus());
-    observer.failure({
-      code: "cleanup",
-      operation: "cleanup",
-      safeMessage: "CURRENT_FAILURE",
-    });
-    const statuses = [...f.setStatus.mock.calls];
-    const failures = [...f.sendMessage.mock.calls];
-    current = false;
-    observer.progress(cachedStatus({ phase: "closed" }));
-    observer.failure({
-      code: "cleanup",
-      operation: "cleanup",
-      safeMessage: "STALE_FAILURE",
-    });
-    expect(f.setStatus.mock.calls).toEqual(statuses);
-    expect(f.sendMessage.mock.calls).toEqual(failures);
-  });
-
-  it("should publish persistent failures when optional UI throws", () => {
-    const f = adapterFixture();
-    const observer = createRuntimeObserver(f.pi, f.context, () => true);
-    f.setStatus.mockImplementation(() => {
-      throw new Error("closed footer");
-    });
+    const observer = createRuntimeObserver(f.pi, f.context);
     f.notify.mockImplementation(() => {
       throw new Error("closed UI");
     });
-    observer.progress(cachedStatus({ phase: "preparing" }));
     observer.failure({
       code: "execution",
       operation: "exec",
@@ -178,22 +147,6 @@ describe("createRuntimeObserver", () => {
       "RETAINED_FAILURE",
     );
   });
-  it.each([
-    ["starting", "OpenShell · preparing"],
-    ["gateway", "OpenShell · starting gateway"],
-    ["providers", "OpenShell · configuring providers"],
-    ["sandbox", "OpenShell · creating and checking sandbox"],
-  ] as const)(
-    "should publish the owning preparation label when the step is %s",
-    (step, label) => {
-      const f = adapterFixture();
-      const observer = createRuntimeObserver(f.pi, f.context, () => true);
-      observer.progress(
-        cachedStatus({ phase: "preparing", preparationStep: step }),
-      );
-      expect(f.setStatus.mock.calls).toEqual([["openshell-sandbox", label]]);
-    },
-  );
 });
 
 describe("inlineText", () => {

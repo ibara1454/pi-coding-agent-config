@@ -68,10 +68,8 @@ export async function connectGateway(
   const client = await connect({ gateway: endpoint, ...tls });
   const deadline = performance.now() + GATEWAY_STARTUP_MS;
   const lifetime = new AbortController();
-  child.closed.then(
-    () => lifetime.abort(),
-    () => lifetime.abort(),
-  );
+  const abortLifetime = () => lifetime.abort();
+  child.closed.then(abortLifetime, abortLifetime);
   const preparation = AbortSignal.any([signal, lifetime.signal]);
   await waitHealthy(client, host, deadline, preparation);
   await configureGateway(client, preparation);

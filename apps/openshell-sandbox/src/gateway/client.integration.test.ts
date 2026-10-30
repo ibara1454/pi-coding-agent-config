@@ -3,19 +3,25 @@ import { createServer } from "node:net";
 import { reserveGatewayPort } from "./client.ts";
 
 describe("reserveGatewayPort", () => {
-  it("should release the test-owned loopback reservation before returning a bindable port", async () => {
-    const port = await reserveGatewayPort();
+  it("should return the allocated port after the test-owned loopback listener closes", async () => {
     const server = createServer();
-    const listening = Promise.withResolvers<void>();
-    server.once("error", listening.reject);
-    server.listen(port, "127.0.0.1", listening.resolve);
+    let address: unknown;
+    let closed = false;
+    server.once("listening", () => {
+      address = server.address();
+    });
+    server.once("close", () => {
+      closed = true;
+    });
     try {
-      await listening.promise;
-      expect(server.address()).toMatchObject({ port });
+      const port = await reserveGatewayPort(() => server);
+      expect(address).toMatchObject({ port });
+      expect(closed).toBe(true);
+      expect(server.listening).toBe(false);
     } finally {
-      const closed = Promise.withResolvers<void>();
-      server.close(() => closed.resolve());
-      await closed.promise;
+      const cleanup = Promise.withResolvers<void>();
+      server.close(() => cleanup.resolve());
+      await cleanup.promise;
     }
   });
 });

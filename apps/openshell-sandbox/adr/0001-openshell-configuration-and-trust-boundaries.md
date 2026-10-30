@@ -71,7 +71,7 @@ binaries:
 }
 ```
 
-This is illustrative configuration, not fresh native default-image acceptance. The host variable `WORK_NPM_TOKEN` supplies the value; `NPM_TOKEN` must match the profile's environment key. Keep any other needed providers/profiles when replacing arrays. The `/usr/bin/node` profile entry scopes native enforcement; it neither installs Node nor makes it a startup requirement. Baseline executable/network grants are unchanged.
+This is illustrative configuration, not fresh native default-image acceptance. The host variable `WORK_NPM_TOKEN` supplies the value; `NPM_TOKEN` must match the profile's environment key. Keep any other needed providers/profiles when replacing arrays. The `/usr/bin/node` profile entry scopes native enforcement; it neither installs Node nor makes it a startup requirement.
 
 Providers supply credential environment placeholders, not client configuration. Workloads must configure Git/npm/pip manually while preserving TLS/proxy settings. The README owns the rejected [`providers[].client` migration and path-specific Git trust caveats](../README.md#configure-trusted-inputs).
 
@@ -83,5 +83,3 @@ Machine-local native paths avoid a portable-policy translation layer; manual rev
 - [Pinned Docker runtime model](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-driver-docker/README.md#runtime-model)
 - [Pinned security-policy architecture](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/architecture/security-policy.md)
 - [Native credential profiles](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-providers/src/profiles.rs)
-
-Historical native proofs remain scoped to their earlier implementation and fixtures. They do not certify the simplified cutover, its mutable base image, or macOS behavior.

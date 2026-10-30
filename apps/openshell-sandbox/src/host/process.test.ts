@@ -364,37 +364,6 @@ describe("runHostProcess", () => {
     ).rejects.toBeInstanceOf(HostProcessError);
     expect(scenario.signals).toEqual(["SIGTERM"]);
   });
-  it.each([
-    { timeoutMs: 0, maxOutputBytes: 1 },
-    { timeoutMs: TEST_DEADLINE_MS, maxOutputBytes: -1 },
-    {
-      timeoutMs: TEST_DEADLINE_MS,
-      maxOutputBytes: Number.MAX_SAFE_INTEGER + 1,
-    },
-    { timeoutMs: Number.POSITIVE_INFINITY, maxOutputBytes: 1 },
-  ])(
-    "should reject invalid process limits before launch when timeout=$timeoutMs output=$maxOutputBytes",
-    async (invalid) => {
-      let launches = 0;
-      const scenario = processScenario(() => undefined);
-      const effects: ProcessEffects = {
-        ...scenario.effects,
-        spawn: ((...args: Parameters<typeof spawn>) => {
-          launches += 1;
-          return scenario.effects.spawn(...args);
-        }) as typeof spawn,
-      };
-      await expect(
-        runHostProcess(
-          "/native",
-          [],
-          { environment: {}, mode: "finite", ...invalid },
-          effects,
-        ),
-      ).rejects.toBeInstanceOf(HostProcessError);
-      expect(launches).toBe(0);
-    },
-  );
   it("should reject an already-aborted launch without spawning a process", async () => {
     const controller = new AbortController();
     controller.abort();

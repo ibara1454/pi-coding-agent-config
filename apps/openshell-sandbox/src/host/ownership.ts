@@ -10,6 +10,7 @@ const DOCKER_TIMEOUT_MS = 15_000;
 const MAX_DOCKER_OUTPUT_BYTES = 1_048_576;
 
 /** Runs a bounded Docker operation on one explicit local daemon with safe failures.
+ * @param host - Captured endpoint already admitted by resolveDockerHost.
  * @example await dockerCommand(host, ['network', 'inspect', networkId])
  */
 export async function dockerCommand(
@@ -17,11 +18,8 @@ export async function dockerCommand(
   argv: readonly string[],
   signal?: AbortSignal,
 ): Promise<ProcessResult> {
-  if (
-    !host.dockerEndpoint.startsWith("unix:///") ||
-    host.dockerEndpoint.includes("\n")
-  ) {
-    throw new Error("OpenShell requires an explicit local Docker socket.");
+  if (host.dockerEndpoint.includes("\n")) {
+    throw new Error("OpenShell Docker endpoint must not contain a newline.");
   }
   try {
     const result = await runHostProcess(

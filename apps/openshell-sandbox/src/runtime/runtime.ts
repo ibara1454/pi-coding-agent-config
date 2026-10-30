@@ -196,9 +196,7 @@ class RuntimeController {
       this.publish("progress", runtimeStatus(this));
       return;
     }
-    const live = !(
-      event.generation.signal.aborted || this.effects.activationSignal.aborted
-    );
+    const live = !event.generation.signal.aborted;
     if (event.kind === "stopped") {
       this.recoverySnapshot = this.prepared
         ? runtimeStatus(this).recovery
@@ -282,8 +280,6 @@ class RuntimeController {
         generation,
         rawRequests: this.rawRequests,
         prepared: () => this.prepared,
-        generationStopped: () =>
-          this.state.phase === "closing" && this.state.stage === "session",
       });
       this.prepared = undefined;
       this.creationOutcome = undefined;

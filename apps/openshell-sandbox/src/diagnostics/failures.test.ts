@@ -7,8 +7,6 @@ import {
 } from "./failures.ts";
 
 const STRING_CLIP_LENGTH = 3;
-const SAFE_MESSAGE_LENGTH = 1024;
-const RECOVERY_LENGTH = 2048;
 
 describe("safeText", () => {
   it("should remove terminal controls before clipping untrusted text", () => {
@@ -17,39 +15,26 @@ describe("safeText", () => {
 });
 
 describe("RuntimeFailure.constructor", () => {
-  it("should sanitize display and recovery diagnostics without retaining a raw cause", () => {
-    const error = new RuntimeFailure(
-      "aborted",
-      "cancellation",
-      "bad\u001b\nmessage",
-      { recovery: "safe\u0000route" },
-    );
+  it("should preserve abort classification and a safe nested cause", () => {
+    const error = new RuntimeFailure("aborted", "cancellation", "aborted", {
+      recovery:
+        "Inspect /sandbox; review selected policy and native prerequisites.",
+    });
     expect(error.name).toBe("AbortError");
     expect(error.failure).toEqual({
       code: "aborted",
       operation: "cancellation",
-      safeMessage: "badmessage",
-      recovery: "saferoute",
+      safeMessage: "aborted",
+      recovery:
+        "Inspect /sandbox; review selected policy and native prerequisites.",
     });
     expect(error.cause).toBeUndefined();
+    expect(Object.isFrozen(error.failure)).toBe(true);
     const nested = new RuntimeFailure("cleanup", "cleanup", "Failed", {
       cause: error,
     });
     expect(nested.cause).toBe(error);
-  });
-  it("should bound message and recovery independently when safe guidance exceeds display limits", () => {
-    const error = new RuntimeFailure(
-      "execution",
-      "command",
-      "m".repeat(SAFE_MESSAGE_LENGTH + 1),
-      {
-        recovery: "r".repeat(RECOVERY_LENGTH + 1),
-      },
-    );
-    expect(error.name).toBe("Error");
-    expect(error.message).toBe("m".repeat(SAFE_MESSAGE_LENGTH));
-    expect(error.failure.recovery).toBe("r".repeat(RECOVERY_LENGTH));
-    expect(Object.isFrozen(error.failure)).toBe(true);
+    expect(nested.name).toBe("Error");
   });
   it("should omit empty recovery when no actionable guidance is supplied", () => {
     expect(

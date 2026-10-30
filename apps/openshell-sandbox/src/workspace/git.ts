@@ -1,4 +1,4 @@
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { HostPaths } from "../host/index.ts";
 import { nativeFailure } from "../host/index.ts";
 import type { GitProcess, WorkspaceFilesystem } from "./inspection.ts";
@@ -77,7 +77,7 @@ async function validateMetadataDirectory(
   }
 }
 
-/** Verify native Git's selected metadata matches the already checked linkage, hiding raw diagnostics.
+/** Read native Git's selected metadata for the caller's exact linkage comparison, hiding raw diagnostics.
  * The injected runner owns deadline, output limits, shell-free spawn and clean GIT_* environment.
  * @example queryMetadata('/work/topic', ['--absolute-git-dir'], run) returns one absolute path.
  */
@@ -90,11 +90,7 @@ async function queryMetadata(
   if (result.exitCode !== 0 || result.stdout.length > MAX_GIT_METADATA_BYTES) {
     throw new Error("Git metadata query failed");
   }
-  const path = result.stdout.replace(TRAILING_NEWLINE, "");
-  if (normalize(path) !== path) {
-    throw new Error("Git returned noncanonical metadata");
-  }
-  return path;
+  return result.stdout.replace(TRAILING_NEWLINE, "");
 }
 
 /** Resolve and verify linked-worktree forward/common/back pointers before executing Git.
@@ -122,7 +118,6 @@ async function linkedMetadata(
   );
   if (
     backlink !== join(root, ".git") ||
-    dirname(dirname(gitDir)) !== commonDir ||
     dirname(gitDir) !== join(commonDir, "worktrees")
   ) {
     throw new Error("Git metadata does not identify this linked checkout");

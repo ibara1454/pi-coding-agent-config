@@ -1,9 +1,8 @@
 import type { ProviderProfile } from "@nvidia/openshell-sdk/raw";
 import type { ProviderConfiguration } from "../configuration/index.ts";
 
-const ENVIRONMENT_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 /** Validates selected credential declarations without reading secrets or mutating inputs.
+ * @param provider Frozen explicit declaration already admitted by settings validation.
  * @throws On undeclared keys, missing required credentials, or ambiguous aliases.
  * @example validateProvider(profile, declaration) returns the selected workload ENV keys.
  */
@@ -12,13 +11,7 @@ export function validateProvider(
   provider: ProviderConfiguration,
 ): readonly string[] {
   const keys = Object.keys(provider.credentialsFromEnv);
-  if (provider.credentialMode !== "explicit" || keys.length === 0) {
-    throw new Error("Explicit provider credentials are required.");
-  }
-  for (const [key, source] of Object.entries(provider.credentialsFromEnv)) {
-    if (!(ENVIRONMENT_KEY.test(key) && ENVIRONMENT_KEY.test(source))) {
-      throw new Error("Invalid provider environment mapping.");
-    }
+  for (const key of keys) {
     const declarations = profile.credentials.filter((credential) =>
       credential.envVars.includes(key),
     );

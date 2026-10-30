@@ -8,7 +8,6 @@ import { executeRequest } from "./request.ts";
 import { completion, requestFixture } from "./test/request.helper.ts";
 
 const OVERSIZED_TIMEOUT_SECONDS = 2_147_484;
-const FRACTIONAL_EXIT_CODE = 1.5;
 const ELAPSED_TIMEOUT_MS = 1001;
 const TIMEOUT_BUDGET_MS = 1000;
 const STARTUP_DELAY_MS = 250;
@@ -131,10 +130,6 @@ describe("executeRequest", () => {
   });
   it.each([
     ["has no exit", []],
-    [
-      "has a fractional exit",
-      [{ type: "exit", exitCode: FRACTIONAL_EXIT_CODE }],
-    ],
     [
       "has data after exit",
       [
@@ -408,32 +403,6 @@ describe("executeRequest", () => {
     }
   });
 
-  it("should convert an unexpected lifetime failure into one deferred safe terminal error", async () => {
-    const { fixture, owner, handle } = requestFixture();
-    try {
-      const result = await completion(
-        executeRequest(
-          "true",
-          "/project",
-          {},
-          {
-            ...owner,
-            admit: () => ({
-              ...handle,
-              get signal(): AbortSignal {
-                throw new Error("private lifetime failure");
-              },
-            }),
-          },
-        ),
-      );
-      expect(result.error).toMatchObject({ failure: { code: "execution" } });
-      expect(JSON.stringify(result.error)).not.toContain("private lifetime");
-      expect(result.terminals).toBe(1);
-    } finally {
-      fixture.clock.restore();
-    }
-  });
   it.each([true, false])(
     "should address only the acknowledged ID when its name resolves to a replacement and owned presence is %s",
     async (ownedPresent) => {

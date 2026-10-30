@@ -3,46 +3,38 @@ import { getEventListeners } from "node:events";
 import { createSandboxRuntime } from "./runtime.ts";
 import { plannedRealpath, unitRuntimeFixture } from "./test/index.helper.ts";
 
-const INVALID_ENTROPY_LENGTH = 9;
-
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createSandboxRuntime", () => {
-  it.each([
-    [
-      "throws",
-      () => {
-        throw new Error("private entropy failure");
-      },
-    ],
-    ["returns too few bytes", () => new Uint8Array(INVALID_ENTROPY_LENGTH)],
-  ] as const)(
-    "should release activation observation without starting preparation when entropy %s",
-    async (_condition, randomBytes) => {
-      const fixture = unitRuntimeFixture();
-      try {
-        const listeners = getEventListeners(
-          fixture.activation.signal,
-          "abort",
-        ).length;
-        await expect(
-          createSandboxRuntime(
-            fixture.environment,
-            { ...fixture.effects, randomBytes },
-            fixture.observer,
-          ),
-        ).rejects.toThrow();
-        expect(fixture.clock.pending()).toBe(0);
-        expect(
-          getEventListeners(fixture.activation.signal, "abort"),
-        ).toHaveLength(listeners);
-        expect(fixture.statuses).toEqual([]);
-        expect(fixture.failures).toEqual([]);
-        expect(fixture.native.launches).toBe(0);
-      } finally {
-        fixture.clock.restore();
-      }
-    },
-  );
+  it("should release activation observation without starting preparation when entropy throws", async () => {
+    const fixture = unitRuntimeFixture();
+    try {
+      const listeners = getEventListeners(
+        fixture.activation.signal,
+        "abort",
+      ).length;
+      await expect(
+        createSandboxRuntime(
+          fixture.environment,
+          {
+            ...fixture.effects,
+            randomBytes: () => {
+              throw new Error("private entropy failure");
+            },
+          },
+          fixture.observer,
+        ),
+      ).rejects.toThrow();
+      expect(fixture.clock.pending()).toBe(0);
+      expect(
+        getEventListeners(fixture.activation.signal, "abort"),
+      ).toHaveLength(listeners);
+      expect(fixture.statuses).toEqual([]);
+      expect(fixture.failures).toEqual([]);
+      expect(fixture.native.launches).toBe(0);
+    } finally {
+      fixture.clock.restore();
+    }
+  });
   it("should expose a frozen fail-closed handle without native work for an already canceled activation", async () => {
     const fixture = unitRuntimeFixture();
     try {

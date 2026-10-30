@@ -81,11 +81,7 @@ async function readTlsMaterial(
       await previous;
       const path = join(state.tlsDirectory, leaf);
       const info = await host.filesystem.lstat(path);
-      if (
-        !info.isDirectory() ||
-        info.isSymbolicLink() ||
-        info.uid !== host.uid
-      ) {
+      if (!info.isDirectory() || info.uid !== host.uid) {
         throw new Error("Private TLS directory is invalid.");
       }
       await host.filesystem.chmod(path, OWNER_DIR_MODE);
@@ -99,7 +95,6 @@ async function readTlsMaterial(
     const info = await host.filesystem.lstat(path);
     if (
       !info.isFile() ||
-      info.isSymbolicLink() ||
       info.uid !== host.uid ||
       info.size <= 0 ||
       info.size > MAX_TLS_BYTES
@@ -153,11 +148,11 @@ function verifyTlsMaterial(material: Buffer[]): GatewayTls {
 
 /** Writes native operational configuration, never provider secrets or a second user policy.
  * Supervisor resolution uses native defaults; no binary or image override is emitted.
- * @param host - Local Docker endpoint and filesystem owning the configuration write.
+ * @param host - Validated local Docker endpoint and filesystem owning the configuration write.
  * @param state - Private gateway state and verified TLS directory.
  * @param config - Private namespace and reserved loopback port.
  * @returns Path to the newly written owner-only native configuration.
- * @throws On a nonlocal Docker endpoint or a failed exclusive configuration write.
+ * @throws On a failed exclusive configuration write.
  * @example await writeGatewayConfig(host, state, { namespace, port })
  */
 export async function writeGatewayConfig(
@@ -169,9 +164,6 @@ export async function writeGatewayConfig(
   },
 ): Promise<string> {
   const { namespace, port } = config;
-  if (!host.dockerEndpoint.startsWith("unix:///")) {
-    throw new Error("Private gateway requires a local Docker endpoint.");
-  }
   const q = JSON.stringify;
   const tls = state.tlsDirectory;
   const content = `[openshell]\nversion = 1

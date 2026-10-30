@@ -415,7 +415,6 @@ describe("mapCommandDirectory", () => {
     requiredNativeReadWritePaths: [],
   });
   it.each([
-    [root, `${root}/src/../outside`],
     [`${root}/link`, `${root}-other`],
     [`${root}/link`, "relative"],
     [`${root}/link`, `${root}/bad\npath`],

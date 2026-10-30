@@ -11,7 +11,6 @@ import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.help
 import { prepareGatewayTls, writeGatewayConfig } from "./config.ts";
 import { createGatewayState } from "./state.ts";
 import {
-  directory,
   network,
   withRead,
   withStats,
@@ -28,6 +27,7 @@ describe("prepareGatewayTls", () => {
     try {
       const state = await createGatewayState(
         fixture.effects.host,
+        () => undefined,
         () => undefined,
       );
       const read: string[] = [];
@@ -50,7 +50,11 @@ describe("prepareGatewayTls", () => {
   });
   it.each([
     ["foreign directory", "", { uid: FOREIGN_UID }],
-    ["symbolic-link file", "ca.crt", { isSymbolicLink: () => true }],
+    [
+      "symbolic-link file",
+      "ca.crt",
+      { isFile: () => false, isSymbolicLink: () => true },
+    ],
     ["empty file", "ca.crt", { size: 0 }],
     ["empty JWT key", "jwt/signing.pem", { size: 0 }],
   ] as [string, string, Partial<Stats>][])(
@@ -60,6 +64,7 @@ describe("prepareGatewayTls", () => {
       try {
         const state = await createGatewayState(
           fixture.effects.host,
+          () => undefined,
           () => undefined,
         );
         const target = leaf
@@ -86,6 +91,7 @@ describe("prepareGatewayTls", () => {
       const state = await createGatewayState(
         fixture.effects.host,
         () => undefined,
+        () => undefined,
       );
       const mismatchedKey = GATEWAY_TEST_CERTIFICATES["client/tls.key"];
       if (!mismatchedKey) {
@@ -110,6 +116,7 @@ describe("prepareGatewayTls", () => {
     try {
       const state = await createGatewayState(
         fixture.effects.host,
+        () => undefined,
         () => undefined,
       );
       const original = fixture.effects.host.processEffects.spawn;
@@ -159,6 +166,7 @@ describe("prepareGatewayTls", () => {
       const state = await createGatewayState(
         fixture.effects.host,
         () => undefined,
+        () => undefined,
       );
       try {
         await prepareGatewayTls(
@@ -197,6 +205,7 @@ describe("writeGatewayConfig", () => {
       const state = await createGatewayState(
         fixture.effects.host,
         () => undefined,
+        () => undefined,
       );
       const configPath = await writeGatewayConfig(fixture.effects.host, state, {
         namespace: network.name,
@@ -215,34 +224,6 @@ describe("writeGatewayConfig", () => {
       expect(contents).not.toContain("supervisor_image");
       expect(contents).not.toContain("provider_api_key");
       await state.close();
-    } finally {
-      fixture.clock.restore();
-    }
-  });
-  it("should refuse a nonlocal Docker endpoint before writing configuration", async () => {
-    const fixture = runtimeFixture();
-    try {
-      const state = await createGatewayState(
-        fixture.effects.host,
-        () => undefined,
-      );
-      try {
-        await expect(
-          writeGatewayConfig(
-            { ...fixture.effects.host, dockerEndpoint: "tcp://remote:2375" },
-            state,
-            {
-              namespace: network.name,
-              port: 43_123,
-            },
-          ),
-        ).rejects.toThrow("local Docker");
-        expect(fixture.filesystem.files.has(`${directory}/gateway.toml`)).toBe(
-          false,
-        );
-      } finally {
-        await state.close();
-      }
     } finally {
       fixture.clock.restore();
     }

@@ -16,9 +16,6 @@ import type {
   RequestOwner,
 } from "./types.ts";
 
-type Outcome =
-  | { kind: "exit"; exitCode: number }
-  | { kind: "error"; error: Error };
 const MILLISECONDS_PER_SECOND = 1000;
 const MAX_HOST_TIMER_MS = 2_147_483_647;
 
@@ -34,23 +31,18 @@ export function executeRequest(
 ): EventEmitter<ExecutionEvents> {
   const request = new ExecutionRequest(command, cwd, options, owner);
   queueMicrotask(() => {
-    request
-      .run()
-      .then((outcome) =>
+    request.run().then(
+      (exitCode) =>
         queueMicrotask(() => {
-          if (outcome.kind === "exit") {
-            request.emitter.emit("exit", { exitCode: outcome.exitCode });
-          } else {
-            request.emitter.emit("error", outcome.error);
-          }
+          request.emitter.emit("exit", { exitCode });
         }),
-      )
-      .catch((error: unknown) => {
-        const failure = safeFailure(error, "execution");
-        queueMicrotask(() =>
-          request.emitter.emit("error", failureError(failure, error)),
-        );
-      });
+      (error: unknown) => {
+        const failure = failureError(safeFailure(error, "execution"), error);
+        queueMicrotask(() => {
+          request.emitter.emit("error", failure);
+        });
+      },
+    );
   });
   return request.emitter;
 }
@@ -68,7 +60,6 @@ class ExecutionRequest {
   limit: Deadline | undefined;
   signal: AbortSignal | undefined;
   executionStarted: boolean;
-  terminal: boolean;
 
   constructor(
     command: string,
@@ -84,7 +75,6 @@ class ExecutionRequest {
     this.admit = owner.admit;
     this.trackRaw = owner.trackRaw;
     this.requestedAt = performance.now();
-    this.terminal = false;
   }
 
   /** Validates before admission; timeout starts when exec was called, including readiness and cwd checks.
@@ -129,7 +119,6 @@ class ExecutionRequest {
         throw new RuntimeFailure("timeout", "deadline", "Command timed out");
       }
       this.limit = deadline(this.effects, remaining);
-      assertLive(this.limit.signal);
     }
     this.generation = this.admit();
     this.signal = AbortSignal.any([
@@ -141,17 +130,18 @@ class ExecutionRequest {
     return this.signal;
   }
 
-  /** Converts operational failure once; required generation cleanup precedes the terminal result.
+  /** Settles required generation cleanup before exposing task success or failure.
+   * @throws The operational or cleanup failure, for the event boundary to sanitize.
    * @example a thrown data listener invalidates unknown execution but never causes two terminal events.
    */
-  async run(): Promise<Outcome> {
+  async run(): Promise<number> {
     try {
       const signal = this.initialize();
       const raw = this.execute(signal);
       this.trackRaw(raw);
       const exitCode = await waitBounded(raw, signal);
       assertLive(signal);
-      return { kind: "exit", exitCode };
+      return exitCode;
     } catch (error) {
       let failure = await this.recoverPreparationFailure(error);
       if (this.generation && (this.signal?.aborted || this.executionStarted)) {
@@ -161,10 +151,8 @@ class ExecutionRequest {
           failure = cleanupError;
         }
       }
-      const safe = safeFailure(failure, "execution");
-      return { kind: "error", error: failureError(safe, failure) };
+      throw failure;
     } finally {
-      this.terminal = true;
       this.limit?.close();
     }
   }
@@ -226,7 +214,6 @@ class ExecutionRequest {
       this.cwd,
       resolved,
     );
-    assertLive(signal);
     return await this.streamExecution(resources, workdir, signal);
   }
 
@@ -255,9 +242,6 @@ class ExecutionRequest {
     let exitCode: number | undefined;
     for await (const event of stream) {
       assertLive(signal);
-      if (this.terminal) {
-        throw new RuntimeFailure("aborted", "execution", "aborted");
-      }
       if (exitCode !== undefined) {
         throw new RuntimeFailure(
           "execution",
@@ -273,7 +257,7 @@ class ExecutionRequest {
         this.emitter.emit("data", data);
       }
     }
-    if (exitCode === undefined || !Number.isInteger(exitCode)) {
+    if (exitCode === undefined) {
       throw new RuntimeFailure(
         "execution",
         "stream",

@@ -203,7 +203,7 @@ function ownChild(
 /** Runs one shell-free direct child with ignored stdin, returning output on close or transferring its handle after spawn.
  * @param executable - Selected native executable; no shell interpretation.
  * @param argv - Literal arguments supplied to the child.
- * @param options - Finite or managed lifetime, private environment, cancellation, and byte/deadline limits.
+ * @param options - Finite or managed lifetime, private environment, cancellation, and internal byte/deadline constants.
  * @param effects - Injectable spawn, direct-child signalling, clock and timer effects.
  * @returns Finite output after close, or a managed child owning its own termination and close.
  * @throws HostProcessError with the retained handle if termination cannot be confirmed.
@@ -227,19 +227,10 @@ export async function runHostProcess(
   options: ProcessOptions,
   effects: ProcessEffects,
 ): Promise<ProcessResult | ManagedProcess> {
-  if (
-    !Number.isFinite(options.timeoutMs) ||
-    options.timeoutMs <= 0 ||
-    options.signal?.aborted
-  ) {
-    throw new HostProcessError(
-      "Native process launch cancelled or deadline invalid.",
-    );
+  if (options.signal?.aborted) {
+    throw new HostProcessError("Native process launch cancelled.");
   }
   const maximum = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
-  if (!Number.isSafeInteger(maximum) || maximum < 0) {
-    throw new HostProcessError("Native output limit is invalid.");
-  }
   let child: ChildProcess;
   try {
     child = effects.spawn(executable, [...argv], {

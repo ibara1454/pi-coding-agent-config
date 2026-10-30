@@ -128,7 +128,7 @@ export class AdapterActivation {
     const created = await createSandboxRuntime(
       environment,
       effects,
-      createRuntimeObserver(pi, this.context, () => this.current),
+      createRuntimeObserver(pi, this.context),
     );
     if (!this.current) {
       try {
