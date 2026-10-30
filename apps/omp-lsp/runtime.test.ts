@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept and restore the runtime's live filesystem imports.
 import * as fs from "node:fs/promises";
 import { PassThrough } from "node:stream";
+import { setImmediate } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import {
   type CancellationToken,
@@ -33,6 +34,7 @@ const BUSY_CLOCK_MS = 2000;
 const EXPIRED_CLOCK_MS = 2011;
 const DIAGNOSTIC_POLL_MS = 50;
 const PROGRESS_DIAGNOSTIC_TIMEOUT_MS = 1000;
+const QUEUE_PROGRESS_TIMEOUT_MS = 2000;
 const INVALID_TEXT_SYNC_KIND = 3;
 // Narrow host timer effects rather than inheriting Bun/Node's overloaded signatures.
 const timers: {
@@ -846,23 +848,35 @@ describe("LanguageServer.syncFile", () => {
     const controller = new AbortController();
     const pending = client.syncFile(file, undefined, controller.signal);
     const canceled = pending.catch((error: unknown) => error);
-    await started.promise;
-    const next = client.syncFile(file, "updated");
-    const reason = new Error("document read canceled");
-    controller.abort(reason);
-    reading.resolve("stale disk text");
-    const [failure] = await Promise.all([canceled, next, reading.promise]);
-
-    expect(failure).toBe(reason);
-    expect(read.mock.calls[0]?.[1]).toMatchObject({
-      signal: { aborted: true },
-    });
-    expect(client.document(file)).toEqual({
-      version: (version ?? 0) + 1,
-      content: "updated",
-    });
-    expect(client.isAlive).toBe(true);
-    expect(server.stop).not.toHaveBeenCalled();
+    const next = client.syncFile(
+      file,
+      "updated",
+      AbortSignal.timeout(QUEUE_PROGRESS_TIMEOUT_MS),
+    );
+    try {
+      await started.promise;
+      const reason = new Error("document read canceled");
+      controller.abort(reason);
+      await next;
+      expect(await canceled).toBe(reason);
+      expect(read.mock.calls[0]?.[1]).toMatchObject({
+        signal: { aborted: true },
+      });
+      const updated = { version: (version ?? 0) + 1, content: "updated" };
+      expect(client.document(file)).toEqual(updated);
+      reading.resolve("stale disk text");
+      await setImmediate();
+      expect(client.document(file)).toEqual(updated);
+      expect(client.isAlive).toBe(true);
+      expect(server.stop).not.toHaveBeenCalled();
+    } finally {
+      reading.resolve("stale disk text");
+      try {
+        await Promise.allSettled([pending, next]);
+      } finally {
+        read.mockRestore();
+      }
+    }
   });
   it("should replace numeric incremental synchronization with a UTF-16 range across CRLF", async () => {
     const server = fixture({ capabilities: { textDocumentSync: 2 } });
