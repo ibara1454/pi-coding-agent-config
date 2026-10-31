@@ -209,7 +209,7 @@ failed, the same notification reports both results.
 
 If the manager was disabled, recover with `pi config` or edit the applicable
 global or project `settings.json`. Remove any exact
-`-.../extension-manager/index.ts` filter, then add the extension directory:
+`-.../extension-manager/src/index.ts` filter, then add the extension directory:
 
 ```json
 {
@@ -229,11 +229,12 @@ extensions, and `commitSettings(...)` owns locked validation and writes.
 
 | Area | Files |
 | --- | --- |
-| Host registration and lifecycle | `index.ts`, `extension-command.ts`, `extension-runtime.ts` |
-| Discovery and Pi resolution | `discovery.ts`, `package-identity.ts`, `package-resource-paths.ts` |
-| Staging and terminal UI | `catalog.ts`, `panel-state.ts`, `panel.ts` |
-| Filter and settings policy | `resource-filters.ts`, `settings.ts` |
-| Safe persistence | `persistence.ts`, `target-identity.ts`, `settings-serialization.ts` |
+| Host registration and lifecycle | `src/index.ts`, `src/pi/extension-command.ts`, `src/pi/extension-runtime.ts`, `src/pi/commit-notification.ts` |
+| Catalog and shared contracts | `src/catalog/catalog.ts`, `src/catalog/types.ts` |
+| Discovery and Pi resolution | `src/discovery/discovery.ts`, `src/discovery/package-identity.ts`, `src/discovery/package-resource-paths.ts` |
+| Staging and terminal UI | `src/panel/panel-state.ts`, `src/panel/panel.ts` |
+| Filter and settings policy | `src/settings/resource-filters.ts`, `src/settings/settings.ts` |
+| Safe persistence | `src/settings/persistence.ts`, `src/settings/target-identity.ts`, `src/settings/settings-serialization.ts` |
 
 ## Development
 
@@ -254,5 +255,5 @@ bun run check
 For panel work, run the focused test file:
 
 ```sh
-bun test apps/extension-manager/panel.test.ts
+bun test apps/extension-manager/src/panel/panel.test.ts
 ```
