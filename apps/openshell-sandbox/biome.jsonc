@@ -28,7 +28,7 @@
   },
   "overrides": [
     {
-      "includes": ["index.ts", "!src/**"],
+      "includes": ["src/index.ts"],
       "linter": {
         "rules": {
           "style": {

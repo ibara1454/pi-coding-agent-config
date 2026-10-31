@@ -28,7 +28,7 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 - Status line: `apps/omp-status-line/index.ts` reads global and project settings, aggregates session/context/git state, renders declarative segments, then wraps the editor and footer. `segments.ts` is the segment-rendering interface; `types.ts`, `presets.ts`, and `theme.ts` define its contracts and presentation data.
 - Welcome UI: `apps/omp-welcome/index.ts` collects extension/session data and installs a responsive header. `data.ts` handles discovery/settings snapshots; `welcome.ts` renders; `resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
 - Provider base URL overrides: `apps/provider-base-url-overrides/index.ts` validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
-- OpenShell sandbox: `apps/openshell-sandbox/index.ts` registers fail-closed model Bash; scoped modules own session lifecycle, native configuration, SDK resources, and direct-child gateway cleanup. User Bash remains host-side.
+- OpenShell sandbox: `apps/openshell-sandbox/src/index.ts` registers fail-closed model Bash; scoped modules own session lifecycle, native configuration, SDK resources, and direct-child gateway cleanup. User Bash remains host-side.
 - Agent configuration: `config/pi/settings.json` loads extension packages through `../../apps`; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
 
 ## Key Directories
@@ -73,7 +73,7 @@ bun test packages/biome-rules
 - `apps/extension-manager/index.ts` — extension-manager host entry point.
 - `apps/omp-status-line/index.ts` — status-line integration entry point.
 - `apps/omp-welcome/index.ts` — welcome integration entry point.
-- `apps/openshell-sandbox/index.ts` — OpenShell sandbox Pi factory.
+- `apps/openshell-sandbox/src/index.ts` — OpenShell sandbox Pi factory.
 - `apps/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
 - `.gitignore` and `config/pi/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
 

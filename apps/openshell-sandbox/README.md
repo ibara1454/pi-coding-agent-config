@@ -89,7 +89,7 @@ Normal cleanup retains Docker's image cache and completed project writes; contai
 
 ## Package structure
 
-`index.ts` is Pi's factory. Implementation and colocated tests live under `src/`; `assets/` contains only the native policy.
+`src/index.ts` is Pi's factory. Implementation and colocated tests live under `src/`; `assets/` contains only the native policy.
 
 | Owner | Responsibility |
 | --- | --- |

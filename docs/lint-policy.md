@@ -9,7 +9,7 @@ Every workspace under `apps/*` and `packages/*` has a `biome.jsonc` with
 `"root": false` and `"extends": "//"` to inherit the root configuration. Put
 package-specific rules and `overrides` in that package's file; override globs
 are relative to the package. App configs allow default exports only in their
-root `index.ts` entrypoint.
+Pi factory entrypoint (`src/index.ts` for OpenShell sandbox; root `index.ts` elsewhere).
 
 The following checks are enforced as errors:
 `useMathMinMax`, `noConditionalExpect`, `noIdenticalTestTitle`, and
