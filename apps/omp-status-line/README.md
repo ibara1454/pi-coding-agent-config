@@ -130,6 +130,13 @@ or when the current branch has no pull request.
 
 The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-status-line` through the `../../apps` directory entry.
 
+## Source layout
+
+- `src/index.ts` is Pi's factory; `src/pi/registration.ts` owns registration, settings, editor chrome, and session lifecycle.
+- `src/context/` owns context usage and run metrics; `src/git/` owns Git and pull-request state.
+- `src/rendering/` contains segments, shared rendering types, presets, and theme data. Shared validation stays in `src/guards.ts`.
+- Implementation tests live beside their modules. `src/index.integration.test.ts` exercises the Pi factory with real rendering and lifecycle behavior.
+
 ## Testing
 
 Run the unit and integration tests from the extension directory:

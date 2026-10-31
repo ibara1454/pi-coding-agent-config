@@ -16,14 +16,14 @@ The tracked `config/pi/settings.json` loads this package through `../../apps`. `
 For a one-off run after installing workspace dependencies:
 
 ```sh
-pi -e "$(realpath apps/omp-lsp/index.ts)"
+pi -e "$(realpath apps/omp-lsp/src/index.ts)"
 ```
 
-To use the extension independently, copy the complete `apps/omp-lsp/` directory into your Pi configuration's `extensions/` directory, omitting generated `node_modules/`. Run `bun install --production` inside the copied package, then restart Pi or run `/reload`. Keep its supporting source files, `defaults.json`, and `LICENSE`; copying only `index.ts` is insufficient.
+To use the extension independently, copy the complete `apps/omp-lsp/` directory into your Pi configuration's `extensions/` directory, omitting generated `node_modules/`. Run `bun install --production` inside the copied package, then restart Pi or run `/reload`. Keep its `src/` directory (including the `src/index.ts` entrypoint), `assets/defaults.json`, package metadata, and `LICENSE`; copying only `src/index.ts` is insufficient.
 
 ### Supported languages and servers to install
 
-Install the language servers your projects need separately. Project-local binaries, including `node_modules/.bin` and common virtual-environment directories, and `PATH` are searched. The tables below cover all 55 bundled presets in [defaults.json](./defaults.json); that file defines their exact file types and project-root markers.
+Install the language servers your projects need separately. Project-local binaries, including `node_modules/.bin` and common virtual-environment directories, and `PATH` are searched. The tables below cover all 55 bundled presets in [assets/defaults.json](./assets/defaults.json); that file defines their exact file types and project-root markers.
 
 Install only what you need. Multiple entries for one language are alternatives, not a requirement to install every server. The preset names in parentheses identify entries you can customize or disable in [server definitions](#server-definitions).
 
@@ -165,7 +165,7 @@ Server definitions are read only from the agent directory and the trusted projec
 
 Project-root files, `.omp/`, `.claude/`, and plugin directories are not searched.
 
-You can override any bundled preset without editing `defaults.json`. Use the preset name from the tables above as the key under `servers`.
+You can override any bundled preset without editing `assets/defaults.json`. Use the preset name from the tables above as the key under `servers`.
 
 #### 1. Choose the configuration scope
 
@@ -245,7 +245,7 @@ Then inspect configured and missing servers:
 
 Overrides do not install executables. Install the required servers separately, or override their `command` field to point to an installed executable.
 
-New named definitions specify `command`, `args`, `fileTypes`, and `rootMarkers`. Optional `env`, `settings`, `initOptions`, `languageId`, and `extensionToLanguage` configure the server further. See [defaults.json](./defaults.json) for complete examples.
+New named definitions specify `command`, `args`, `fileTypes`, and `rootMarkers`. Optional `env`, `settings`, `initOptions`, `languageId`, and `extensionToLanguage` configure the server further. See [assets/defaults.json](./assets/defaults.json) for complete examples.
 
 ## Runtime boundaries
 
