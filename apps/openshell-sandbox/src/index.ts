@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerSandbox } from "./src/pi/index.ts";
+import { registerSandbox } from "./pi/index.ts";
 
 /** Installs model-only fail-closed routing before any configuration or SDK operation.
  * Read-only status remains available after failed native preparation.
