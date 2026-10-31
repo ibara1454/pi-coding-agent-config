@@ -24,11 +24,12 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
 
 ## Architecture & Data Flow
 
-- Extension manager: `apps/extension-manager/index.ts` delegates `/extensions` registration to `extension-command.ts`, which discovers settings resources into a catalog, opens the panel, and reports commits; `extension-runtime.ts` binds discovery, persistence, panel creation, and disposal.
-- Status line: `apps/omp-status-line/index.ts` reads global and project settings, aggregates session/context/git state, renders declarative segments, then wraps the editor and footer. `segments.ts` is the segment-rendering interface; `types.ts`, `presets.ts`, and `theme.ts` define its contracts and presentation data.
-- Welcome UI: `apps/omp-welcome/index.ts` collects extension/session data and installs a responsive header. `data.ts` handles discovery/settings snapshots; `welcome.ts` renders; `resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
-- Provider base URL overrides: `apps/provider-base-url-overrides/index.ts` validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
+- Extension manager: `apps/extension-manager/src/index.ts` delegates `/extensions` registration to `src/pi/extension-command.ts`; `src/pi/extension-runtime.ts` binds discovery, persistence, panel creation, and disposal. Implementation and tests are grouped under `src/{pi,catalog,discovery,settings,panel}`.
+- Status line: `apps/omp-status-line/src/index.ts` delegates to `src/pi/registration.ts`, which reads settings, aggregates session/context/git state, and wraps the editor and footer. Context, Git, and declarative rendering modules live under `src/{context,git,rendering}`.
+- Welcome UI: `apps/omp-welcome/src/index.ts` delegates to `src/pi/registration.ts`. `src/discovery/data.ts` handles discovery/settings snapshots; `src/rendering/welcome.ts` renders; `src/pi/resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
+- Provider base URL overrides: `apps/provider-base-url-overrides/src/index.ts` delegates to `src/pi/registration.ts`, which validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
 - OpenShell sandbox: `apps/openshell-sandbox/src/index.ts` registers fail-closed model Bash; scoped modules own session lifecycle, native configuration, SDK resources, and direct-child gateway cleanup. User Bash remains host-side.
+- Language servers: `apps/omp-lsp/src/index.ts` delegates to `src/pi/registration.ts`; configuration, host processes, runtime, and workspace operations live under `src/{configuration,host,runtime,workspace}`, with bundled server definitions in `assets/defaults.json`.
 - Agent configuration: `config/pi/settings.json` loads extension packages through `../../apps`; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
 
 ## Key Directories
@@ -70,11 +71,12 @@ bun test packages/biome-rules
 - `README.md` — repository purpose and root setup entry point.
 - `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
 - `config/pi/settings.json` — tracked, non-secret Pi defaults and extension references.
-- `apps/extension-manager/index.ts` — extension-manager host entry point.
-- `apps/omp-status-line/index.ts` — status-line integration entry point.
-- `apps/omp-welcome/index.ts` — welcome integration entry point.
+- `apps/extension-manager/src/index.ts` — extension-manager host entry point.
+- `apps/omp-status-line/src/index.ts` — status-line integration entry point.
+- `apps/omp-welcome/src/index.ts` — welcome integration entry point.
 - `apps/openshell-sandbox/src/index.ts` — OpenShell sandbox Pi factory.
-- `apps/provider-base-url-overrides/index.ts` — provider base URL override integration entry point.
+- `apps/provider-base-url-overrides/src/index.ts` — provider base URL override integration entry point.
+- `apps/omp-lsp/src/index.ts` — language-server integration entry point.
 - `.gitignore` and `config/pi/.gitignore` — exclude dependencies, credentials, local Pi state, sessions, and generated binaries.
 
 ## Agent skills

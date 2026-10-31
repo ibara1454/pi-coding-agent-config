@@ -118,6 +118,11 @@ The extension has no extension-specific configuration.
 
 The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
 
+The `src/index.ts` factory delegates to `src/pi/registration.ts`. Discovery and settings
+snapshots live under `src/discovery/`; header, animation, and terminal rendering
+live under `src/rendering/`. The guarded host inventory override stays under
+`src/pi/`, and tests are colocated with their owning modules.
+
 Run the unit tests from the extension directory:
 
 ```bash

@@ -1,0 +1,2766 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  Command,
+  type Diagnostic,
+  type Position,
+  type TextEdit,
+  type WorkspaceEdit,
+} from "vscode-languageserver-protocol";
+import {
+  isCliLinter,
+  loadLspConfig,
+  serversForFile,
+} from "../configuration/config.ts";
+import {
+  type LanguageServer,
+  type LanguageServerPool,
+  StdioLanguageServerPool,
+} from "../runtime/runtime.ts";
+import type {
+  LspConfig,
+  LspParams,
+  LspResult,
+  LspSettings,
+  ServerConfig,
+} from "../runtime/types.ts";
+import {
+  applyWorkspaceEdit,
+  type DocumentSnapshot,
+  directoryFiles,
+  type EditResult,
+  type ExecutedChange,
+  fileToUri,
+  uriToFile,
+} from "./edits.ts";
+import { formatWithCli, lintWithCli } from "./linters.ts";
+import {
+  type DisplaySymbol,
+  diagnosticsText,
+  diagnosticTargets,
+  formattingOptions,
+  hoverText,
+  locations,
+  type NavigationLocation,
+  normalizeDiagnostics,
+  object,
+  resolvePosition,
+  symbols,
+} from "./operations.ts";
+import { runWorkspaceDiagnostics } from "./workspace-diagnostics.ts";
+
+const LINE_BREAK = /\r?\n/;
+const CODE_ACTION_INDEX = /^\d+$/;
+const SWIFTLINT_COMMAND = /swiftlint/i;
+const ANY_LINE_BREAK = /\r\n|\r|\n/;
+const LSP_METHOD_NOT_FOUND_CODE = -32_601;
+const DEFAULT_ACTION_TIMEOUT_SECONDS = 20;
+const MIN_ACTION_TIMEOUT_SECONDS = 5;
+const MAX_ACTION_TIMEOUT_SECONDS = 300;
+const MILLISECONDS_PER_SECOND = 1000;
+const MAX_RESULT_TEXT_LENGTH = 60_000;
+// 16 MiB (16 * 1024 * 1024 bytes).
+const MAX_DOCUMENT_BYTES = 16_777_216;
+const REFERENCE_RETRY_DELAY_MS = 250;
+const MAX_REFERENCE_RESULTS = 50;
+const MAX_NAVIGATION_RESULTS = 200;
+const MAX_CONTEXT_LINE_LENGTH = 500;
+const MAX_RAW_REQUEST_PAYLOAD_LENGTH = 400;
+const MAX_LINTER_TIMEOUT_MS = 3000;
+const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 10_000;
+const MULTI_FILE_DIAGNOSTIC_TIMEOUT_MS = 400;
+const MAX_SYMBOL_LINES = 200;
+const MUTATION_FEEDBACK_TIMEOUT_MS = 15_000;
+const MAX_MUTATION_FEEDBACK_TEXT_LENGTH = 20_000;
+const AFTER_MUTATION_TIMEOUT_MS = 16_000;
+
+interface WorkspaceOptions {
+  cwd: string;
+  agentDir: string;
+  trusted: boolean;
+}
+
+interface DiagnosticReport {
+  file: string;
+  diagnostics: Diagnostic[];
+  failures: string[];
+  unverifiedSources: string[];
+  responders: number;
+}
+
+interface ParsedCodeAction {
+  raw: unknown;
+  title: string;
+  kind: string;
+  isPreferred: boolean;
+  isCommand: boolean;
+  disabledReason: string | undefined;
+  edit: unknown;
+  command: Command | undefined;
+}
+
+/**
+ * Validates metadata and commands before an action can mutate files.
+ * Keeps the original resolve payload; workspace-edit validation belongs to the edit applier.
+ */
+function parseCodeAction(value: unknown): ParsedCodeAction {
+  const { title, kind, isPreferred, disabled, edit, command } = object(
+    value,
+    "code action",
+  );
+  if (
+    typeof title !== "string" ||
+    (kind !== undefined && typeof kind !== "string") ||
+    (isPreferred !== undefined && typeof isPreferred !== "boolean")
+  ) {
+    throw new Error("Invalid code action metadata");
+  }
+  let disabledReason: string | undefined;
+  if (disabled !== undefined) {
+    const { reason } = object(disabled, "disabled code action");
+    if (typeof reason !== "string") {
+      throw new Error("Invalid disabled code action reason");
+    }
+    disabledReason = reason;
+  }
+  const candidate = typeof command === "string" ? value : command;
+  let executable: Command | undefined;
+  if (candidate !== undefined) {
+    if (
+      !Command.is(candidate) ||
+      (candidate.arguments !== undefined && !Array.isArray(candidate.arguments))
+    ) {
+      throw new Error("Invalid code action command");
+    }
+    executable = candidate;
+  }
+  return {
+    raw: value,
+    title,
+    kind: kind ?? "action",
+    isPreferred: isPreferred === true,
+    isCommand: typeof command === "string",
+    disabledReason,
+    edit,
+    command: executable,
+  };
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Recognizes the JSON-RPC method-not-found error used for capability fallbacks.
+ * @param error - Untrusted thrown value or RPC error object.
+ * @returns Whether the object carries numeric code -32601.
+ * @example methodNotFound({ code: -32601 }) is true; methodNotFound(null) is false.
+ */
+function methodNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === LSP_METHOD_NOT_FOUND_CODE
+  );
+}
+
+function missing(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+async function concurrent<T, U>(
+  items: readonly T[],
+  work: (item: T) => Promise<U>,
+  concurrency = 3,
+): Promise<U[]> {
+  const results: U[] = new Array(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        const item = items[index];
+        if (item !== undefined) {
+          results[index] = await work(item);
+        }
+      }
+    }),
+  );
+  return results;
+}
+
+interface WorkspaceState {
+  readonly options: WorkspaceOptions;
+  readonly poolFactory: typeof createPool;
+  config: LspConfig;
+  pool: LanguageServerPool;
+  readonly lifetime: AbortController;
+  readonly jobs: Set<Promise<unknown>>;
+  readonly knownFiles: Set<string>;
+  readonly hooks: Map<string, AbortController>;
+  readonly diagnosticFingerprints: Map<
+    string,
+    { fingerprint: string; hadFindings: boolean; unverified: boolean }
+  >;
+  disposePromise: Promise<void> | undefined;
+}
+
+/**
+ * Creates a session-owned pool; clients start on demand and an idle timer may start immediately.
+ * @param cwd - Absolute workspace root.
+ * @param idleTimeoutMs - Optional idle timeout in milliseconds passed through to the pool.
+ * @param onApplyEdit - Trust-gated handler for server-requested workspace edits.
+ * @returns A pool that the workspace must dispose or replace on reload.
+ * @example
+ * ```ts
+ * const pool = createPool("/project", 60_000, async () => ({ applied: false }));
+ * // Idle clients are eligible for shutdown after 60 seconds without work.
+ * await pool.dispose(); // Stops acquired clients and clears the idle sweep timer.
+ * ```
+ */
+function createPool(
+  cwd: string,
+  idleTimeoutMs: number | undefined,
+  onApplyEdit: (
+    edit: WorkspaceEdit,
+    server: LanguageServer,
+  ) => Promise<{ applied: boolean; failureReason?: string }>,
+): LanguageServerPool {
+  return new StdioLanguageServerPool({
+    cwd,
+    ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
+    onApplyEdit,
+  });
+}
+
+/**
+ * Applies server-requested edits only inside the trust gate and tracked lifetime.
+ * @param state - Session-owned mutable configuration, jobs, and server state.
+ * @param edit - Untrusted workspace edit to validate before committing.
+ * @param server - Requesting server whose document snapshots guard the edit.
+ * @returns Protocol application status, preserving any partial-failure reason.
+ * @throws If edit processing rejects; the tracked job is removed in either case.
+ * @example In an untrusted workspace, an empty edit returns applied: false without changing files.
+ */
+async function applyServerEdit(
+  state: WorkspaceState,
+  edit: WorkspaceEdit,
+  server: LanguageServer,
+): Promise<{ applied: boolean; failureReason?: string }> {
+  if (
+    !(state.options.trusted && state.config.settings.enabled) ||
+    state.lifetime.signal.aborted
+  ) {
+    return {
+      applied: false,
+      failureReason: "LSP workspace untrusted, disabled, or disposed",
+    };
+  }
+  const job = applyEdit(state, edit, server, {
+    documents: documentSnapshots(state.knownFiles, server),
+    signal: state.lifetime.signal,
+  });
+  state.jobs.add(job);
+  try {
+    const result = await job;
+    return {
+      applied: result.applied,
+      ...(result.failureReason === undefined
+        ? {}
+        : { failureReason: result.failureReason }),
+    };
+  } finally {
+    state.jobs.delete(job);
+  }
+}
+
+/**
+ * Executes one trust-gated, deadline-bound action and reports operational failures.
+ * @param state - Session-owned state whose lifetime participates in cancellation.
+ * @param params - Requested LSP action and optional timeout in seconds.
+ * @param callerSignal - Optional caller cancellation, combined with the session and deadline.
+ * @returns Tool result; trust, disabled, disposed, timeout, and action failures remain observable.
+ * @example With trusted: false, action "hover" returns an error result without starting a server.
+ */
+async function executeAction(
+  state: WorkspaceState,
+  params: LspParams,
+  callerSignal?: AbortSignal,
+): Promise<LspResult> {
+  if (!state.options.trusted) {
+    return workspaceResult(
+      params,
+      "LSP is available only in trusted projects.",
+      false,
+    );
+  }
+  if (state.lifetime.signal.aborted) {
+    return workspaceResult(params, "LSP workspace has been disposed.", false);
+  }
+  if (
+    !state.config.settings.enabled &&
+    params.action !== "status" &&
+    params.action !== "reload"
+  ) {
+    return workspaceResult(params, "LSP is disabled in settings.", false);
+  }
+  const requestedTimeout = params.timeout ?? DEFAULT_ACTION_TIMEOUT_SECONDS;
+  if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
+    return workspaceResult(
+      params,
+      "timeout must be a positive number of seconds.",
+      false,
+    );
+  }
+  const timeout = Math.min(
+    MAX_ACTION_TIMEOUT_SECONDS,
+    Math.max(MIN_ACTION_TIMEOUT_SECONDS, requestedTimeout),
+  );
+  const deadline = new AbortController();
+  const timer = setTimeout(
+    () =>
+      deadline.abort(
+        new Error(`LSP ${params.action} timed out after ${timeout}s`),
+      ),
+    timeout * MILLISECONDS_PER_SECOND,
+  );
+  const signal = AbortSignal.any([
+    state.lifetime.signal,
+    deadline.signal,
+    ...(callerSignal ? [callerSignal] : []),
+  ]);
+  try {
+    signal.throwIfAborted();
+    return await dispatchAction(state, params, signal);
+  } catch (error) {
+    return workspaceResult(
+      params,
+      `LSP error: ${errorText(signal.aborted ? signal.reason : error)}`,
+      false,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Bounds tool text while retaining the original request and success metadata.
+ * @param params - Original tool request.
+ * @param text - Human-readable output, limited to 60000 characters.
+ * @param success - Whether the operation succeeded; defaults to true.
+ * @param serverName - Optional server attribution.
+ * @returns Tool output with isError only for failure.
+ * @example workspaceResult({ action: "status" }, "Ready", false) returns isError: true.
+ */
+function workspaceResult(
+  params: LspParams,
+  text: string,
+  success = true,
+  serverName?: string,
+): LspResult {
+  const bounded =
+    text.length > MAX_RESULT_TEXT_LENGTH
+      ? `${text.slice(0, MAX_RESULT_TEXT_LENGTH)}\n…output truncated at 60000 characters…`
+      : text;
+  return {
+    text: bounded,
+    ...(!success ? { isError: true } : {}),
+    details: {
+      action: params.action,
+      success,
+      request: params,
+      ...(serverName ? { serverName } : {}),
+    },
+  };
+}
+
+/**
+ * Selects available language servers without starting them or including CLI linters.
+ * @param config - Effective server configuration.
+ * @param file - Optional absolute file path used to filter matching servers.
+ * @returns Eligible servers in configured order.
+ * @example
+ * With installed .ts servers "typescript-native", disabled "eslint", and CLI linter
+ * "biome", plus "pyright" matching only .py, selectedServers(config, "/project/a.ts")
+ * selects only "typescript-native"; omitting the file also selects "pyright".
+ */
+function selectedServers(config: LspConfig, file?: string): ServerConfig[] {
+  const configured = file
+    ? serversForFile(config, file)
+    : config.servers.filter(
+        (server) => !server.disabled && server.resolvedCommand,
+      );
+  return configured.filter((server) => !isCliLinter(server));
+}
+
+/**
+ * Obtains the first eligible language server through the session-owned pool.
+ * @param state - Session configuration, root, and shared server pool.
+ * @param file - Optional absolute target file; omitted for workspace requests.
+ * @param signal - Cancellation for this caller’s startup wait.
+ * @returns The selected shared language-server instance.
+ * @throws If no server is available or startup is canceled or fails.
+ * @example With no available servers, requesting "/project/a.ts" fails rather than reporting successful navigation.
+ */
+async function languageServerFor(
+  state: WorkspaceState,
+  file: string | undefined,
+  signal: AbortSignal,
+): Promise<LanguageServer> {
+  const [config] = selectedServers(state.config, file);
+  if (!config) {
+    throw new Error(
+      file
+        ? `No language server found for ${path.relative(state.options.cwd, file)}`
+        : "No language servers configured and available",
+    );
+  }
+  return await state.pool.get(config, signal);
+}
+
+/**
+ * Reads a bounded regular file and synchronizes it without changing workspace tracking.
+ * @param server - Server that owns the synchronized document.
+ * @param file - Absolute file path to read.
+ * @param signal - Cancellation for file synchronization.
+ * @returns UTF-8 content after successful synchronization; the caller records the opened path.
+ * @throws If canceled, filesystem access fails, the target is not a file, it exceeds 16 MiB, or synchronization fails.
+ * @example Opening "/project/a.ts" containing "let x = 1;" returns that text without retaining the path.
+ */
+async function openDocument(
+  server: LanguageServer,
+  file: string,
+  signal: AbortSignal,
+): Promise<string> {
+  signal.throwIfAborted();
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) {
+    throw new Error(`Expected a file: ${file}`);
+  }
+  if (stat.size > MAX_DOCUMENT_BYTES) {
+    throw new Error(`LSP document exceeds 16 MiB: ${file}`);
+  }
+  const content = await fs.readFile(file, "utf8");
+  await server.syncFile(file, content, signal);
+  return content;
+}
+
+/**
+ * Copies known documents from the requesting server for later edit validation.
+ * @param knownFiles - Absolute paths known to this workspace.
+ * @param server - Server supplying detached document versions and content.
+ * @returns Snapshots only for paths currently open in that server.
+ * @example
+ * With "/project/open.ts" open at version 3 containing "let x = 1;" and
+ * "/project/closed.ts" closed in server:
+ * ```ts
+ * documentSnapshots(new Set(["/project/open.ts", "/project/closed.ts"]), server);
+ * // Map { "/project/open.ts" => { version: 3, content: "let x = 1;" } }
+ * ```
+ */
+function documentSnapshots(
+  knownFiles: ReadonlySet<string>,
+  server: LanguageServer,
+): Map<string, DocumentSnapshot> {
+  const snapshots = new Map<string, DocumentSnapshot>();
+  for (const file of knownFiles) {
+    const document = server.document(file);
+    if (document) {
+      snapshots.set(file, { ...document });
+    }
+  }
+  return snapshots;
+}
+
+/**
+ * Reports cached configuration and process state without starting servers.
+ * @param config - Effective settings, server definitions, and warnings.
+ * @param pool - Session pool whose existing clients are inspected.
+ * @param params - Original status request retained in result metadata.
+ * @returns Status output including unavailable servers and configuration warnings.
+ * @example With enabled: false, the first status line begins "LSP: disabled".
+ */
+function workspaceStatus(
+  config: LspConfig,
+  pool: LanguageServerPool,
+  params: LspParams,
+): LspResult {
+  const clients = pool.clients();
+  const lines = [
+    `LSP: ${config.settings.enabled ? "enabled" : "disabled"}; ${config.settings.lazy ? "lazy" : "eager"}; session-owned servers`,
+  ];
+  for (const server of config.servers) {
+    const client = clients.find(
+      (candidate) => candidate.config.name === server.name,
+    );
+    let state: string;
+    if (server.disabled) {
+      state = "disabled";
+    } else if (!server.resolvedCommand) {
+      state = "unavailable (executable not installed)";
+    } else if (isCliLinter(server)) {
+      state = "CLI linter (runs on demand)";
+    } else if (client?.isAlive) {
+      state = "running";
+    } else {
+      state = "configured, not started";
+    }
+    lines.push(
+      `${server.name}: ${state}; root=${server.root}; command=${server.resolvedCommand ?? server.command}`,
+    );
+  }
+  if (config.servers.length === 0) {
+    lines.push("No language servers configured");
+  }
+  if (config.warnings.length > 0) {
+    lines.push("Configuration warnings:", ...config.warnings);
+  }
+  return workspaceResult(params, lines.join("\n"));
+}
+
+/**
+ * Starts matching servers and reports their negotiated capabilities and failures.
+ * @param state - Session-owned configuration, root, and server pool.
+ * @param params - Capabilities request, optionally restricted to a file.
+ * @param signal - Cancellation for each server startup.
+ * @returns A successful result if any server responds; individual failures remain listed.
+ * @example With no matching servers, a capabilities request returns an error result.
+ */
+async function serverCapabilities(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const configs = selectedServers(
+    state.config,
+    params.file && params.file !== "*"
+      ? path.resolve(state.options.cwd, params.file)
+      : undefined,
+  );
+  if (configs.length === 0) {
+    return workspaceResult(
+      params,
+      "No language servers configured for this target",
+      false,
+    );
+  }
+  const responses = await concurrent(configs, async (config) => {
+    try {
+      const server = await state.pool.get(config, signal);
+      return {
+        success: true,
+        text: `${config.name}:\n${JSON.stringify(server.capabilities, undefined, 2)}`,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        text: `${config.name}: failed to start (${errorText(error)})`,
+      };
+    }
+  });
+  return workspaceResult(
+    params,
+    responses.map((item) => item.text).join("\n\n"),
+    responses.some((item) => item.success),
+    configs.map((config) => config.name).join(", "),
+  );
+}
+
+/**
+ * Routes workspace actions, handling early routes before opening documents for
+ * position-based operations.
+ * Status, capabilities, raw requests, reloads, file renames, and diagnostics
+ * return before document setup; concrete-file actions are narrowed to document
+ * operations before dispatch. Each successful open is tracked before validation or requests.
+ * The fallback rejects unsupported runtime values instead of bypassing required
+ * prerequisites.
+ * @param state - Session-owned configuration, document tracking, server lifetime.
+ * @param params - Action target supplied by tool caller.
+ * @param signal - Combined caller, session, deadline cancellation.
+ * @returns Navigation, inspection, diagnostic, or mutation result requested action.
+ * @throws If parameters, peer responses, file access, server requests, or cancellation prevent action.
+ * @example A status request inspects existing state without opening a document or starting a server.
+ */
+async function dispatchAction(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  if (params.action === "status") {
+    return workspaceStatus(state.config, state.pool, params);
+  }
+  if (params.action === "capabilities") {
+    return serverCapabilities(state, params, signal);
+  }
+  if (params.action === "request") {
+    return rawRequest(state, params, signal);
+  }
+  if (params.action === "reload") {
+    return reloadWorkspace(state, params, signal);
+  }
+  if (params.action === "rename_file") {
+    return renameFile(state, params, signal);
+  }
+  if (!params.file) {
+    throw new Error(
+      "file parameter required. Use '*' for supported workspace actions.",
+    );
+  }
+  if (params.action === "diagnostics") {
+    return diagnosticsResult(state, params, signal);
+  }
+  if (params.file === "*") {
+    if (params.action !== "symbols") {
+      throw new Error(`${params.action} requires a concrete file`);
+    }
+    return workspaceSymbols(state, params, signal);
+  }
+  const file = path.resolve(state.options.cwd, params.file);
+  const server = await languageServerFor(state, file, signal);
+  const content = await openDocument(server, file, signal);
+  state.knownFiles.add(file);
+  return await documentAction(state, params, params.action, {
+    file,
+    server,
+    content,
+    signal,
+  });
+}
+
+/**
+ * Routes position-based requests and edits after the owner opens and tracks the document.
+ * @param state - Read-only access to configuration, snapshots, and effect-owning edit operations.
+ * @param params - Original request used for position selection and output.
+ * @param action - Document action narrowed after workspace-only routes.
+ * @param operation - Absolute path, synchronized server and content, and request cancellation.
+ * @returns The requested navigation, inspection, or edit result without changing document tracking.
+ * @throws On position validation, peer, or edit failures.
+ * @example A symbols action requests symbols from an already opened document without resolving a position.
+ */
+async function documentAction(
+  state: WorkspaceState,
+  params: LspParams,
+  action:
+    | "definition"
+    | "type_definition"
+    | "implementation"
+    | "references"
+    | "hover"
+    | "symbols"
+    | "rename"
+    | "code_actions",
+  operation: {
+    file: string;
+    server: LanguageServer;
+    content: string;
+    signal: AbortSignal;
+  },
+): Promise<LspResult> {
+  const { file, server, content, signal } = operation;
+  const uri = fileToUri(file);
+  if (
+    !server.config.isLinter &&
+    params.line !== undefined &&
+    !params.symbol &&
+    ["definition", "references", "rename"].includes(action)
+  ) {
+    throw new Error(
+      `symbol is required for project-aware ${action}; pass the name, optionally symbol#N for repeated occurrences`,
+    );
+  }
+  const position =
+    action === "symbols"
+      ? { line: 0, character: 0 }
+      : resolvePosition(content, params.line, params.symbol);
+  const target = { textDocument: { uri }, position };
+  switch (action) {
+    case "definition":
+    case "type_definition":
+    case "implementation":
+    case "references":
+      return navigationResult(state.options.cwd, params, server, {
+        action,
+        file,
+        target,
+        signal,
+      });
+    case "hover": {
+      const text = hoverText(
+        await server.request("textDocument/hover", target, signal),
+      );
+      return workspaceResult(
+        params,
+        text || "No hover information",
+        true,
+        server.config.name,
+      );
+    }
+    case "symbols": {
+      const found = symbols(
+        await server.request(
+          "textDocument/documentSymbol",
+          { textDocument: { uri } },
+          signal,
+        ),
+        file,
+      );
+      return workspaceResult(
+        params,
+        found.length > 0
+          ? `Symbols in ${params.file}:\n${symbolLines(state.options.cwd, found).join("\n")}`
+          : "No symbols found",
+        true,
+        server.config.name,
+      );
+    }
+    case "rename": {
+      if (!params.new_name?.trim()) {
+        throw new Error("new_name parameter required for rename");
+      }
+      const snapshots = documentSnapshots(state.knownFiles, server);
+      // biome-ignore lint/plugin/biome-rules/use-undefined: LSP rename results explicitly allow null when no edit exists.
+      const edit = await server.request<WorkspaceEdit | null>(
+        "textDocument/rename",
+        { ...target, newName: params.new_name },
+        signal,
+      );
+      if (edit === null) {
+        return workspaceResult(
+          params,
+          "Rename returned no edits",
+          true,
+          server.config.name,
+        );
+      }
+      const result = await applyEdit(state, edit, server, {
+        documents: snapshots,
+        signal,
+        preview: params.apply === false,
+      });
+      return editResult(
+        params,
+        result,
+        params.apply === false ? "Rename preview" : "Applied rename",
+        server.config.name,
+      );
+    }
+    case "code_actions":
+      return codeActions(state, params, server, { file, position, signal });
+    default:
+      throw new Error(`Unsupported LSP action: ${String(action)}`);
+  }
+}
+
+/**
+ * Requests navigation locations and formats bounded context without changing peer order.
+ * @param cwd - Workspace root used to render location paths and context.
+ * @param params - Original action used for result metadata.
+ * @param server - Already synchronized document's server.
+ * @param options - Navigation kind, document, protocol target, and request cancellation.
+ * @returns Empty-success output or ordered locations with the original total count.
+ * @throws On request, invalid location, context-read, or cancellation failures.
+ * @example A references result includes declarations and renders at most 50 locations.
+ */
+async function navigationResult(
+  cwd: string,
+  params: LspParams,
+  server: LanguageServer,
+  options: {
+    action: "definition" | "type_definition" | "implementation" | "references";
+    file: string;
+    target: { textDocument: { uri: string }; position: Position };
+    signal: AbortSignal;
+  },
+): Promise<LspResult> {
+  const { action } = options;
+  const methods = {
+    definition: "textDocument/definition",
+    typeDefinition: "textDocument/typeDefinition",
+    implementation: "textDocument/implementation",
+    references: "textDocument/references",
+  };
+  const method =
+    action === "type_definition" ? methods.typeDefinition : methods[action];
+  const request = {
+    ...options.target,
+    ...(action === "references"
+      ? { context: { includeDeclaration: true } }
+      : {}),
+  };
+  const found = await navigationLocations(
+    server,
+    method,
+    { file: options.file, request },
+    options.signal,
+  );
+  const label = action === "type_definition" ? "type definition" : action;
+  if (found.length === 0) {
+    return workspaceResult(
+      params,
+      `No ${label} found`,
+      true,
+      server.config.name,
+    );
+  }
+  const limit =
+    action === "references" ? MAX_REFERENCE_RESULTS : MAX_NAVIGATION_RESULTS;
+  const lines = await navigationContextLines(
+    cwd,
+    found.slice(0, limit),
+    options.signal,
+  );
+  return workspaceResult(
+    params,
+    `${found.length} ${action === "references" ? "reference(s)" : `${label} location(s)`}:\n${lines.join("\n")}${found.length > limit ? `\n…${found.length - limit} locations elided…` : ""}`,
+    true,
+    server.config.name,
+  );
+}
+
+/**
+ * Requests navigation locations, retrying semantic references that only find the declaration.
+ * Request and cancellation failures propagate; the caller owns result limits and context reads.
+ * @example References containing only the requested declaration are retried at most twice.
+ */
+async function navigationLocations(
+  server: LanguageServer,
+  method: string,
+  target: {
+    file: string;
+    request: { textDocument: { uri: string }; position: Position };
+  },
+  signal: AbortSignal,
+): Promise<NavigationLocation[]> {
+  const { file, request } = target;
+  const { position } = request;
+  let found = locations(await server.request(method, request, signal));
+  if (method !== "textDocument/references" || server.config.isLinter) {
+    return found;
+  }
+  for (
+    let attempt = 0;
+    attempt < 2 &&
+    (found.length === 0 ||
+      (found.length === 1 &&
+        found[0]?.file === file &&
+        found[0].range.start.line === position.line));
+    attempt++
+  ) {
+    await delay(REFERENCE_RETRY_DELAY_MS, undefined, { signal });
+    found = locations(await server.request(method, request, signal));
+  }
+  return found;
+}
+
+/**
+ * Reads bounded source context for selected navigation locations in result order.
+ * Unreadable files retain an unavailable-context note; cancellation still throws.
+ * @example A location at line 0 in a.ts yields "a.ts:1:1  source text".
+ */
+async function navigationContextLines(
+  cwd: string,
+  found: readonly NavigationLocation[],
+  signal: AbortSignal,
+): Promise<string[]> {
+  const contexts = new Map<string, string[]>();
+  const lines: string[] = [];
+  for (const location of found) {
+    signal.throwIfAborted();
+    let context = contexts.get(location.file);
+    if (!context) {
+      try {
+        if ((await fs.stat(location.file)).size > MAX_DOCUMENT_BYTES) {
+          throw new Error("file exceeds context limit");
+        }
+        context = (await fs.readFile(location.file, "utf8")).split(LINE_BREAK);
+      } catch (error) {
+        context = [`Context unavailable: ${errorText(error)}`];
+      }
+      contexts.set(location.file, context);
+    }
+    const text = context[location.range.start.line]?.trim();
+    lines.push(
+      `${path.relative(cwd, location.file) || location.file}:${location.range.start.line + 1}:${location.range.start.character + 1}${text ? `  ${text.slice(0, MAX_CONTEXT_LINE_LENGTH)}` : ""}`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * Sends a raw protocol request with parsed JSON or a derived document target.
+ * @param state - Session root, server pool, and known documents.
+ * @param params - Request whose query names the method and payload optionally supplies JSON.
+ * @param signal - Cancellation for document synchronization and the request.
+ * @returns Serialized server output or an attributed protocol error.
+ * @throws If the method, JSON, document, position, or server startup is invalid or unavailable.
+ * @example
+ * In a workspace with an available language server, a request with action "request",
+ * query "workspace/symbol", and payload '{"query":"Widget"}' sends
+ * workspace/symbol with { query: "Widget" }, not the JSON string.
+ */
+async function rawRequest(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const method = params.query?.trim();
+  if (!method) {
+    throw new Error("query must contain the raw LSP method name");
+  }
+  const file =
+    params.file && params.file !== "*"
+      ? path.resolve(state.options.cwd, params.file)
+      : undefined;
+  let payload: unknown;
+  if (params.payload !== undefined) {
+    try {
+      payload = JSON.parse(params.payload);
+    } catch (error) {
+      throw new Error(`Invalid JSON in payload: ${errorText(error)}`, {
+        cause: error,
+      });
+    }
+  }
+  const server = await languageServerFor(state, file, signal);
+  let content: string | undefined;
+  if (file) {
+    content = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+  }
+  if (params.payload === undefined) {
+    payload = file
+      ? {
+          textDocument: { uri: fileToUri(file) },
+          ...(params.line !== undefined
+            ? {
+                position: resolvePosition(
+                  content ?? "",
+                  params.line,
+                  params.symbol,
+                ),
+              }
+            : {}),
+        }
+      : {};
+  }
+  try {
+    const result = await server.request(method, payload, signal);
+    return workspaceResult(
+      params,
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Render empty JSON-RPC results as their wire-level JSON null.
+      `${server.config.name} ← ${method}:\n${typeof result === "string" ? result : JSON.stringify(result ?? null, undefined, 2)}`,
+      true,
+      server.config.name,
+    );
+  } catch (error) {
+    return workspaceResult(
+      params,
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Render absent JSON-RPC params as JSON null in request diagnostics.
+      `LSP error from ${server.config.name} on ${method}: ${errorText(error)}\n  params: ${JSON.stringify(payload ?? null).slice(0, MAX_RAW_REQUEST_PAYLOAD_LENGTH)}`,
+      false,
+      server.config.name,
+    );
+  }
+}
+
+/**
+ * Collects diagnostics across eligible servers while rejecting changed-file results.
+ * @param state - Session configuration, pool, and tracked document paths.
+ * @param file - Absolute regular file path, limited to 16 MiB.
+ * @param signal - Cancellation shared across diagnostic sources.
+ * @param timeoutMs - Per-source wait; linter servers are capped at 3000 ms.
+ * @returns Normalized findings, responder count, source failures, and unverified sources.
+ * @throws If canceled, file access fails, the target is oversized or invalid, or its contents change during collection.
+ * @example With no matching servers, the report has responders: 0 and a failure rather than claiming a clean file.
+ */
+async function collectDiagnostics(
+  state: WorkspaceState,
+  file: string,
+  signal: AbortSignal,
+  timeoutMs = 10_000,
+): Promise<DiagnosticReport> {
+  const configs = serversForFile(state.config, file);
+  if (configs.length === 0) {
+    return {
+      file,
+      diagnostics: [],
+      failures: ["No language server found for file"],
+      unverifiedSources: [],
+      responders: 0,
+    };
+  }
+  const stat = await fs.stat(file);
+  if (!stat.isFile() || stat.size > MAX_DOCUMENT_BYTES) {
+    throw new Error(
+      `Diagnostics target is not a regular file below 16 MiB: ${file}`,
+    );
+  }
+  const original = await fs.readFile(file, "utf8");
+  const findings: Diagnostic[] = [];
+  const failures: string[] = [];
+  const unverifiedSources: string[] = [];
+  let responders = 0;
+  await concurrent(configs, async (config) => {
+    try {
+      signal.throwIfAborted();
+      let diagnostics: Diagnostic[];
+      if (isCliLinter(config)) {
+        diagnostics = normalizeDiagnostics(
+          await lintWithCli(config, file, signal),
+        );
+      } else {
+        const server = await state.pool.get(config, signal);
+        await openDocument(server, file, signal);
+        state.knownFiles.add(file);
+        const report = await server.diagnostics(
+          file,
+          signal,
+          config.isLinter
+            ? Math.min(MAX_LINTER_TIMEOUT_MS, timeoutMs)
+            : timeoutMs,
+        );
+        diagnostics = normalizeDiagnostics(report.items);
+        if (report.freshness === "unversioned") {
+          unverifiedSources.push(config.name);
+        }
+      }
+      findings.push(...diagnostics);
+      responders++;
+    } catch (error) {
+      failures.push(`${config.name}: ${errorText(error)}`);
+    }
+  });
+  signal.throwIfAborted();
+  if ((await fs.readFile(file, "utf8")) !== original) {
+    throw new Error(
+      `File changed during diagnostics; result discarded: ${file}`,
+    );
+  }
+  return {
+    file,
+    diagnostics: normalizeDiagnostics(findings),
+    failures,
+    unverifiedSources: unverifiedSources.sort((left, right) => {
+      if (left < right) {
+        return -1;
+      }
+      if (left > right) {
+        return 1;
+      }
+      return 0;
+    }),
+    responders,
+  };
+}
+
+/**
+ * Runs workspace checks or bounded file diagnostics without treating unavailable sources as clean.
+ * @param state - Session root, configuration, and diagnostic resources.
+ * @param params - Diagnostic target; "*" selects workspace checkers.
+ * @param signal - Combined cancellation for checks and target collection.
+ * @returns Diagnostic text with freshness and failure reporting; at least one file responder is required for success.
+ * @throws If no file targets exist, collection fails, or the request is canceled.
+ * @example A file target with no responding server returns an error result, not verified-clean output.
+ */
+async function diagnosticsResult(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  if (params.file === "*") {
+    const result = await runWorkspaceDiagnostics(
+      state.options.cwd,
+      signal,
+      Math.min(
+        MAX_ACTION_TIMEOUT_SECONDS,
+        Math.max(
+          MIN_ACTION_TIMEOUT_SECONDS,
+          params.timeout ?? DEFAULT_ACTION_TIMEOUT_SECONDS,
+        ),
+      ) * MILLISECONDS_PER_SECOND,
+    );
+    return {
+      ...result,
+      details: {
+        ...result.details,
+        action: params.action,
+        request: params,
+        success: !result.isError,
+      },
+    };
+  }
+  const targets = await diagnosticTargets(
+    params.file ?? "",
+    state.options.cwd,
+    signal,
+  );
+  if (targets.files.length === 0) {
+    return workspaceResult(params, `No files matched pattern: ${params.file}`);
+  }
+  const reports = await concurrent(targets.files, (file) =>
+    collectDiagnostics(
+      state,
+      file,
+      signal,
+      targets.files.length > 1
+        ? MULTI_FILE_DIAGNOSTIC_TIMEOUT_MS
+        : DEFAULT_DIAGNOSTIC_TIMEOUT_MS,
+    ),
+  );
+  const lines: string[] = [];
+  for (const report of reports) {
+    if (report.responders > 0) {
+      lines.push(
+        diagnosticsText(
+          report.file,
+          report.diagnostics,
+          state.options.cwd,
+          report.unverifiedSources,
+        ),
+      );
+    } else {
+      lines.push(
+        `${path.relative(state.options.cwd, report.file)}: all language servers failed; diagnostics unavailable`,
+      );
+    }
+    if (report.failures.length > 0) {
+      lines.push(`Server failures:\n${report.failures.join("\n")}`);
+    }
+  }
+  if (targets.truncated) {
+    lines.push(
+      "…diagnostics limited to 20 matched files; narrow the glob for remaining targets…",
+    );
+  }
+  return workspaceResult(
+    params,
+    lines.join("\n\n"),
+    reports.some((report) => report.responders > 0),
+  );
+}
+
+/**
+ * Formats a bounded list of symbols with relative paths and one-based positions.
+ * @param cwd - Workspace root used to shorten display paths.
+ * @param found - Normalized symbols in display order.
+ * @returns At most 200 symbol rows followed by an overflow notice when necessary.
+ * @example
+ * ```ts
+ * symbolLines("/project", [{
+ *   name: "Widget", kind: 5, container: "", file: "/project/src/widget.ts",
+ *   position: { line: 0, character: 6 }, depth: 0,
+ * }]);
+ * // ["Widget [kind 5] src/widget.ts:1:7"]
+ * ```
+ */
+function symbolLines(cwd: string, found: readonly DisplaySymbol[]): string[] {
+  const lines = found
+    .slice(0, MAX_SYMBOL_LINES)
+    .map(
+      (symbol) =>
+        `${"  ".repeat(symbol.depth)}${symbol.name}${symbol.container ? ` (${symbol.container})` : ""} [kind ${symbol.kind}] ${path.relative(cwd, symbol.file) || symbol.file}${symbol.position ? `:${symbol.position.line + 1}:${symbol.position.character + 1}` : " (location unresolved)"}`,
+    );
+  if (found.length > MAX_SYMBOL_LINES) {
+    lines.push(`…${found.length - MAX_SYMBOL_LINES} symbols elided…`);
+  }
+  return lines;
+}
+
+/**
+ * Searches available servers, filters and deduplicates symbols, and retains source failures.
+ * @param state - Session configuration, root, and shared pool.
+ * @param params - Workspace-symbol request with a nonempty query.
+ * @param signal - Cancellation for server startup and search.
+ * @returns Matching symbols with success when at least one server responds.
+ * @throws If the query is empty or no language server is configured and available.
+ * @example Searching for "Widget" also matches "widget" and emits duplicate cross-server locations only once.
+ */
+async function workspaceSymbols(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const query = params.query?.trim();
+  if (!query) {
+    throw new Error("query parameter required for workspace symbols");
+  }
+  const configs = selectedServers(state.config);
+  if (configs.length === 0) {
+    throw new Error("No language servers configured and available");
+  }
+  const responses = await concurrent(configs, async (config) => {
+    try {
+      const server = await state.pool.get(config, signal);
+      return {
+        symbols: symbols(
+          await server.request("workspace/symbol", { query }, signal),
+        ),
+        failure: "",
+      };
+    } catch (error) {
+      return { symbols: [], failure: `${config.name}: ${errorText(error)}` };
+    }
+  });
+  const unique = new Map<string, DisplaySymbol>();
+  const needle = query.toLowerCase();
+  for (const response of responses) {
+    for (const symbol of response.symbols) {
+      if (
+        ![symbol.name, symbol.container, symbol.file].some((field) =>
+          field.toLowerCase().includes(needle),
+        )
+      ) {
+        continue;
+      }
+      unique.set(
+        JSON.stringify([
+          symbol.name,
+          symbol.container,
+          symbol.kind,
+          symbol.file,
+          symbol.position,
+        ]),
+        symbol,
+      );
+    }
+  }
+  const found = [...unique.values()];
+  const failures = responses
+    .map((response) => response.failure)
+    .filter(Boolean);
+  const lines =
+    found.length > 0
+      ? [
+          `${found.length} workspace symbol(s) matching "${query}":`,
+          ...symbolLines(state.options.cwd, found),
+        ]
+      : [`No symbols matching "${query}"`];
+  if (failures.length > 0) {
+    lines.push("Server failures:", ...failures);
+  }
+  return workspaceResult(
+    params,
+    lines.join("\n"),
+    responses.some((response) => !response.failure),
+    configs.map((config) => config.name).join(", "),
+  );
+}
+
+/**
+ * Lists validated actions or resolves one explicitly selected action before applying it.
+ * @param state - Session state used for snapshots, edits, and reconciliation.
+ * @param params - Action request; apply requires a title match or numeric query.
+ * @param server - Server providing diagnostics and code actions.
+ * @param target - Absolute file, zero-based position, and operation cancellation.
+ * @returns Action list, selection feedback, or the selected action’s application result.
+ * @throws If peer action metadata is invalid, an action is disabled, or a request fails or is canceled.
+ * @example With apply: true and query "0", only the action at index zero is selected.
+ */
+async function codeActions(
+  state: WorkspaceState,
+  params: LspParams,
+  server: LanguageServer,
+  target: {
+    file: string;
+    position: Position;
+    signal: AbortSignal;
+  },
+): Promise<LspResult> {
+  const { file, position, signal } = target;
+  let diagnostics: Diagnostic[] = [];
+  let diagnosticWarning = "";
+  let diagnosticContextFailed = false;
+  try {
+    const report = await server.diagnostics(
+      file,
+      signal,
+      DEFAULT_DIAGNOSTIC_TIMEOUT_MS,
+    );
+    diagnostics = normalizeDiagnostics(report.items);
+    if (report.freshness === "unversioned") {
+      diagnosticWarning = `Diagnostic context freshness-unverified from ${server.config.name}: unversioned diagnostics may be stale.`;
+    }
+  } catch (error) {
+    signal.throwIfAborted();
+    diagnosticContextFailed = true;
+    diagnosticWarning = `Diagnostic context unavailable: ${errorText(error)}`;
+  }
+  const snapshots = documentSnapshots(state.knownFiles, server);
+  const response = await server.request(
+    "textDocument/codeAction",
+    {
+      textDocument: { uri: fileToUri(file) },
+      range: { start: position, end: position },
+      context: {
+        diagnostics,
+        triggerKind: 1,
+        ...(params.apply !== true && params.query
+          ? { only: [params.query] }
+          : {}),
+      },
+    },
+    signal,
+  );
+  if (response !== null && !Array.isArray(response)) {
+    throw new Error("Invalid code action response");
+  }
+  const actions = response === null ? [] : response.map(parseCodeAction);
+  if (actions.length === 0) {
+    return workspaceResult(
+      params,
+      `No code actions available${diagnosticWarning ? `\n${diagnosticWarning}` : ""}`,
+      !diagnosticContextFailed,
+      server.config.name,
+    );
+  }
+  const list =
+    actions
+      .map(
+        (candidate, index) =>
+          `${index}: [${candidate.kind}] ${candidate.title}${candidate.isPreferred ? " (preferred)" : ""}${candidate.disabledReason !== undefined ? ` (disabled: ${candidate.disabledReason})` : ""}`,
+      )
+      .join("\n") + (diagnosticWarning ? `\n${diagnosticWarning}` : "");
+  if (params.apply !== true) {
+    return workspaceResult(
+      params,
+      `${actions.length} action(s):\n${list}`,
+      true,
+      server.config.name,
+    );
+  }
+  const query = params.query?.trim();
+  if (!query) {
+    return workspaceResult(
+      params,
+      `query parameter required to select one action when apply=true. Available actions:\n${list}`,
+      false,
+      server.config.name,
+    );
+  }
+  const selected = CODE_ACTION_INDEX.test(query)
+    ? actions.filter((_action, index) => index === Number(query))
+    : actions.filter((candidate) =>
+        candidate.title.toLowerCase().includes(query.toLowerCase()),
+      );
+  let [action] = selected;
+  if (!action || selected.length !== 1) {
+    return workspaceResult(
+      params,
+      `${selected.length === 0 ? "No" : "Multiple"} code actions match "${query}". Select an exact numeric index:\n${list}`,
+      false,
+      server.config.name,
+    );
+  }
+  if (action.disabledReason !== undefined) {
+    throw new Error(`Code action disabled: ${action.disabledReason}`);
+  }
+  if (
+    !action.isCommand &&
+    action.edit === undefined &&
+    typeof server.capabilities.codeActionProvider === "object" &&
+    server.capabilities.codeActionProvider.resolveProvider
+  ) {
+    action = parseCodeAction(
+      await server.request("codeAction/resolve", action.raw, signal),
+    );
+  }
+  if (action.disabledReason !== undefined) {
+    throw new Error(`Resolved code action disabled: ${action.disabledReason}`);
+  }
+  return runCodeAction(state, params, action, {
+    server,
+    snapshots,
+    signal,
+    diagnosticWarning,
+  });
+}
+
+/**
+ * Commits a validated action’s edit before its command, preserving prior commits on command failure.
+ * @param state - Workspace state used to apply and reconcile edits.
+ * @param params - Original action request.
+ * @param action - Validated action and optional command.
+ * @param context - Executing server, observed document versions, cancellation, and diagnostic warning.
+ * @returns Action result; command failure includes any already-committed edit summary.
+ * @throws If edit processing rejects before an application result is available.
+ * @example If an edit succeeds but its command rejects, files stay changed and the result reports both the commit and failure.
+ */
+async function runCodeAction(
+  state: WorkspaceState,
+  params: LspParams,
+  action: ParsedCodeAction,
+  context: {
+    server: LanguageServer;
+    snapshots: ReadonlyMap<string, DocumentSnapshot>;
+    signal: AbortSignal;
+    diagnosticWarning: string;
+  },
+): Promise<LspResult> {
+  const { server, snapshots, signal, diagnosticWarning } = context;
+  const summary: string[] = [];
+  if (action.edit !== undefined) {
+    const result = await applyEdit(state, action.edit, server, {
+      documents: snapshots,
+      signal,
+    });
+    summary.push(...result.summary);
+    if (!result.applied) {
+      return editResult(
+        params,
+        result,
+        `Code action "${action.title}" failed`,
+        server.config.name,
+      );
+    }
+  }
+  const { command } = action;
+  if (command) {
+    try {
+      await server.request(
+        "workspace/executeCommand",
+        { command: command.command, arguments: command.arguments ?? [] },
+        signal,
+      );
+      summary.push(`Executed command: ${command.command}`);
+    } catch (error) {
+      return workspaceResult(
+        params,
+        `Code action command failed: ${errorText(error)}${summary.length > 0 ? `\nAlready applied:\n${summary.join("\n")}` : ""}`,
+        false,
+        server.config.name,
+      );
+    }
+  }
+  const text =
+    summary.length > 0
+      ? `Applied code action "${action.title}":\n${summary.join("\n")}`
+      : `Code action "${action.title}" has no edits or commands`;
+  return workspaceResult(
+    params,
+    `${text}${diagnosticWarning ? `\n${diagnosticWarning}` : ""}`,
+    true,
+    server.config.name,
+  );
+}
+
+/**
+ * Applies validated workspace edits and reconciles every committed path, including partial failures.
+ * @param state - Session root, server state, hooks, and diagnostics tracking.
+ * @param edit - Untrusted workspace edit passed to the shared validator and applier.
+ * @param server - Optional requesting server supplying current document versions.
+ * @param options - Existing edit options: observed documents, cancellation, preview, and rename rollback.
+ * @returns Application result, marked failed if committed paths cannot be synchronized.
+ * @throws If cancellation or the edit applier rejects.
+ * @example With preview: true, a rename is summarized without filesystem changes or server reconciliation.
+ */
+async function applyEdit(
+  state: WorkspaceState,
+  edit: unknown,
+  server: LanguageServer | undefined,
+  options: Omit<
+    Parameters<typeof applyWorkspaceEdit>[1],
+    "cwd" | "document"
+  > & {
+    signal: AbortSignal;
+  },
+): Promise<EditResult> {
+  options.signal.throwIfAborted();
+  const result = await applyWorkspaceEdit(edit, {
+    cwd: state.options.cwd,
+    ...options,
+    ...(server ? { document: (file: string) => server.document(file) } : {}),
+  });
+  if (!options.preview && result.changes.length > 0) {
+    const failures = await reconcileChanges(state, result.changes);
+    if (failures.length > 0) {
+      result.summary.push(
+        "Filesystem changes committed, but server synchronization failed:",
+        ...failures,
+      );
+      result.failureReason = [result.failureReason, ...failures]
+        .filter(Boolean)
+        .join("; ");
+      result.applied = false;
+    }
+  }
+  return result;
+}
+
+/**
+ * Formats edit summaries without concealing partial-application failures.
+ * @param params - Original tool request.
+ * @param result - Application outcome, including any committed changes and failure reason.
+ * @param label - Heading describing the edit operation.
+ * @param serverName - Optional attribution for the requesting server.
+ * @returns Bounded tool output whose success matches result.applied.
+ * @example An unapplied edit with failureReason "stale" produces an error result containing "Error: stale".
+ */
+function editResult(
+  params: LspParams,
+  result: EditResult,
+  label: string,
+  serverName?: string,
+): LspResult {
+  return workspaceResult(
+    params,
+    `${label}:\n${result.summary.length > 0 ? result.summary.join("\n") : "No file changes"}${result.failureReason ? `\nError: ${result.failureReason}` : ""}`,
+    result.applied,
+    serverName,
+  );
+}
+
+/**
+ * Follows committed rename chains for documents observed by one server.
+ * @param server - Observer whose open source documents select reopening.
+ * @param renamed - URI pairs in commit order, left unchanged.
+ * @param deleted - Final removed paths that must not be reopened.
+ * @returns Final absolute destination paths to reopen, without changing server state.
+ * @example An open a.ts renamed to b.ts then c.ts selects c.ts unless it was deleted.
+ */
+function renamedOpenFiles(
+  server: LanguageServer,
+  renamed: readonly { oldUri: string; newUri: string }[],
+  deleted: ReadonlySet<string>,
+): Set<string> {
+  const reopen = new Set<string>();
+  for (const pair of renamed) {
+    if (server.document(uriToFile(pair.oldUri))) {
+      let final = pair.newUri;
+      for (const next of renamed) {
+        if (next.oldUri === final) {
+          final = next.newUri;
+        }
+      }
+      if (!deleted.has(uriToFile(final))) {
+        reopen.add(uriToFile(final));
+      }
+    }
+  }
+  return reopen;
+}
+
+/**
+ * Synchronizes committed changes across live servers and invalidates deleted-path feedback.
+ * @param state - Workspace-owned documents, hooks, fingerprints, pool, and lifetime.
+ * @param changes - Executed filesystem changes in commit order, including partial results.
+ * @returns Per-server synchronization failures; committed filesystem changes are not rolled back.
+ * @example Deleting "/project/a.ts" removes its tracked diagnostics and closes it in live servers.
+ */
+async function reconcileChanges(
+  state: WorkspaceState,
+  changes: readonly ExecutedChange[],
+): Promise<string[]> {
+  const failures: string[] = [];
+  const changed = new Set<string>();
+  const deleted = new Set<string>();
+  const renamed: Array<{ oldUri: string; newUri: string }> = [];
+  for (const change of changes) {
+    for (const file of change.removedFiles ?? []) {
+      deleted.add(file);
+      changed.delete(file);
+    }
+    if (change.kind === "rename" && change.newFile) {
+      for (const file of change.files) {
+        const newFile = path.join(
+          change.newFile,
+          path.relative(change.file, file),
+        );
+        deleted.add(file);
+        changed.delete(file);
+        changed.add(newFile);
+        deleted.delete(newFile);
+        renamed.push({ oldUri: fileToUri(file), newUri: fileToUri(newFile) });
+      }
+    } else if (change.kind === "delete") {
+      for (const file of change.files) {
+        deleted.add(file);
+        changed.delete(file);
+      }
+    } else {
+      for (const file of change.files) {
+        changed.add(file);
+        deleted.delete(file);
+      }
+    }
+  }
+  for (const file of deleted) {
+    state.knownFiles.delete(file);
+    state.diagnosticFingerprints.delete(file);
+    state.hooks.get(file)?.abort(new Error("File was removed or renamed"));
+  }
+  for (const file of changed) {
+    state.knownFiles.add(file);
+  }
+  await concurrent(state.pool.clients(), async (server) => {
+    if (!server.isAlive) {
+      return;
+    }
+    const reopen = renamedOpenFiles(server, renamed, deleted);
+    try {
+      for (const file of deleted) {
+        await server.closeFile(file);
+      }
+      for (const file of changed) {
+        if (
+          server.document(file) ||
+          reopen.has(file) ||
+          selectedServers(state.config, file).some(
+            (config) => config.name === server.config.name,
+          )
+        ) {
+          await server.syncFile(file, undefined, state.lifetime.signal);
+          await server.saved(file);
+        }
+      }
+      const watched = [...deleted].map((file) => ({
+        uri: fileToUri(file),
+        type: 3,
+      }));
+      watched.push(
+        ...[...changed].map((file) => ({
+          uri: fileToUri(file),
+          type:
+            changes.some(
+              (change) => change.kind === "create" && change.file === file,
+            ) || reopen.has(file)
+              ? 1
+              : 2,
+        })),
+      );
+      if (watched.length > 0) {
+        await server.notify("workspace/didChangeWatchedFiles", {
+          changes: watched,
+        });
+      }
+      if (renamed.length > 0) {
+        await server.notify("workspace/didRenameFiles", { files: renamed });
+      }
+    } catch (error) {
+      failures.push(`${server.config.name}: ${errorText(error)}`);
+    }
+  });
+  return failures;
+}
+
+/**
+ * Validates rename paths and discovers the files and servers participating in the move.
+ * Filesystem and cancellation failures propagate before requesting any server edits.
+ * @example Moving "src" to "lib" pairs each source file with its matching destination.
+ */
+async function prepareFileRename(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+) {
+  if (!(params.file && params.new_name?.trim())) {
+    throw new Error(
+      "rename_file requires file (source) and new_name (destination)",
+    );
+  }
+  const source = path.resolve(state.options.cwd, params.file);
+  const destination = path.resolve(state.options.cwd, params.new_name);
+  if (source === destination) {
+    throw new Error("Source and destination paths are identical");
+  }
+  const sourceStat = await fs.lstat(source);
+  try {
+    await fs.lstat(destination);
+    throw new Error(`Destination already exists: ${destination}`);
+  } catch (error) {
+    if (!missing(error)) {
+      throw error;
+    }
+  }
+  const files = sourceStat.isDirectory()
+    ? await directoryFiles(source, signal)
+    : [source];
+  if (files.length === 0) {
+    throw new Error("No files to rename");
+  }
+  const pairs = files.map((file) => ({
+    oldUri: fileToUri(file),
+    newUri: fileToUri(path.join(destination, path.relative(source, file))),
+  }));
+  const configs = new Map<string, ServerConfig>();
+  for (const pair of pairs) {
+    for (const file of [uriToFile(pair.oldUri), uriToFile(pair.newUri)]) {
+      for (const config of selectedServers(state.config, file)) {
+        configs.set(config.name, config);
+      }
+    }
+  }
+  return { source, destination, sourceStat, files, pairs, configs };
+}
+
+/**
+ * Rejects conflicting server content before the caller records a snapshot.
+ * @param file - Absolute document path used in the failure diagnostic.
+ * @param snapshot - Incoming server snapshot, left unchanged.
+ * @param previous - Earlier server snapshot, if any; versions are server-specific.
+ * @throws If two servers report different content for the same path.
+ * @example Snapshots with equal text and different versions agree; different text throws.
+ */
+function assertSnapshotContentMatches(
+  file: string,
+  snapshot: Readonly<DocumentSnapshot>,
+  previous: Readonly<DocumentSnapshot> | undefined,
+): void {
+  if (previous && previous.content !== snapshot.content) {
+    throw new Error(`Servers disagree about current content of ${file}`);
+  }
+}
+
+/**
+ * Synchronizes selected rename sources, yielding each successful open before starting another.
+ * The consumer owns tracking and must record each yielded path before resuming this generator.
+ * @param config - Read-only workspace configuration selecting files for the peer.
+ * @param server - Peer whose selected documents are synchronized.
+ * @param files - Absolute source paths in discovery order.
+ * @param signal - Cancellation for file reads and synchronization.
+ * @returns Successful absolute paths in open order; no tracking or snapshots are changed.
+ * @throws On failed opens or cancellation after any earlier successful paths have been yielded.
+ * @example If b.ts fails after a.ts, the consumer has already received and tracked a.ts.
+ */
+async function* openRenameDocuments(
+  config: LspConfig,
+  server: LanguageServer,
+  files: readonly string[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void> {
+  for (const file of files) {
+    if (
+      selectedServers(config, file).some(
+        (candidate) => candidate.name === server.config.name,
+      )
+    ) {
+      await openDocument(server, file, signal);
+      yield file;
+    }
+  }
+}
+
+/**
+ * Requests and preview-validates one server's rename edits without committing files.
+ * @param cwd - Workspace root for edit validation.
+ * @param server - Synchronized peer contributing rename references.
+ * @param options - URI pairs, pre-request snapshots, and cancellation.
+ * @returns The validated peer edit, or protocol null when there are no edits.
+ * @throws On peer failures or invalid edits, preserving the existing validation message.
+ * @example A valid willRenameFiles edit is returned while its preview leaves files unchanged.
+ */
+async function validatedRenameEdit(
+  cwd: string,
+  server: LanguageServer,
+  options: {
+    pairs: readonly { oldUri: string; newUri: string }[];
+    documents: ReadonlyMap<string, DocumentSnapshot>;
+    signal: AbortSignal;
+  },
+  // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+): Promise<WorkspaceEdit | null> {
+  // biome-ignore lint/plugin/biome-rules/use-undefined: LSP willRenameFiles results explicitly allow null when no edits exist.
+  const response = await server.request<WorkspaceEdit | null>(
+    "workspace/willRenameFiles",
+    { files: options.pairs },
+    options.signal,
+  );
+  if (response === null) {
+    return response;
+  }
+  const validated = await applyWorkspaceEdit(response, {
+    cwd,
+    documents: options.documents,
+    document: (file) => server.document(file),
+    signal: options.signal,
+    preview: true,
+  });
+  if (!validated.applied) {
+    throw new Error(
+      validated.failureReason ?? "Invalid willRenameFiles workspace edit",
+    );
+  }
+  return response;
+}
+
+/**
+ * Collects validated server contributions in semantic-first order without committing files.
+ * Owns its edit buckets, annotations, snapshots, and notes; resource edits flush earlier text edits.
+ * Each successful open is yielded for the owner to track before another open or peer request.
+ * @param state - Read-only configuration, tracking for snapshots, and effect-owning server pool.
+ * @param preparation - Ordered absolute source files, URI pairs, and selected server configurations.
+ * @param signal - Cancellation for acquisition, synchronization, and peer requests.
+ * @returns Yields opened paths; returns ordered changes, annotations, snapshots, notes, and request failures.
+ * @throws On cancellation; unavailable servers and unsupported methods become notes, other peer failures are returned.
+ * @example Two servers replacing the same range retain the earlier semantic server's edit.
+ */
+async function* collectFileRenameEdits(
+  state: WorkspaceState,
+  preparation: {
+    files: readonly string[];
+    pairs: readonly { oldUri: string; newUri: string }[];
+    configs: ReadonlyMap<string, ServerConfig>;
+  },
+  signal: AbortSignal,
+): AsyncGenerator<
+  string,
+  {
+    documentChanges: NonNullable<WorkspaceEdit["documentChanges"]>;
+    annotations: NonNullable<WorkspaceEdit["changeAnnotations"]>;
+    snapshots: Map<string, DocumentSnapshot>;
+    notes: string[];
+    failures: string[];
+  }
+> {
+  const { files, pairs, configs } = preparation;
+  const buckets = new Map<string, Array<{ edit: TextEdit; server: string }>>();
+  const documentChanges: NonNullable<WorkspaceEdit["documentChanges"]> = [];
+  const annotations: NonNullable<WorkspaceEdit["changeAnnotations"]> = {};
+  const snapshots = new Map<string, DocumentSnapshot>();
+  const notes: string[] = [];
+  const failures: string[] = [];
+  /**
+   * Reads this collector's pending buckets in insertion order without consuming them.
+   * @returns Unversioned text changes; the collector owns appending them and clearing buckets.
+   * @example A bucket for a.ts yields one TextDocumentEdit preceding a later resource rename.
+   */
+  function* pendingTextChanges(): Generator<
+    NonNullable<WorkspaceEdit["documentChanges"]>[number],
+    void
+  > {
+    for (const [uri, values] of buckets) {
+      yield {
+        // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+        textDocument: { uri, version: null },
+        edits: values.map((value) => value.edit),
+      };
+    }
+  }
+  // Semantic servers precede linters. Preserve nonoverlapping contributions, but never apply two servers' conflicting replacements.
+  const selected = [...configs.values()].sort(
+    (a, b) => Number(Boolean(a.isLinter)) - Number(Boolean(b.isLinter)),
+  );
+  for (const config of selected) {
+    signal.throwIfAborted();
+    let server: LanguageServer;
+    try {
+      server = await state.pool.get(config, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      notes.push(`${config.name}: failed to start: ${errorText(error)}`);
+      continue;
+    }
+    try {
+      yield* openRenameDocuments(state.config, server, files, signal);
+      const serverSnapshots = documentSnapshots(state.knownFiles, server);
+      for (const [file, document] of serverSnapshots) {
+        assertSnapshotContentMatches(file, document, snapshots.get(file));
+        snapshots.set(file, document);
+      }
+      const response = await validatedRenameEdit(state.options.cwd, server, {
+        pairs,
+        documents: serverSnapshots,
+        signal,
+      });
+      if (response === null) {
+        continue;
+      }
+      for (const [id, annotation] of Object.entries(
+        response.changeAnnotations ?? {},
+      )) {
+        annotations[`${config.name}:${id}`] = annotation;
+      }
+      /**
+       * Namespaces annotation references using this contribution's server without changing the input.
+       * @param value - Protocol text edit or resource operation, with an optional annotationId.
+       * @returns The original value without an annotation, otherwise a namespaced copy.
+       * @example Server "ts" changes annotationId "fix" into "ts:fix".
+       */
+      const annotate = <T extends object>(value: T): T =>
+        "annotationId" in value
+          ? {
+              ...value,
+              annotationId: `${config.name}:${String(value.annotationId)}`,
+            }
+          : value;
+      /**
+       * Selects reference edits against read-only buckets, giving earlier servers precedence.
+       * @param uri - Document URI receiving the edits.
+       * @param incoming - Ordered edits from this contribution's server; inputs remain unchanged.
+       * @returns Accepted namespaced edits and discard notes for the collector to apply.
+       * @example A duplicate from a later server returns no accepted edit and one discard note.
+       */
+      const referenceEdits = (uri: string, incoming: readonly TextEdit[]) => {
+        const previous = buckets.get(uri) ?? [];
+        const accepted: Array<{ edit: TextEdit; server: string }> = [];
+        let discarded = 0;
+        for (const raw of incoming) {
+          const edit = annotate(raw);
+          /**
+           * Compares LSP zero-based positions without changing either input.
+           * @param a - First line/UTF-16 character position.
+           * @param b - Second line/UTF-16 character position.
+           * @returns Negative, zero, or positive for before, equal, or after.
+           * @example (0, 2) sorts before (1, 0).
+           */
+          const compare = (a: Position, b: Position): number =>
+            a.line - b.line || a.character - b.character;
+          const conflict = previous.find(
+            (value) =>
+              value.server !== config.name &&
+              ((compare(value.edit.range.start, edit.range.end) < 0 &&
+                compare(edit.range.start, value.edit.range.end) < 0) ||
+                (JSON.stringify(value.edit.range) ===
+                  JSON.stringify(edit.range) &&
+                  value.edit.newText === edit.newText)),
+          );
+          if (conflict) {
+            discarded++;
+          } else {
+            accepted.push({ edit, server: config.name });
+          }
+        }
+        return {
+          edits: accepted,
+          notes:
+            discarded > 0
+              ? [
+                  `${config.name}: discarded ${discarded} overlapping/duplicate reference edit(s) for ${uriToFile(uri)}; earlier semantic server takes precedence`,
+                ]
+              : [],
+        };
+      };
+      const changes =
+        response.documentChanges ??
+        Object.entries(response.changes ?? {}).map(([uri, edits]) => ({
+          // biome-ignore lint/plugin/biome-rules/use-undefined: LSP TextDocumentEdit requires null for an unversioned document identifier.
+          textDocument: { uri, version: null },
+          edits,
+        }));
+      for (const change of changes) {
+        if ("textDocument" in change) {
+          const { uri } = change.textDocument;
+          const contribution = referenceEdits(uri, change.edits as TextEdit[]);
+          const bucket = buckets.get(uri) ?? [];
+          bucket.push(...contribution.edits);
+          buckets.set(uri, bucket);
+          notes.push(...contribution.notes);
+        } else {
+          documentChanges.push(...pendingTextChanges());
+          buckets.clear();
+          documentChanges.push(annotate(change));
+        }
+      }
+    } catch (error) {
+      signal.throwIfAborted();
+      if (methodNotFound(error)) {
+        notes.push(`${config.name}: willRenameFiles is not supported`);
+        continue;
+      }
+      failures.push(`${config.name}: ${errorText(error)}`);
+    }
+  }
+  documentChanges.push(...pendingTextChanges());
+  return { documentChanges, annotations, snapshots, notes, failures };
+}
+
+/**
+ * Coordinates server rename edits before committing a file or directory move.
+ * Records each successful open immediately, retaining tracking when a later open fails.
+ * @param state - Session root, available servers, observed documents, and edit lifetime.
+ * @param params - Source file, new_name destination, and optional apply: false preview.
+ * @param signal - Cancellation for discovery, server requests, and application.
+ * @returns Rename summary, preserving server notes, validation failures, and partial-application errors.
+ * @throws If paths are invalid, the destination exists, documents disagree, directory contents change, or required work fails or is canceled.
+ * @example With file "a.ts", new_name "b.ts", and apply: false, the move is previewed without changing either path.
+ */
+async function renameFile(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  const { source, destination, sourceStat, files, pairs, configs } =
+    await prepareFileRename(state, params, signal);
+  const contributions = collectFileRenameEdits(
+    state,
+    { files, pairs, configs },
+    signal,
+  );
+  let contribution = await contributions.next();
+  while (!contribution.done) {
+    state.knownFiles.add(contribution.value);
+    contribution = await contributions.next();
+  }
+  const { documentChanges, annotations, snapshots, notes, failures } =
+    contribution.value;
+  signal.throwIfAborted();
+  if (failures.length > 0) {
+    return workspaceResult(
+      params,
+      `Aborted rename: workspace/willRenameFiles failed. No files moved.\n${failures.join("\n")}${notes.length > 0 ? `\nServer notes:\n${notes.join("\n")}` : ""}`,
+      false,
+    );
+  }
+  if (
+    sourceStat.isDirectory() &&
+    JSON.stringify(await directoryFiles(source, signal)) !==
+      JSON.stringify(files)
+  ) {
+    throw new Error(
+      "Directory contents changed while computing rename references; no files moved",
+    );
+  }
+  documentChanges.push({
+    kind: "rename",
+    oldUri: fileToUri(source),
+    newUri: fileToUri(destination),
+  });
+  const result = await applyEdit(
+    state,
+    { documentChanges, changeAnnotations: annotations },
+    undefined,
+    {
+      documents: snapshots,
+      signal,
+      preview: params.apply === false,
+      rollbackTextOnRenameFailure: true,
+    },
+  );
+  if (notes.length > 0) {
+    result.summary.push("Server notes:", ...notes);
+  }
+  return editResult(
+    params,
+    result,
+    `${params.apply === false ? "Rename preview" : "Rename"}: ${params.file} → ${params.new_name} (${files.length} file(s))`,
+  );
+}
+
+/**
+ * Reloads configuration, invalidates feedback, and restarts only affected server lifetimes.
+ * @param state - Mutable session configuration, pool, hooks, and diagnostic fingerprints.
+ * @param params - Reload request; a concrete file selects its first matching server.
+ * @param signal - Cancellation for loading and server reload operations.
+ * @returns Reload results and configuration warnings, including unavailable-server failures.
+ * @throws If configuration loading, pool disposal or creation, or cancellation prevents completion.
+ * @example Changing idleTimeoutMs from 60000 to 120000 disposes the old pool and uses the session factory to acquire its replacement.
+ */
+async function reloadWorkspace(
+  state: WorkspaceState,
+  params: LspParams,
+  signal: AbortSignal,
+): Promise<LspResult> {
+  for (const hook of state.hooks.values()) {
+    hook.abort(new Error("LSP configuration reloaded"));
+  }
+  state.diagnosticFingerprints.clear();
+  const previous = state.config;
+  const next = await loadLspConfig(
+    state.options.cwd,
+    state.options.agentDir,
+    state.options.trusted,
+  );
+  signal.throwIfAborted();
+  state.config = next;
+  if (previous.idleTimeoutMs !== next.idleTimeoutMs) {
+    await state.pool.dispose();
+    state.pool = state.poolFactory(
+      state.options.cwd,
+      next.idleTimeoutMs,
+      (edit, server) => applyServerEdit(state, edit, server),
+    );
+  }
+  const concrete =
+    params.file && params.file !== "*"
+      ? path.resolve(state.options.cwd, params.file)
+      : undefined;
+  const changed = previous.servers
+    .filter(
+      (old) =>
+        !next.servers.some(
+          (server) =>
+            server.name === old.name &&
+            JSON.stringify(server) === JSON.stringify(old),
+        ),
+    )
+    .map((server) => server.name);
+  if (concrete) {
+    const [selected] = selectedServers(state.config, concrete);
+    if (selected) {
+      changed.push(selected.name);
+    }
+  }
+  if (!next.settings.enabled) {
+    await state.pool.stop();
+    return workspaceResult(
+      params,
+      "LSP configuration reloaded; LSP is disabled.",
+    );
+  }
+  if (changed.length > 0) {
+    await state.pool.stop([...new Set(changed)]);
+  }
+  const configs = concrete
+    ? selectedServers(state.config, concrete).slice(0, 1)
+    : selectedServers(state.config);
+  if (configs.length === 0) {
+    return workspaceResult(
+      params,
+      `LSP configuration reloaded; no language servers available.${state.config.warnings.length > 0 ? `\n${state.config.warnings.join("\n")}` : ""}`,
+      false,
+    );
+  }
+  const results = await concurrent(configs, async (config) => {
+    try {
+      const server = await state.pool.get(config, signal);
+      if (
+        config.name === "rust-analyzer" ||
+        path.basename(config.command) === "rust-analyzer"
+      ) {
+        try {
+          // biome-ignore lint/plugin/biome-rules/use-undefined: rust-analyzer reloadWorkspace is a parameterless JSON-RPC request.
+          await server.request("rust-analyzer/reloadWorkspace", null, signal);
+        } catch (error) {
+          if (!methodNotFound(error)) {
+            throw error;
+          }
+        }
+      }
+      try {
+        await server.notify("workspace/didChangeConfiguration", {
+          settings: config.settings ?? {},
+        });
+      } catch (error) {
+        signal.throwIfAborted();
+        await state.pool.stop([config.name]);
+        await state.pool.get(config, signal);
+        return {
+          success: true,
+          text: `${config.name}: restarted after configuration notification failed (${errorText(error)})`,
+        };
+      }
+      return { success: true, text: `${config.name}: reloaded` };
+    } catch (error) {
+      return {
+        success: false,
+        text: `${config.name}: reload failed: ${errorText(error)}`,
+      };
+    }
+  });
+  return workspaceResult(
+    params,
+    [...results.map((result) => result.text), ...state.config.warnings].join(
+      "\n",
+    ),
+    results.some((result) => result.success),
+    configs.map((config) => config.name).join(", "),
+  );
+}
+
+/**
+ * Detects feedback invalidated by a newer file hook or cancellation of its caller or session.
+ * @param state - Owner of current hook identity and session lifetime.
+ * @param file - Absolute path whose hook owns the feedback.
+ * @param controller - Hook identity; its own timeout remains reportable rather than suppressed.
+ * @param callerSignal - Optional cancellation of the host feedback request.
+ * @returns Whether output must be discarded instead of reported to the successful host operation.
+ * @example A newer write replacing the file's controller suppresses both notes and caught failures.
+ */
+function mutationFeedbackSuperseded(
+  state: WorkspaceState,
+  file: string,
+  controller: AbortController,
+  callerSignal?: AbortSignal,
+): boolean {
+  return (
+    state.hooks.get(file) !== controller ||
+    state.lifetime.signal.aborted ||
+    callerSignal?.aborted === true
+  );
+}
+
+/**
+ * Inspects a host-mutated path without reading content or changing workspace state.
+ * @param file - Absolute path to stat; symbolic links are followed by the filesystem.
+ * @returns "file" for any regular file, including empty files; "missing" for ENOENT;
+ * "non-file" for directories and other non-regular targets. The caller owns reconciliation and tracking.
+ * @throws All stat failures other than those recognized by missing(), including ENOTDIR.
+ * @example An empty a.ts selects "file"; an absent a.ts selects "missing"; a directory selects "non-file".
+ */
+async function inspectMutationFeedbackTarget(
+  file: string,
+): Promise<"file" | "missing" | "non-file"> {
+  try {
+    const stat = await fs.stat(file);
+    return stat.isFile() ? "file" : "non-file";
+  } catch (error) {
+    if (!missing(error)) {
+      throw error;
+    }
+    return "missing";
+  }
+}
+
+/**
+ * Formats optional feedback failure without changing signals, hooks, or workspace state.
+ * @param displayPath - Failed file's path already made relative to the workspace root.
+ * @param source - Host operation that already succeeded and must not be reversed.
+ * @param signal - Combined feedback cancellation; an aborted signal's reason takes precedence.
+ * @param error - Caught failure used only when the signal is not aborted.
+ * @returns Failure text for the owner to report after checking whether feedback was superseded.
+ * @throws If the selected failure value cannot be converted to text.
+ * @example A timeout reason replaces a caught stat error while still stating that the host write succeeded.
+ */
+function mutationFeedbackFailureText(
+  displayPath: string,
+  source: "write" | "edit",
+  signal: AbortSignal,
+  error: unknown,
+): string {
+  return `${displayPath}: LSP feedback unavailable (${errorText(signal.aborted ? signal.reason : error)}). The host ${source} already succeeded.`;
+}
+
+/**
+ * Supersedes older per-file feedback while unrelated files run with bounded concurrency.
+ * Owns hook/timer cleanup, missing-file reconciliation, file tracking, and diagnostic fingerprints.
+ * Regular files, including empty ones, are processed; non-files are skipped and ENOENT reconciles deletion.
+ * Other stat and document failures become feedback, with hook timeout reasons taking precedence.
+ * @param state - Session-owned hooks, diagnostics history, documents, and pool.
+ * @param paths - Host-mutated paths resolved relative to the workspace root.
+ * @param source - Successful host operation; only "write" permits formatting.
+ * @param callerSignal - Optional cancellation for this feedback request.
+ * @returns Bounded optional feedback; stale or canceled work is suppressed without changing the host result.
+ * @example For the same file, a second write aborts the first pending feedback hook; an edit never triggers formatting.
+ */
+async function mutationFeedback(
+  state: WorkspaceState,
+  paths: readonly string[],
+  source: "write" | "edit",
+  callerSignal?: AbortSignal,
+): Promise<LspResult | undefined> {
+  const files = [
+    ...new Set(paths.map((file) => path.resolve(state.options.cwd, file))),
+  ];
+  const targets = files.map((file) => {
+    state.hooks
+      .get(file)
+      ?.abort(new Error("Superseded by a newer file mutation"));
+    const controller = new AbortController();
+    state.hooks.set(file, controller);
+    return { file, controller };
+  });
+  const feedback = await concurrent(targets, async ({ file, controller }) => {
+    if (state.hooks.get(file) !== controller) {
+      return "";
+    }
+    const timer = setTimeout(
+      () =>
+        controller.abort(
+          new Error("LSP mutation feedback timed out after 15s"),
+        ),
+      MUTATION_FEEDBACK_TIMEOUT_MS,
+    );
+    const signal = AbortSignal.any([
+      state.lifetime.signal,
+      controller.signal,
+      ...(callerSignal ? [callerSignal] : []),
+    ]);
+    try {
+      signal.throwIfAborted();
+      switch (await inspectMutationFeedbackTarget(file)) {
+        case "non-file":
+          return "";
+        case "missing": {
+          const failures = await reconcileChanges(state, [
+            { kind: "delete", file, files: [file] },
+          ]);
+          return failures.join("\n");
+        }
+        case "file":
+          break;
+        default:
+          throw new Error("Invalid mutation feedback target");
+      }
+      state.knownFiles.add(file);
+      const { notes, report } = await gatherMutationDocumentFeedback(
+        state,
+        file,
+        source,
+        signal,
+      );
+      if (report) {
+        if (state.hooks.get(file) !== controller) {
+          return "";
+        }
+        signal.throwIfAborted();
+        const diagnosticFeedback = mutationDiagnosticFeedback(
+          state,
+          file,
+          report,
+        );
+        notes.push(...diagnosticFeedback.notes);
+        if (report.responders > 0) {
+          state.diagnosticFingerprints.set(
+            file,
+            diagnosticFeedback.fingerprint,
+          );
+        }
+      }
+      if (mutationFeedbackSuperseded(state, file, controller, callerSignal)) {
+        return "";
+      }
+      return notes.join("\n");
+    } catch (error) {
+      if (mutationFeedbackSuperseded(state, file, controller, callerSignal)) {
+        return "";
+      }
+      return mutationFeedbackFailureText(
+        path.relative(state.options.cwd, file),
+        source,
+        signal,
+        error,
+      );
+    } finally {
+      clearTimeout(timer);
+      if (state.hooks.get(file) === controller) {
+        state.hooks.delete(file);
+      }
+    }
+  });
+  const text = feedback.filter(Boolean).join("\n\n");
+  return text
+    ? {
+        text:
+          text.length > MAX_MUTATION_FEEDBACK_TEXT_LENGTH
+            ? `${text.slice(0, MAX_MUTATION_FEEDBACK_TEXT_LENGTH)}\n…LSP feedback truncated…`
+            : text,
+        details: { action: "afterMutation", source },
+      }
+    : undefined;
+}
+
+/**
+ * Synchronizes a surviving host-mutated document, optionally formats it, and gathers diagnostics.
+ * The caller tracks the file before entry and owns hook freshness checks and diagnostic history.
+ * @param state - Read-only configuration and access to effect-owning synchronization, formatting, and diagnostics.
+ * @param file - Existing absolute document path already tracked by the owner.
+ * @param source - Successful host operation; only writes may trigger configured formatting.
+ * @param signal - Combined hook, caller, and session cancellation for document effects.
+ * @returns Synchronization/formatting notes and an optional diagnostic report, without changing fingerprints.
+ * @throws On synchronization setup, diagnostic, or cancellation failures; formatting failures become notes.
+ * @example An edit gathers configured diagnostics without format-on-write; the owner deduplicates its report.
+ */
+async function gatherMutationDocumentFeedback(
+  state: WorkspaceState,
+  file: string,
+  source: "write" | "edit",
+  signal: AbortSignal,
+): Promise<{ notes: string[]; report?: DiagnosticReport }> {
+  const notes: string[] = [];
+  const relevant = serversForFile(state.config, file).length > 0;
+  notes.push(...(await synchronizeMutationDocuments(state, file, signal)));
+  if (relevant && source === "write" && state.config.settings.formatOnWrite) {
+    try {
+      notes.push(...(await formatDocument(state, file, signal)));
+    } catch (error) {
+      notes.push(`Formatting failed: ${errorText(error)}`);
+    }
+  }
+  if (
+    relevant &&
+    (source === "write"
+      ? state.config.settings.diagnosticsOnWrite
+      : state.config.settings.diagnosticsOnEdit)
+  ) {
+    return { notes, report: await collectDiagnostics(state, file, signal) };
+  }
+  return { notes };
+}
+
+/**
+ * Synchronizes a host-mutated file with live servers already observing or selected for it.
+ * Saves follow successful syncs; per-server failures become notes without stopping later servers.
+ * @example A failed sync adds a synchronization note and skips that server's saved notification.
+ */
+async function synchronizeMutationDocuments(
+  state: WorkspaceState,
+  file: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const notes: string[] = [];
+  for (const server of state.pool.clients()) {
+    if (
+      !(
+        server.isAlive &&
+        (server.document(file) ||
+          selectedServers(state.config, file).some(
+            (config) => config.name === server.config.name,
+          ))
+      )
+    ) {
+      continue;
+    }
+    try {
+      await server.syncFile(file, undefined, signal);
+      await server.saved(file);
+    } catch (error) {
+      notes.push(
+        `${server.config.name}: synchronization failed: ${errorText(error)}`,
+      );
+    }
+  }
+  return notes;
+}
+
+/**
+ * Computes formatting before applying it only to an unchanged original document.
+ * @param state - Session configuration, root, server pool, and tracked snapshots.
+ * @param file - Absolute file path to format after a successful host write.
+ * @param signal - Cancellation for formatting and guarded application.
+ * @returns Formatting notes, no notes for unchanged content, or an unavailable-formatter explanation.
+ * @throws If file access, formatting, cancellation, or guarded edit application fails.
+ * @example If a formatter returns the original file contents, no edit is applied and the result is [].
+ */
+async function formatDocument(
+  state: WorkspaceState,
+  file: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const configs = serversForFile(state.config, file);
+  const content = await fs.readFile(file, "utf8");
+  const cli = configs.find(
+    (config) => isCliLinter(config) && !SWIFTLINT_COMMAND.test(config.command),
+  );
+  if (cli) {
+    const formatted = await formatWithCli(cli, file, content, signal);
+    signal.throwIfAborted();
+    if (formatted === content) {
+      return [];
+    }
+    const lines = content.split(ANY_LINE_BREAK);
+    const last = lines.at(-1) ?? "";
+    const edit: WorkspaceEdit = {
+      changes: {
+        [fileToUri(file)]: [
+          {
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: lines.length - 1, character: last.length },
+            },
+            newText: formatted,
+          },
+        ],
+      },
+    };
+    const result = await applyEdit(state, edit, undefined, {
+      documents: new Map([[file, { version: 0, content }]]),
+      signal,
+    });
+    if (!result.applied) {
+      throw new Error(result.failureReason ?? "Formatting edit failed");
+    }
+    return [
+      `Formatted ${path.relative(state.options.cwd, file)} with ${cli.name}`,
+    ];
+  }
+  for (const config of configs.filter((candidate) => !isCliLinter(candidate))) {
+    const server = await state.pool.get(config, signal);
+    if (!server.capabilities.documentFormattingProvider) {
+      continue;
+    }
+    const openedContent = await openDocument(server, file, signal);
+    state.knownFiles.add(file);
+    if (openedContent !== content) {
+      throw new Error(
+        "File changed before formatting; stale formatter result discarded",
+      );
+    }
+    const snapshots = documentSnapshots(state.knownFiles, server);
+    // biome-ignore lint/plugin/biome-rules/use-undefined: LSP formatting results explicitly allow null when no edits exist.
+    const response = await server.request<TextEdit[] | null>(
+      "textDocument/formatting",
+      {
+        textDocument: { uri: fileToUri(file) },
+        options: await formattingOptions(file, content, state.options.cwd),
+      },
+      signal,
+    );
+    if (response === null) {
+      return [];
+    }
+    const result = await applyEdit(
+      state,
+      { changes: { [fileToUri(file)]: response } },
+      server,
+      { documents: snapshots, signal },
+    );
+    if (!result.applied) {
+      throw new Error(result.failureReason ?? "Formatting edit failed");
+    }
+    return result.changes.length > 0
+      ? [
+          `Formatted ${path.relative(state.options.cwd, file)} with ${config.name}`,
+        ]
+      : [];
+  }
+  return [
+    "Formatting unavailable: no matching formatting-capable server is installed",
+  ];
+}
+
+/** One trusted Pi session owns its lazy language servers, diagnostics and mutation hooks. */
+export class LspWorkspace {
+  readonly #state: WorkspaceState;
+
+  /**
+   * Initializes private session state and acquires its owned pool from the supplied factory.
+   * @param options - Trust decision and configuration roots for the session.
+   * @param config - Already-loaded effective LSP configuration.
+   * @param poolFactory - Acquires a pool owned by this workspace, also retained for reloads.
+   * @throws If the factory cannot create the pool.
+   * @example A cwd of "." is resolved before calling the factory; the default pool starts no servers here.
+   */
+  private constructor(
+    options: WorkspaceOptions,
+    config: LspConfig,
+    poolFactory: typeof createPool,
+  ) {
+    const normalizedOptions = { ...options, cwd: path.resolve(options.cwd) };
+    const state: WorkspaceState = {
+      options: normalizedOptions,
+      poolFactory,
+      config,
+      lifetime: new AbortController(),
+      jobs: new Set(),
+      knownFiles: new Set(),
+      hooks: new Map(),
+      diagnosticFingerprints: new Map(),
+      disposePromise: undefined,
+      pool: poolFactory(
+        normalizedOptions.cwd,
+        config.idleTimeoutMs,
+        (edit, server) => applyServerEdit(state, edit, server),
+      ),
+    };
+    this.#state = state;
+  }
+
+  /**
+   * Loads configuration, acquires an owned pool, and optionally warms servers.
+   * The caller must dispose the workspace; it also disposes pools replaced on reload.
+   * @param options - Workspace root, agent configuration directory, and trust decision.
+   * @param poolFactory - Acquires pools for initial creation and idle-timeout changes; defaults to real session-owned language servers.
+   * @returns One workspace with eager-startup failures retained as warnings.
+   * @throws If configuration loading or pool creation fails.
+   * @example
+   * ```ts
+   * const workspace = await LspWorkspace.create({
+   *   cwd: "/project", agentDir: "/agent", trusted: false,
+   * }); // The default pool starts no servers in an untrusted project.
+   * await workspace.dispose(); // Releases the session-owned pool and idle timer.
+   * ```
+   */
+  static async create(
+    options: WorkspaceOptions,
+    poolFactory: typeof createPool = createPool,
+  ): Promise<LspWorkspace> {
+    const workspace = new LspWorkspace(
+      options,
+      await loadLspConfig(options.cwd, options.agentDir, options.trusted),
+      poolFactory,
+    );
+    if (
+      options.trusted &&
+      workspace.settings.enabled &&
+      !workspace.settings.lazy
+    ) {
+      const notes = await concurrent(
+        selectedServers(workspace.#state.config),
+        async (config) => {
+          try {
+            await workspace.#state.pool.get(
+              config,
+              workspace.#state.lifetime.signal,
+            );
+            return "";
+          } catch (error) {
+            return `${config.name}: eager startup failed: ${errorText(error)}`;
+          }
+        },
+      );
+      workspace.#state.config.warnings.push(...notes.filter(Boolean));
+    }
+    return workspace;
+  }
+
+  /**
+   * Exposes the current effective settings, including configuration reloads.
+   * @returns The settings object owned by the current configuration.
+   * @example After reloading enabled: false, settings.enabled is false.
+   */
+  get settings(): LspSettings {
+    return this.#state.config.settings;
+  }
+
+  /**
+   * Exposes configuration and eager-startup warnings without starting servers.
+   * @returns Current warnings in their recorded order.
+   * @example
+   * With lazy: false, if "typescript-native" startup rejects with Error("not found"),
+   * workspace.warnings includes "typescript-native: eager startup failed: not found".
+   */
+  get warnings(): readonly string[] {
+    return this.#state.config.warnings;
+  }
+
+  /**
+   * Tracks one deadline-bound tool action until it settles.
+   * @param params - Requested action and optional deadline in seconds.
+   * @param signal - Optional caller cancellation.
+   * @returns Tool result with operational failures reported as errors rather than thrown.
+   * @example execute({ action: "status" }) reports configured and existing server state without starting a server.
+   */
+  execute(params: LspParams, signal?: AbortSignal): Promise<LspResult> {
+    const state = this.#state;
+    const job = executeAction(state, params, signal);
+    state.jobs.add(job);
+    job.then(
+      () => state.jobs.delete(job),
+      () => state.jobs.delete(job),
+    );
+    return job;
+  }
+
+  /**
+   * Synchronizes successful host mutations with bounded optional feedback; only writes can format.
+   * @param paths - Paths actually committed by the host write or edit.
+   * @param source - Successful host operation.
+   * @param signal - Optional cancellation of feedback without reverting the host operation.
+   * @returns Optional diagnostic/formatting feedback, bounded by a 16-second outer timeout.
+   * @example afterMutation(["a.ts"], "edit") can synchronize and diagnose a.ts but never format it.
+   */
+  afterMutation(
+    paths: readonly string[],
+    source: "write" | "edit",
+    signal?: AbortSignal,
+  ): Promise<LspResult | undefined> {
+    const state = this.#state;
+    if (
+      !(state.options.trusted && state.config.settings.enabled) ||
+      state.lifetime.signal.aborted
+    ) {
+      return Promise.resolve(undefined);
+    }
+    const deadline = new AbortController();
+    const combined = AbortSignal.any([
+      deadline.signal,
+      ...(signal ? [signal] : []),
+    ]);
+    const job = mutationFeedback(state, paths, source, combined);
+    state.jobs.add(job);
+    job.then(
+      () => state.jobs.delete(job),
+      () => state.jobs.delete(job),
+    );
+    const timeout = new Promise<LspResult>((resolve) => {
+      const timer = setTimeout(() => {
+        deadline.abort(new Error("LSP mutation feedback timed out"));
+        resolve({
+          text: `LSP feedback timed out; the host ${source} already succeeded. Cancellation was requested for pending LSP work.`,
+          details: { action: "afterMutation", source },
+        });
+      }, AFTER_MUTATION_TIMEOUT_MS);
+      job.then(
+        () => clearTimeout(timer),
+        () => clearTimeout(timer),
+      );
+    });
+    return Promise.race([job, timeout]);
+  }
+
+  /**
+   * Idempotently cancels feedback, disposes servers, and waits for tracked jobs.
+   * @returns The same disposal promise on repeated calls; completion clears tracked session state.
+   * @throws If the owned server pool cannot finish disposal.
+   * @example Calling dispose() twice requests cancellation once and returns the same promise.
+   */
+  dispose(): Promise<void> {
+    const state = this.#state;
+    if (!state.disposePromise) {
+      state.lifetime.abort(new Error("LSP workspace disposed"));
+      for (const hook of state.hooks.values()) {
+        hook.abort(new Error("LSP workspace disposed"));
+      }
+      state.disposePromise = (async () => {
+        await state.pool.dispose();
+        await Promise.allSettled([...state.jobs]);
+        state.hooks.clear();
+        state.knownFiles.clear();
+        state.diagnosticFingerprints.clear();
+      })();
+    }
+    return state.disposePromise;
+  }
+}
+
+/**
+ * Computes diagnostic feedback and its next deduplication fingerprint without updating history.
+ * @param state - Read-only workspace root, deduplication setting, and previous diagnostic fingerprints.
+ * @param file - Absolute document path selecting history and rendering workspace-relative output.
+ * @param report - Collected findings, freshness sources, failures, and successful responder count.
+ * @returns Notes and a candidate fingerprint; the current hook's owner records it only if a source responded.
+ * @example A clean response after earlier findings emits a clearing diagnostic message and hadFindings: false.
+ */
+function mutationDiagnosticFeedback(
+  state: WorkspaceState,
+  file: string,
+  report: DiagnosticReport,
+) {
+  const notes: string[] = [];
+  const unverified = report.unverifiedSources.length > 0;
+  const fingerprint = JSON.stringify([
+    report.unverifiedSources,
+    report.diagnostics.map((item) => [item.range, item.severity, item.message]),
+  ]);
+  const previous = state.diagnosticFingerprints.get(file);
+  if (report.responders > 0) {
+    const hasFeedback =
+      report.diagnostics.length > 0 ||
+      unverified ||
+      previous?.hadFindings ||
+      previous?.unverified;
+    if (
+      (!state.config.settings.diagnosticsDeduplicate ||
+        previous?.fingerprint !== fingerprint) &&
+      hasFeedback
+    ) {
+      notes.push(
+        diagnosticsText(
+          file,
+          report.diagnostics,
+          state.options.cwd,
+          report.unverifiedSources,
+        ),
+      );
+    }
+  }
+  if (report.failures.length > 0) {
+    notes.push(
+      `Diagnostics ${report.responders ? "partially unavailable" : "unavailable"}:\n${report.failures.join("\n")}`,
+    );
+  }
+  return {
+    notes,
+    fingerprint: {
+      fingerprint,
+      hadFindings: report.diagnostics.length > 0,
+      unverified,
+    },
+  };
+}

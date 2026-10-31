@@ -6,8 +6,10 @@ This repository contains personal configuration and customized extensions for
 
 ## Repository layout
 
-- `apps/` contains **Pi extension packages only**. Each extension is a complete
-  package with its own `package.json`, entrypoint, and supporting files.
+- `apps/` contains **Pi extension packages only**. Each package keeps metadata at
+  its root, a thin `src/index.ts` factory and domain-owned implementation with
+  colocated tests under `src/`, shared test fixtures under each domain's `test/`,
+  and static resources under `assets/` when needed.
 - `packages/` contains shared libraries and development tooling.
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
@@ -85,13 +87,17 @@ repository.
    directories; do not copy this repository's settings or its `../../apps` entry
    into your independent configuration.
 
-Copying only `index.ts` is insufficient for extensions with supporting modules.
+Copying only `src/index.ts` is insufficient for extensions with supporting modules.
 
 For a one-off run from the repository root after installing workspace dependencies:
 
 ```sh
-pi -e "$(realpath apps/extension-manager/index.ts)"
+pi -e "$(realpath apps/extension-manager/src/index.ts)"
 ```
+
+Direct file references must use `apps/<package>/src/index.ts`; root `index.ts`
+entrypoints are no longer provided. Directory-based extension settings need no
+change because Pi follows each package's `pi.extensions` manifest.
 
 See Pi's [extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 for other loading options.
@@ -162,7 +168,7 @@ Narrow a run to one file while working on the extension manager panel:
 
 ```bash
 bun test apps/extension-manager
-bun test apps/extension-manager/panel.test.ts
+bun test apps/extension-manager/src/panel/panel.test.ts
 ```
 
 ### Coverage
