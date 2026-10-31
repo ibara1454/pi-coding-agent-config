@@ -68,13 +68,15 @@ describe("registerModelBash", () => {
     expect(f.events.listenerCount("exit")).toBe(0);
     expect(f.events.listenerCount("error")).toBe(0);
   });
-  it("should reject nonzero results without retaining stream listeners", async () => {
+  it("should report nonzero exits as errors without retaining stream listeners", async () => {
     const nonzeroExit = 7;
     const f = streamFixture((events) => {
       events.emit("data", Buffer.from("COMMAND_FAILED"));
       events.emit("exit", { exitCode: nonzeroExit });
     });
-    await expect(executeRegisteredBash(f)).rejects.toBeInstanceOf(Error);
+    const result = await executeRegisteredBash(f);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toHaveProperty("exit_code", nonzeroExit);
     expect(f.events.listenerCount("data")).toBe(0);
     expect(f.events.listenerCount("exit")).toBe(0);
     expect(f.events.listenerCount("error")).toBe(0);
