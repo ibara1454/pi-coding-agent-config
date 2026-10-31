@@ -8,7 +8,10 @@ import type {
   Model,
   Provider,
 } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import {
+  createAssistantMessageEventStream,
+  normalizeContext,
+} from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import providerBaseUrlOverrides from "./index.ts";
 
@@ -531,7 +534,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.id).toBe("snapshot-provider");
     expect(wrapped.stream(model, context)).toBe(results.stream);
     expect(required(calls.stream[0]).model.baseUrl).toBe(
@@ -626,7 +629,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.stream(accessorModel, context)).toBe(results.stream);
     const delegatedModel = required(calls.stream[0]).model;
     expect(delegatedModel.api).toBe("openai-responses");
@@ -660,7 +663,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     let thrown: unknown;
     try {
       wrapped.stream(model, context);
@@ -850,7 +853,7 @@ describe("providerBaseUrlOverrides", () => {
     const { registry } = makeRegistry([originalModel], { transport: provider });
     await triggerSessionStart(harness, registry);
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     const streamOptions = { temperature: 0.2 };
     const simpleOptions = {
       reasoning: "high",
@@ -1043,7 +1046,7 @@ describe("providerBaseUrlOverrides", () => {
     const { registry } = makeRegistry([originalModel], { azure: provider });
     await triggerSessionStart(harness, registry);
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     const handle: Parameters<FetchDeferred>[1] = {
       provider: "azure",
       modelId: originalModel.id,
@@ -1170,7 +1173,7 @@ describe("providerBaseUrlOverrides", () => {
     await triggerSessionStart(harness, registry);
 
     const wrapped = required(harness.registrations[0]);
-    const context: Parameters<Provider["stream"]>[1] = { messages: [] };
+    const context = normalizeContext({ messages: [] });
     expect(wrapped.stream(model, context, callerOptions)).toBe(results.stream);
     expect(required(calls.stream[0]).options).toEqual({
       apiKey: "key",

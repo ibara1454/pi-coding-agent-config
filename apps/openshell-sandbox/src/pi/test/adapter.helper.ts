@@ -3,6 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { SanitizedRuntimeStatus } from "../../runtime/index.ts";
@@ -27,9 +28,9 @@ export function adapterFixture() {
   const setStatus = mock((_key: string, _text?: string) => undefined);
   const sendMessage = mock((_message: { content: string }) => undefined);
   const confirm = mock(async () => false);
-  const context: ExtensionCommandContext = Object.assign(
+  const context: ExtensionCommandContext & ExtensionToolContext = Object.assign(
     // biome-ignore lint/plugin/biome-rules/use-undefined: Object.create requires null for a prototype-free Pi context fixture.
-    Object.create(null) as ExtensionCommandContext,
+    Object.create(null) as ExtensionCommandContext & ExtensionToolContext,
     {
       cwd: "/project",
       isProjectTrusted: () => true,

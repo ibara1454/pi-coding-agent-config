@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace to intercept host effects.
@@ -105,7 +106,7 @@ function fixture() {
         params,
         undefined,
         undefined,
-        context as ExtensionContext,
+        context as ExtensionToolContext,
       );
     },
   };
