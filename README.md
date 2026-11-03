@@ -14,8 +14,47 @@ This repository contains personal configuration and customized extensions for
 
 ## Installation
 
-Install [Pi](https://github.com/earendil-works/pi) and [Bun](https://bun.com/)
-separately, then choose a setup below.
+### Install a compatible Pi version
+
+The extensions' Pi peer dependencies declare `^0.84.1`:
+**`>=0.84.1 <0.85.0`**, excluding prereleases. Install **Pi `0.84.2`** to match
+`pi-coding-agent`, `pi-ai`, and `pi-tui` in [`bun.lock`](bun.lock).
+The range declares compatibility; it does not guarantee every patch was tested.
+Versions outside it are unsupported. Avoid `@latest` and independent Pi upgrades;
+recheck the pin when updating this repository.
+
+Install [Bun](https://bun.com/docs/installation) **1.4.4**, matching the root
+`packageManager`, for either option.
+
+#### Option 1: Bun-only Pi
+
+No Node.js or npm installation is required:
+
+```sh
+export PATH="$(bun pm bin -g):$PATH"
+bun install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.2
+bun run --bun pi --version
+```
+
+Use `bun run --bun pi` to override Pi's Node shebang.
+
+#### Option 2: Node-based Pi
+
+Install [Node.js](https://nodejs.org/en/download) **22.19.0+**, including npm:
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.2
+pi --version
+```
+
+For either option, the version check must print `0.84.2`. An existing npm
+installation reporting this version needs no reinstall.
+
+The CLI examples below use `pi`; replace it with `bun run --bun pi` for the
+Bun-only option. Both options use the same repository setup.
+
+On first launch, run `/login` to connect a provider, or configure its API key;
+see [Pi's quick start](https://github.com/earendil-works/pi/blob/v0.84.2/packages/coding-agent/README.md#quick-start).
 
 ### Use the entire repository
 
@@ -26,7 +65,8 @@ before normal model use.
 
 1. Copy or clone the entire repository to local storage and open its root
    directory. Keep `apps/` and `config/pi/` in their existing relative locations.
-2. Install workspace dependencies:
+2. Install the repository's locked dependencies, **even if Pi is already installed
+   through npm**. Bun installs the direct and transitive versions from `bun.lock`:
 
    ```sh
    bun install --frozen-lockfile
