@@ -11,7 +11,7 @@
     "typecheck": "bun check --project tsconfig.json"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.1"
+    "@earendil-works/pi-coding-agent": "^0.99.2"
   },
   "dependencies": {
     "semver": "7.8.5"

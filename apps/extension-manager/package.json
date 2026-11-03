@@ -19,8 +19,8 @@
     "@types/proper-lockfile": "^4.1.4"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.1",
-    "@earendil-works/pi-tui": "^0.84.1"
+    "@earendil-works/pi-coding-agent": "^0.99.2",
+    "@earendil-works/pi-tui": "^0.99.2"
   },
   "pi": {
     "extensions": [
