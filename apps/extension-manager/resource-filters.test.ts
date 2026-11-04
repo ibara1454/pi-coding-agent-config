@@ -550,6 +550,12 @@ describe("applyPatterns", () => {
       expect(applyPatterns([path], [pattern], base)).toEqual(new Set());
     },
   );
+  it("should exclude a skill in the home directory when its exact filter is bare tilde", () => {
+    const homeSkill = join(homedir(), "SKILL.md");
+    expect(applyPatterns([homeSkill, alpha], ["-~"], base)).toEqual(
+      new Set([alpha]),
+    );
+  });
 });
 
 describe("explainFilterState", () => {
