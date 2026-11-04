@@ -142,7 +142,7 @@ describe("effectiveQuietStartup", () => {
     ["malformed JSON", "{"],
     ["array JSON", "[]"],
     ["null JSON", "null"],
-    ["a nonboolean quiet setting", '{"quietStartup":"yes"}'],
+    ["an invalid quiet setting", '{"quietStartup":"yes"}'],
   ])(
     "should retain user quiet startup when trusted project metadata contains %s",
     (_condition, metadata) => {
@@ -152,6 +152,48 @@ describe("effectiveQuietStartup", () => {
       });
       expect(effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, true, ["pi"])).toBe(
         true,
+      );
+    },
+  );
+
+  it.each([
+    {
+      condition: "the user selects header-only startup",
+      user: '{"quietStartup":"header"}',
+      project: "{}",
+      argv: ["pi"],
+      expected: "header" as const,
+    },
+    {
+      condition: "the trusted project selects header-only startup",
+      user: '{"quietStartup":true}',
+      project: '{"quietStartup":"header"}',
+      argv: ["pi"],
+      expected: "header" as const,
+    },
+    {
+      condition: "the trusted project disables header-only startup",
+      user: '{"quietStartup":"header"}',
+      project: '{"quietStartup":false}',
+      argv: ["pi"],
+      expected: false,
+    },
+    {
+      condition: "verbose startup overrides header-only startup",
+      user: '{"quietStartup":"header"}',
+      project: "{}",
+      argv: ["pi", "--verbose"],
+      expected: false,
+    },
+  ])(
+    "should honor the effective quiet mode when $condition",
+    ({ user, project, argv, expected }) => {
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: user,
+        [join(PROJECT_DIR, ".pi", "settings.json")]: project,
+      });
+      expect(effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, true, argv)).toBe(
+        expected,
       );
     },
   );

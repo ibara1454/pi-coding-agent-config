@@ -112,6 +112,11 @@ The extension honors Pi's effective `quietStartup` setting:
 
 With quiet startup enabled, the custom welcome and Pi's routine inventory are both hidden; native diagnostics remain available. Passing `--verbose` overrides `quietStartup`, matching Pi's normal behavior.
 
+With Pi `1.0.0`, `"quietStartup": "header"` also disables the custom welcome,
+leaving Pi's native version and key hints visible without the startup resource
+inventory. Trusted project settings override user settings; `--verbose` restores
+the full welcome.
+
 The extension has no extension-specific configuration.
 
 ## Installation in this repository
