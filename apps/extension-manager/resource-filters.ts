@@ -1,13 +1,29 @@
-import { basename, dirname, relative } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, relative } from "node:path";
 import { minimatch } from "minimatch";
 import { toPosixPath } from "./package-resource-paths.ts";
 
+/**
+ * Expands Pi's home-relative filter paths before exact or glob matching.
+ * @example expandHomePath("~/skills/pdf") // "<home>/skills/pdf"
+ */
+function expandHomePath(pattern: string): string {
+  if (pattern === "~") {
+    return homedir();
+  }
+  return pattern.startsWith("~/") ? join(homedir(), pattern.slice(2)) : pattern;
+}
+
+/**
+ * Normalizes exact filters without changing their literal matching semantics.
+ * @example normalizedExactPattern("./skills/pdf") // "skills/pdf"
+ */
 function normalizedExactPattern(pattern: string): string {
   const withoutDot =
     pattern.startsWith("./") || pattern.startsWith(".\\")
       ? pattern.slice(2)
       : pattern;
-  return toPosixPath(withoutDot);
+  return toPosixPath(expandHomePath(withoutDot));
 }
 
 function matchesExactPattern(
@@ -33,12 +49,16 @@ function matchesExactPattern(
   );
 }
 
+/**
+ * Matches resource globs against relative, absolute, and skill-directory paths.
+ * @example matchesPattern("/home/me/ext.ts", "~/ext.ts", baseDir) // true for that home
+ */
 function matchesPattern(
   filePath: string,
   pattern: string,
   baseDir: string,
 ): boolean {
-  const normalized = toPosixPath(pattern);
+  const normalized = toPosixPath(expandHomePath(pattern));
   const relativePath = toPosixPath(relative(baseDir, filePath));
   const name = basename(filePath);
   const absolutePath = toPosixPath(filePath);

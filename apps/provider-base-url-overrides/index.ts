@@ -144,33 +144,43 @@ function routeModels<ApiType extends Api>(
   return routedModels;
 }
 
+/**
+ * Keeps Azure's endpoint resolution on the routed model URL without mutating
+ * caller options; other transports retain their options identity.
+ * @example routeTransportOptions(azureModel, options) // Azure uses azureModel.baseUrl
+ */
 function routeTransportOptions<OptionsType extends ProviderRequestOptions>(
-  api: Api,
-  routedModelBaseUrl: string,
+  model: Model<Api>,
   options: OptionsType | undefined,
 ): OptionsType | undefined;
 
 function routeTransportOptions(
-  api: Api,
-  routedModelBaseUrl: string,
+  model: Model<Api>,
   options: ProviderRequestOptions | undefined,
 ): TransportOptions | undefined {
-  if (api !== AZURE_API) {
+  if (
+    model.api !== AZURE_API &&
+    !(model.provider === "azure" && model.api === "openai-completions")
+  ) {
     return options;
   }
 
   const optionsSnapshot: ProviderRequestOptions = { ...options };
   return {
     ...optionsSnapshot,
-    azureBaseUrl: routedModelBaseUrl,
+    azureBaseUrl: model.baseUrl,
     env: {
       ...optionsSnapshot.env,
       // biome-ignore lint/style/useNamingConvention: preserve Azure OpenAI environment variable key
-      AZURE_OPENAI_BASE_URL: routedModelBaseUrl,
+      AZURE_OPENAI_BASE_URL: model.baseUrl,
     },
   };
 }
 
+/**
+ * Routes a model and its Azure endpoint options as one transport request.
+ * @example routeRequest(model, routes, options).model.baseUrl // routed API URL
+ */
 function routeRequest<
   ApiType extends Api,
   OptionsType extends ProviderRequestOptions,
@@ -182,14 +192,15 @@ function routeRequest<
   const routedModel = routeModel(model, routes);
   return {
     model: routedModel,
-    options: routeTransportOptions(
-      routedModel.api,
-      routedModel.baseUrl,
-      options,
-    ),
+    options: routeTransportOptions(routedModel, options),
   };
 }
 
+/**
+ * Routes model requests and OpenRouter discovery while preserving the original
+ * provider receiver and propagating its failures.
+ * @example wrapProvider(provider, routes).getModels() // cloned, routed models
+ */
 function wrapProvider(
   provider: Provider<Api>,
   routes: ProviderRoutes,
@@ -219,7 +230,13 @@ function wrapProvider(
 
   const { refreshModels } = provider;
   const wrappedRefreshModels: Provider["refreshModels"] = refreshModels
-    ? (context) => refreshModels.call(provider, context)
+    ? (context) =>
+        refreshModels.call(
+          provider,
+          provider.id === "openrouter"
+            ? { ...context, baseUrl: routes.openAi }
+            : context,
+        )
     : undefined;
 
   const { filterModels } = provider;
