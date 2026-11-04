@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { CatalogRow, ResourceKind } from "../catalog/index.ts";
-import { ExtensionCatalog } from "../catalog/index.ts";
+import type { CatalogRow, ResourceKind } from "../catalog";
+import { ExtensionCatalog } from "../catalog";
 import { ExtensionManagerPanelState } from "./panel-state.ts";
 import { catalogRow, panelCatalogSeed } from "./test/panel.helper.ts";
 

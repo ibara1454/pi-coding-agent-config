@@ -1,7 +1,7 @@
-import { failureError, safeFailure } from "../../diagnostics/index.ts";
-import type { OwnedResource } from "../../host/index.ts";
-import { HostProcessError } from "../../host/index.ts";
-import { assertLive, deadline, SETUP_TIMEOUT_MS } from "../work/index.ts";
+import { failureError, safeFailure } from "../../diagnostics";
+import type { OwnedResource } from "../../host";
+import { HostProcessError } from "../../host";
+import { assertLive, deadline, SETUP_TIMEOUT_MS } from "../work";
 import { cleanupGeneration } from "./cleanup.ts";
 import { randomIdentity } from "./identity.ts";
 import {

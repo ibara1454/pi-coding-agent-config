@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ResourceScope } from "../catalog/index.ts";
+import type { ResourceScope } from "../catalog";
 
 const GIT_URL_SCHEME = /^(?:https?|ssh|git):\/\//i;
 const GIT_PROVIDER = /^(?:github|gitlab|bitbucket):/i;

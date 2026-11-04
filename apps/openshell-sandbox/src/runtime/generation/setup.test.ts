@@ -1,7 +1,7 @@
 import { describe, expect, test as it } from "bun:test";
-import { DEFAULT_SANDBOX_IMAGE } from "../../image/index.ts";
+import { DEFAULT_SANDBOX_IMAGE } from "../../image";
 import { runtimeFixture, unitRuntimeFixture } from "../test/index.helper.ts";
-import { deadline } from "../work/index.ts";
+import { deadline } from "../work";
 import { awaitGenerationReadiness, runGenerationSetup } from "./setup.ts";
 import { gateway, generation, work } from "./test/generation.helper.ts";
 import type { GenerationEvent } from "./types.ts";

@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import process from "node:process";
-import type { HostContext } from "../host/index.ts";
+import type { HostContext } from "../host";
 import {
   captureHostContext,
   resolveDockerHost,
   runHostProcess,
   withGatewayExecutable,
-} from "../host/index.ts";
+} from "../host";
 import type { RuntimeEffects } from "./types.ts";
 
 /** Native entropy, credential and timer adapters for one activation. */

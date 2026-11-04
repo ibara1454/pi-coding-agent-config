@@ -5,7 +5,7 @@ import {
   parseProviders,
 } from "./providers.ts";
 import type { ProviderConfiguration } from "./selection.ts";
-import { SandboxConfigurationError } from "./validation/index.ts";
+import { SandboxConfigurationError } from "./validation";
 
 const declaration: ProviderDeclaration = {
   name: "work",

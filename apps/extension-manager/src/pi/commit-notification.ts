@@ -1,5 +1,5 @@
-import type { ResourceScope } from "../catalog/index.ts";
-import type { PanelResult } from "../panel/index.ts";
+import type { ResourceScope } from "../catalog";
+import type { PanelResult } from "../panel";
 
 function scopeLabel(scope: ResourceScope): string {
   return scope === "global" ? "Global" : "Project";

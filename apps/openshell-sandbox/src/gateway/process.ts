@@ -5,7 +5,7 @@ import {
   type ManagedProcess,
   nativeFailure,
   runHostProcess,
-} from "../host/index.ts";
+} from "../host";
 import type { GatewayState } from "./state.ts";
 import type { GatewayHostContext as HostContext } from "./types.ts";
 

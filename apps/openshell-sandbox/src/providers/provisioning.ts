@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import type {
   ProviderConfiguration,
   SandboxEnvironment,
-} from "../configuration/index.ts";
-import type { ManagedGateway } from "../gateway/index.ts";
-import { type AcquisitionCapture, nativeFailure } from "../host/index.ts";
+} from "../configuration";
+import type { ManagedGateway } from "../gateway";
+import { type AcquisitionCapture, nativeFailure } from "../host";
 import { createNativeProvider } from "./native-provider.ts";
 import { validateProvider } from "./validation.ts";
 

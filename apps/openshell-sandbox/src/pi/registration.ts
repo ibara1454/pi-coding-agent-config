@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerModelBash } from "./bash.ts";
-import { registerSandboxStatus } from "./commands/index.ts";
-import { AdapterSession } from "./session/index.ts";
+import { registerSandboxStatus } from "./commands";
+import { AdapterSession } from "./session";
 
 /** Registers model-only routing before loading SDK implementation or configuration.
  * Each factory owns independent session state; user Bash retains Pi's normal path.

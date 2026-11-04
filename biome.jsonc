@@ -47,7 +47,9 @@
       "correctness": {
         // Pi extensions run on Node/Bun and need built-in modules.
         "noNodejsModules": "off",
-        "noProcessGlobal": "error"
+        "noProcessGlobal": "error",
+        // Bun and bundler resolution support directory imports without index.ts.
+        "useImportExtensions": "off"
       },
       "nursery": {
         "noFloatingPromises": "error",
@@ -107,6 +109,17 @@
         // Environment access belongs at runtime/config boundaries and in isolated tests.
         "noProcessEnv": "off",
         "noInferrableTypes": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["./**/index.ts", "../**/index.ts"],
+                "message": "Import the directory instead of its index.ts file."
+              }
+            ]
+          }
+        },
         // Simple conditional values are readable; nested ternaries remain flagged.
         "noTernary": "off",
         "noNestedTernary": "error",

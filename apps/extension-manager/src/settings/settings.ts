@@ -10,7 +10,7 @@ import type {
   SettingsDocument,
   SettingsMutation,
   ToggleTarget,
-} from "../catalog/index.ts";
+} from "../catalog";
 import {
   mutateExactPattern,
   mutatePackagePatterns,

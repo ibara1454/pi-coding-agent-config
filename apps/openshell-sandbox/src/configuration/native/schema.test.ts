@@ -1,5 +1,5 @@
 import { describe, expect, test as it } from "bun:test";
-import { SandboxConfigurationError } from "../validation/index.ts";
+import { SandboxConfigurationError } from "../validation";
 import {
   boolean,
   dictionary,

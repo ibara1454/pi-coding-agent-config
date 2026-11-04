@@ -3,7 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { type OpenShellClient, SandboxClient } from "@nvidia/openshell-sdk";
 import { SandboxPhase, SandboxResponseSchema } from "@nvidia/openshell-sdk/raw";
-import { executeRequest } from "../execution/index.ts";
+import { executeRequest } from "../execution";
 import { completion } from "../execution/test/index.helper.ts";
 import { runtimeFixture, unitRuntimeFixture } from "../test/index.helper.ts";
 import { createGenerationSandbox, runGenerationSetup } from "./setup.ts";

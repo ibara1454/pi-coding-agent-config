@@ -1,6 +1,6 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import type { SpawnOptions, spawn } from "node:child_process";
-import type { OwnedResource } from "../host/index.ts";
+import type { OwnedResource } from "../host";
 import { nativeResponseChild } from "../host/test/index.helper.ts";
 import {
   type RuntimeFixture,

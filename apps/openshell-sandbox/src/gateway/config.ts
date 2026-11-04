@@ -1,6 +1,6 @@
 import { createPrivateKey, X509Certificate } from "node:crypto";
 import { join } from "node:path";
-import { runHostProcess } from "../host/index.ts";
+import { runHostProcess } from "../host";
 import type { GatewayState } from "./state.ts";
 import type { GatewayHostContext as HostContext } from "./types.ts";
 

@@ -1,6 +1,6 @@
 import { describe, expect, test as it, mock } from "bun:test";
 import { setImmediate } from "node:timers/promises";
-import type { HostPaths } from "../host/index.ts";
+import type { HostPaths } from "../host";
 import { inspectGitMetadata } from "./git.ts";
 import type { GitProcess, WorkspaceFilesystem } from "./inspection.ts";
 

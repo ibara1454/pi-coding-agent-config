@@ -1,7 +1,7 @@
 import type { ProviderResponse } from "@nvidia/openshell-sdk/raw";
-import type { ProviderConfiguration } from "../configuration/index.ts";
-import type { ManagedGateway } from "../gateway/index.ts";
-import { type AcquisitionCapture, nativeFailure } from "../host/index.ts";
+import type { ProviderConfiguration } from "../configuration";
+import type { ManagedGateway } from "../gateway";
+import { type AcquisitionCapture, nativeFailure } from "../host";
 
 const PROVIDER_RPC_TIMEOUT_MS = 30_000;
 

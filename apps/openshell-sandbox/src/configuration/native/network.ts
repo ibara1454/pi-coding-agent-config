@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
-import { invalid, object } from "../validation/index.ts";
+import { invalid, object } from "../validation";
 import { graphql, rule, selectors } from "./matchers.ts";
 import {
   boolean,

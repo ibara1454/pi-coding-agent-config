@@ -1,5 +1,5 @@
 import type { OpenShellClient } from "@nvidia/openshell-sdk";
-import type { HostContext } from "../host/index.ts";
+import type { HostContext } from "../host";
 
 /** Host facts plus gateway-owned connection effects; captured facts remain unchanged.
  * Omitting effects uses native SDK connection and candidate-port reservation.

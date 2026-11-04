@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs";
 import { join } from "node:path";
-import type { AcquisitionCapture, OwnedResource } from "../host/index.ts";
-import { HostProcessError, nativeFailure } from "../host/index.ts";
+import type { AcquisitionCapture, OwnedResource } from "../host";
+import { HostProcessError, nativeFailure } from "../host";
 import type {
   GatewayRecoveryCoordinates,
   GatewayHostContext as HostContext,

@@ -1,6 +1,6 @@
-import type { PreparedGateway, SandboxGeneration } from "./generation/index.ts";
+import type { PreparedGateway, SandboxGeneration } from "./generation";
 import type { RuntimeEffects } from "./types.ts";
-import { CLEANUP_TIMEOUT_MS, deadline, waitBounded } from "./work/index.ts";
+import { CLEANUP_TIMEOUT_MS, deadline, waitBounded } from "./work";
 
 /** Bounds raw requests, generation deletion, SDK providers, and gateway close together.
  * An unsettled native request cannot surrender its private gateway on caller timeout.

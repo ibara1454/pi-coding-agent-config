@@ -1,5 +1,5 @@
 import { describe, expect, test as it } from "bun:test";
-import openshellSandbox from "./index.ts";
+import openshellSandbox from ".";
 import {
   adapterRuntimeFixture,
   executeRegisteredBash,

@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import type { HostPaths } from "../host/index.ts";
+import type { HostPaths } from "../host";
 import type { WorkspaceFilesystem } from "./inspection.ts";
 
 const FIRST_CONTROL_CODE = 32;

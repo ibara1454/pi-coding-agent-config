@@ -1,6 +1,6 @@
 import { describe, expect, test as it } from "bun:test";
-import type { ProjectWorkspace } from "../workspace/index.ts";
-import type { GenerationEvent, SandboxGeneration } from "./generation/index.ts";
+import type { ProjectWorkspace } from "../workspace";
+import type { GenerationEvent, SandboxGeneration } from "./generation";
 import { gateway, workspace } from "./generation/test/index.helper.ts";
 import {
   closingState,

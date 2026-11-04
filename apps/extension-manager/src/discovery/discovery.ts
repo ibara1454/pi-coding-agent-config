@@ -22,12 +22,12 @@ import type {
   ResourceScope,
   SettingsDocument,
   ToggleTarget,
-} from "../catalog/index.ts";
+} from "../catalog";
 import {
   canonicalizeResourcePath,
   packageResourcePaths,
   resourceFilterPath,
-} from "../resource-paths/index.ts";
+} from "../resource-paths";
 import {
   applyPatterns,
   explainFilterState,
@@ -37,7 +37,7 @@ import {
   mutatePackagePatterns,
   packageSource,
   readSettingsDocument,
-} from "../settings/index.ts";
+} from "../settings";
 import { packageIdentity } from "./package-identity.ts";
 
 const RESOURCE_FIELDS = ["extensions", "skills"] as const;

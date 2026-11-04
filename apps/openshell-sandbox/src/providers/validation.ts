@@ -1,5 +1,5 @@
 import type { ProviderProfile } from "@nvidia/openshell-sdk/raw";
-import type { ProviderConfiguration } from "../configuration/index.ts";
+import type { ProviderConfiguration } from "../configuration";
 
 /** Validates selected credential declarations without reading secrets or mutating inputs.
  * @param provider Frozen explicit declaration already admitted by settings validation.

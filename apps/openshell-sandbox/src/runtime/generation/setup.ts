@@ -1,15 +1,15 @@
-import { failureError, safeFailure } from "../../diagnostics/index.ts";
-import type { ManagedGateway } from "../../gateway/index.ts";
-import { startPrivateGateway } from "../../gateway/index.ts";
-import type { AcquisitionCapture, OwnedResource } from "../../host/index.ts";
-import { DEFAULT_SANDBOX_IMAGE } from "../../image/index.ts";
-import { provisionProviders } from "../../providers/index.ts";
+import { failureError, safeFailure } from "../../diagnostics";
+import type { ManagedGateway } from "../../gateway";
+import { startPrivateGateway } from "../../gateway";
+import type { AcquisitionCapture, OwnedResource } from "../../host";
+import { DEFAULT_SANDBOX_IMAGE } from "../../image";
+import { provisionProviders } from "../../providers";
 import {
   type GitProcess,
   inspectWorkspace,
   type ProjectWorkspace,
-} from "../../workspace/index.ts";
-import { assertLive, type Deadline, waitBounded } from "../work/index.ts";
+} from "../../workspace";
+import { assertLive, type Deadline, waitBounded } from "../work";
 import { createNativeSandbox, isRejectedCreate } from "./provision.ts";
 import type {
   ConfirmedStop,

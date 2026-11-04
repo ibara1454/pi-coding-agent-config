@@ -4,7 +4,7 @@ import {
   type ProviderProfile,
   ProviderProfileSchema,
 } from "@nvidia/openshell-sdk/raw";
-import type { ProviderConfiguration } from "../configuration/index.ts";
+import type { ProviderConfiguration } from "../configuration";
 import { validateProvider } from "./validation.ts";
 
 const provider: ProviderConfiguration = {

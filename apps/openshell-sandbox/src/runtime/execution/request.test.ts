@@ -2,7 +2,7 @@ import { describe, expect, test as it, spyOn } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { type OpenShellClient, SandboxClient } from "@nvidia/openshell-sdk";
 import { SandboxResponseSchema } from "@nvidia/openshell-sdk/raw";
-import { RuntimeFailure } from "../../diagnostics/index.ts";
+import { RuntimeFailure } from "../../diagnostics";
 import { plannedRealpath } from "../test/index.helper.ts";
 import { executeRequest } from "./request.ts";
 import { completion, requestFixture } from "./test/request.helper.ts";

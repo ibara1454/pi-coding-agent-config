@@ -1,6 +1,6 @@
-import type { ProjectWorkspace } from "../../../workspace/index.ts";
+import type { ProjectWorkspace } from "../../../workspace";
 import { type RuntimeFixture, TEST_NETWORK } from "../../test/index.helper.ts";
-import { deadline, SETUP_TIMEOUT_MS } from "../../work/index.ts";
+import { deadline, SETUP_TIMEOUT_MS } from "../../work";
 import type { GenerationWork } from "../setup.ts";
 import type {
   GenerationInput,

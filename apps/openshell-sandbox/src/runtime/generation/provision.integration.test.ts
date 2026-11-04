@@ -5,8 +5,8 @@ import {
   type SandboxPolicy,
   SandboxPolicySchema,
 } from "@nvidia/openshell-sdk/raw";
-import type { SandboxEnvironment } from "../../configuration/index.ts";
-import { provisionProviders } from "../../providers/index.ts";
+import type { SandboxEnvironment } from "../../configuration";
+import { provisionProviders } from "../../providers";
 import {
   environment,
   gateway,

@@ -1,7 +1,7 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { registerSandbox } from "./registration.ts";
-import { AdapterActivation } from "./session/index.ts";
+import { AdapterActivation } from "./session";
 import { adapterFixture } from "./test/adapter.helper.ts";
 
 const piCapabilities = await import("@earendil-works/pi-coding-agent");

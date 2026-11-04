@@ -1,7 +1,7 @@
 import { ChildProcess, type spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
-import type { ProcessEffects } from "../../host/index.ts";
-import { defaultProcessEffects } from "../../host/index.ts";
+import type { ProcessEffects } from "../../host";
+import { defaultProcessEffects } from "../../host";
 
 const DOCKER_ID_LENGTH = 64;
 export const TEST_CONTAINER = "b".repeat(DOCKER_ID_LENGTH);

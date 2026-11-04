@@ -6,7 +6,7 @@ import type {
   ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { SanitizedRuntimeStatus } from "../../runtime/index.ts";
+import type { SanitizedRuntimeStatus } from "../../runtime";
 
 type SessionHandler = (
   event: unknown,

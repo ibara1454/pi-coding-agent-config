@@ -1,9 +1,9 @@
 import { describe, expect, test as it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { RuntimeFailure } from "../diagnostics/index.ts";
-import type { ExecutionEvents, ExecutionOptions } from "../runtime/index.ts";
+import { RuntimeFailure } from "../diagnostics";
+import type { ExecutionEvents, ExecutionOptions } from "../runtime";
 import { registerModelBash } from "./bash.ts";
-import { AdapterActivation } from "./session/index.ts";
+import { AdapterActivation } from "./session";
 import { adapterFixture, cachedStatus } from "./test/adapter.helper.ts";
 import { executeRegisteredBash } from "./test/lifecycle.helper.ts";
 

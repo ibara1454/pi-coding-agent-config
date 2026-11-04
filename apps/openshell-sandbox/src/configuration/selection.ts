@@ -1,7 +1,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProviderProfile, SandboxPolicy } from "@nvidia/openshell-sdk/raw";
-import { decodeNativePolicy, decodeNativeProfiles } from "./native/index.ts";
+import { decodeNativePolicy, decodeNativeProfiles } from "./native";
 import {
   normalizeProviders,
   type ProviderDeclaration,
@@ -14,7 +14,7 @@ import {
   object,
   SandboxConfigurationError,
   text,
-} from "./validation/index.ts";
+} from "./validation";
 
 export interface ProviderConfiguration {
   readonly name: string;

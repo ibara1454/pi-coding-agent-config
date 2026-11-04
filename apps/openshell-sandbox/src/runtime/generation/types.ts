@@ -1,14 +1,14 @@
 import type * as filesystem from "node:fs/promises";
-import type { SandboxEnvironment } from "../../configuration/index.ts";
-import type { SafeFailure } from "../../diagnostics/index.ts";
+import type { SandboxEnvironment } from "../../configuration";
+import type { SafeFailure } from "../../diagnostics";
 import type {
   GatewayHostContext,
   GatewayRecoveryCoordinates,
   ManagedGateway,
-} from "../../gateway/index.ts";
-import type { OwnedResource } from "../../host/index.ts";
-import type { GitProcess, ProjectWorkspace } from "../../workspace/index.ts";
-import type { TimerEffects } from "../work/index.ts";
+} from "../../gateway";
+import type { OwnedResource } from "../../host";
+import type { GitProcess, ProjectWorkspace } from "../../workspace";
+import type { TimerEffects } from "../work";
 
 /** SDK generation acquisition capabilities, excluding runtime phase and disposal. */
 export type GenerationEffects = TimerEffects &

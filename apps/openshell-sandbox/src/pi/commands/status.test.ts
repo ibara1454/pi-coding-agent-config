@@ -1,9 +1,9 @@
 import { describe, expect, test as it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { parse } from "yaml";
-import { DEFAULT_SANDBOX_IMAGE } from "../../image/index.ts";
-import type { SanitizedRuntimeStatus } from "../../runtime/index.ts";
-import { AdapterActivation, AdapterSession } from "../session/index.ts";
+import { DEFAULT_SANDBOX_IMAGE } from "../../image";
+import type { SanitizedRuntimeStatus } from "../../runtime";
+import { AdapterActivation, AdapterSession } from "../session";
 import { adapterFixture, cachedStatus } from "../test/index.helper.ts";
 import { registerSandboxStatus } from "./status.ts";
 

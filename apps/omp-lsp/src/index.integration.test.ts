@@ -9,9 +9,9 @@ import type {
 
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as host from "@earendil-works/pi-coding-agent";
+import lsp from ".";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies require the live module namespace; copied named imports cannot intercept consumers.
 import * as config from "./configuration/config.ts";
-import lsp from "./index.ts";
 import type { LspConfig, LspParams } from "./runtime/types.ts";
 
 const CONTROL_CHARACTER = /\p{Cc}/u;

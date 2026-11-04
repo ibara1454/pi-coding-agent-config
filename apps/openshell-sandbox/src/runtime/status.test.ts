@@ -1,7 +1,7 @@
 import { describe, expect, test as it } from "bun:test";
-import type { SandboxEnvironment } from "../configuration/index.ts";
-import type { ManagedGateway } from "../gateway/index.ts";
-import type { SandboxGeneration } from "./generation/index.ts";
+import type { SandboxEnvironment } from "../configuration";
+import type { ManagedGateway } from "../gateway";
+import type { SandboxGeneration } from "./generation";
 import { publishRuntimeObservation, runtimeStatus } from "./status.ts";
 import { runtimeFixture } from "./test/runtime.helper.ts";
 import type { RuntimeObserver, RuntimeState } from "./types.ts";

@@ -1,8 +1,8 @@
 import { describe, expect, test as it, mock, spyOn } from "bun:test";
 import { setImmediate } from "node:timers/promises";
-import type { RuntimeEffects, SandboxRuntime } from "../../runtime/index.ts";
+import type { RuntimeEffects, SandboxRuntime } from "../../runtime";
 // biome-ignore lint/performance/noNamespaceImport: Scoped spies replace runtime acquisition without native effects.
-import * as runtime from "../../runtime/index.ts";
+import * as runtime from "../../runtime";
 import { cachedStatus, piUnitFixture } from "../test/index.helper.ts";
 import { AdapterActivation } from "./activation.ts";
 

@@ -1,4 +1,4 @@
-import type { JsonObject } from "../catalog/index.ts";
+import type { JsonObject } from "../catalog";
 
 const SETTINGS_INDENT = /\n([ \t]+)\S/;
 

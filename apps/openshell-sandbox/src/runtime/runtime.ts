@@ -1,17 +1,17 @@
 import type { EventEmitter } from "node:events";
-import type { SandboxEnvironment } from "../configuration/index.ts";
-import { failureError, safeFailure } from "../diagnostics/index.ts";
-import type { GatewayRecoveryCoordinates } from "../gateway/index.ts";
+import type { SandboxEnvironment } from "../configuration";
+import { failureError, safeFailure } from "../diagnostics";
+import type { GatewayRecoveryCoordinates } from "../gateway";
 import { settleRuntimeDisposal } from "./disposal.ts";
-import type { ExecutionEvents, ExecutionOptions } from "./execution/index.ts";
-import { executeRequest } from "./execution/index.ts";
+import type { ExecutionEvents, ExecutionOptions } from "./execution";
+import { executeRequest } from "./execution";
 import type {
   CreationOutcome,
   GenerationEvent,
   PreparedGateway,
   SandboxGeneration,
-} from "./generation/index.ts";
-import { prepareGeneration } from "./generation/index.ts";
+} from "./generation";
+import { prepareGeneration } from "./generation";
 import {
   closingState,
   failedDisposalState,

@@ -2,7 +2,7 @@ import { describe, expect, test as it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Server } from "node:net";
 import type { OpenShellClient } from "@nvidia/openshell-sdk";
-import type { ManagedProcess, ProcessClose } from "../host/index.ts";
+import type { ManagedProcess, ProcessClose } from "../host";
 import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { connectGateway, reserveGatewayPort } from "./client.ts";
 import type { GatewayHostContext as HostContext } from "./types.ts";

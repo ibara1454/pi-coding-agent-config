@@ -8,7 +8,7 @@ import type {
   PreparationStep,
   RuntimeObserver,
   SanitizedRuntimeStatus,
-} from "../../runtime/index.ts";
+} from "../../runtime";
 
 const statusTextWidth = 240;
 // Runtime recovery fields are capped at 512 UTF-16 units, each at most two terminal cells.

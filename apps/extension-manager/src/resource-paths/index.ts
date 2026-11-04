@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { globSync } from "glob";
-import type { ResourceField, ResourceKind } from "../catalog/index.ts";
+import type { ResourceField, ResourceKind } from "../catalog";
 
 const GLOB_CHARACTERS = /[*?[\]{}]/;
 

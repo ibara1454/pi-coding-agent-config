@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import ompStatusLine from "./index.ts";
+import ompStatusLine from ".";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const STATUS_LINE_LEADING_BORDER = "╭──";

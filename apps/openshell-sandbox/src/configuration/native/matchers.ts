@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
-import { invalid, object } from "../validation/index.ts";
+import { invalid, object } from "../validation";
 import type { Decoder, Fields } from "./schema.ts";
 import {
   dictionary,

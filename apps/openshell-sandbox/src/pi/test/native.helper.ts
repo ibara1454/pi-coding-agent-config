@@ -4,7 +4,7 @@ import type { ObjectEncodingOptions } from "node:fs";
 import type * as fs from "node:fs/promises";
 import type { Server } from "node:net";
 import net from "node:net";
-import type { HostCaptureEffects } from "../../host/index.ts";
+import type { HostCaptureEffects } from "../../host";
 import type { RuntimeFixture } from "../../runtime/test/index.helper.ts";
 import { unitRuntimeFixture } from "../../runtime/test/index.helper.ts";
 import type { PiNativeCapabilities } from "../native-capabilities.ts";

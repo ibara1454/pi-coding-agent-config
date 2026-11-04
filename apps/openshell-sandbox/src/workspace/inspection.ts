@@ -1,6 +1,6 @@
 import type * as fs from "node:fs/promises";
-import type { HostPaths } from "../host/index.ts";
-import { nativeFailure } from "../host/index.ts";
+import type { HostPaths } from "../host";
+import { nativeFailure } from "../host";
 import { inspectGitMetadata } from "./git.ts";
 import {
   canonicalHostPaths,

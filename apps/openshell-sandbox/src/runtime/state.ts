@@ -1,6 +1,6 @@
-import type { SafeFailure } from "../diagnostics/index.ts";
-import { RuntimeFailure } from "../diagnostics/index.ts";
-import type { GenerationEvent, SandboxGeneration } from "./generation/index.ts";
+import type { SafeFailure } from "../diagnostics";
+import { RuntimeFailure } from "../diagnostics";
+import type { GenerationEvent, SandboxGeneration } from "./generation";
 import type { RuntimeState } from "./types.ts";
 
 /** Pure admission: only idle can allocate; preparing and ready share their existing generation.

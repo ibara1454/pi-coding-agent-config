@@ -1,6 +1,6 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import { join } from "node:path";
-import type { OwnedResource } from "../host/index.ts";
+import type { OwnedResource } from "../host";
 import { processScenario } from "../host/test/index.helper.ts";
 import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { launchGateway } from "./process.ts";

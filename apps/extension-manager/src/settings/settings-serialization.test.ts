@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { JsonObject } from "../catalog/index.ts";
+import type { JsonObject } from "../catalog";
 import { serializeSettings } from "./settings-serialization.ts";
 
 const settings: JsonObject = { extensions: ["./extensions"] };

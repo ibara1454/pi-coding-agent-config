@@ -1,12 +1,12 @@
 import type { SandboxRef } from "@nvidia/openshell-sdk";
-import { RuntimeFailure } from "../../diagnostics/index.ts";
+import { RuntimeFailure } from "../../diagnostics";
 import {
   assertLive,
   CLEANUP_TIMEOUT_MS,
   type Deadline,
   deadline,
   waitBounded,
-} from "../work/index.ts";
+} from "../work";
 import type {
   CleanupEffects,
   ConfirmedStop,

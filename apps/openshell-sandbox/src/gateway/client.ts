@@ -1,7 +1,7 @@
 import type { Server } from "node:net";
 import { createServer } from "node:net";
 import type { OpenShellClient } from "@nvidia/openshell-sdk";
-import { type ManagedProcess, nativeFailure } from "../host/index.ts";
+import { type ManagedProcess, nativeFailure } from "../host";
 import type { GatewayTls } from "./config.ts";
 import type { GatewayHostContext as HostContext } from "./types.ts";
 

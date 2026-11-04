@@ -7,10 +7,10 @@ import type {
   CatalogCommitter,
   CatalogSeed,
   ExtensionCatalog,
-} from "../catalog/index.ts";
-import { discoverCatalog } from "../discovery/index.ts";
-import { ExtensionManagerPanel, type PanelResult } from "../panel/index.ts";
-import { commitSettings } from "../settings/index.ts";
+} from "../catalog";
+import { discoverCatalog } from "../discovery";
+import { ExtensionManagerPanel, type PanelResult } from "../panel";
+import { commitSettings } from "../settings";
 
 interface DiscoverInput {
   readonly agentDir: string;

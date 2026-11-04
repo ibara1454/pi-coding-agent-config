@@ -1,8 +1,8 @@
 import type { SandboxPolicy } from "@nvidia/openshell-sdk/raw";
-import { freeze } from "../../configuration/index.ts";
-import type { ManagedGateway } from "../../gateway/index.ts";
-import type { ProjectWorkspace } from "../../workspace/index.ts";
-import { RPC_TIMEOUT_MS } from "../work/index.ts";
+import { freeze } from "../../configuration";
+import type { ManagedGateway } from "../../gateway";
+import type { ProjectWorkspace } from "../../workspace";
+import { RPC_TIMEOUT_MS } from "../work";
 import type { GenerationInput } from "./types.ts";
 
 /** Sends one typed create request with ownership labels and a separate immutable policy snapshot.

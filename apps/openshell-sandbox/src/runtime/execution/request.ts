@@ -1,14 +1,10 @@
 import { EventEmitter } from "node:events";
 import { isAbsolute } from "node:path";
-import {
-  failureError,
-  RuntimeFailure,
-  safeFailure,
-} from "../../diagnostics/index.ts";
-import { mapCommandDirectory } from "../../workspace/index.ts";
-import type { ReadySandbox, SandboxGeneration } from "../generation/index.ts";
-import type { Deadline } from "../work/index.ts";
-import { assertLive, deadline, waitBounded } from "../work/index.ts";
+import { failureError, RuntimeFailure, safeFailure } from "../../diagnostics";
+import { mapCommandDirectory } from "../../workspace";
+import type { ReadySandbox, SandboxGeneration } from "../generation";
+import type { Deadline } from "../work";
+import { assertLive, deadline, waitBounded } from "../work";
 import type {
   ExecutionEffects,
   ExecutionEvents,

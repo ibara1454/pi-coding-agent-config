@@ -3,11 +3,7 @@
 // Protobuf decoding supplies only defaults already established by those native serde definitions.
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { parseDocument } from "yaml";
-import {
-  invalid,
-  object,
-  SandboxConfigurationError,
-} from "../validation/index.ts";
+import { invalid, object, SandboxConfigurationError } from "../validation";
 
 const MAX_YAML_BYTES = 1_048_576;
 const MAX_ALIAS_COUNT = 50;

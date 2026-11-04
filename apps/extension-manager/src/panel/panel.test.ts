@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, visibleWidth } from "@earendil-works/pi-tui";
-import type {
-  CatalogDiagnostic,
-  CatalogRow,
-  CommitResult,
-} from "../catalog/index.ts";
-import { ExtensionCatalog } from "../catalog/index.ts";
+import type { CatalogDiagnostic, CatalogRow, CommitResult } from "../catalog";
+import { ExtensionCatalog } from "../catalog";
 import { ExtensionManagerPanel, type PanelResult } from "./panel.ts";
 import {
   catalogRow,

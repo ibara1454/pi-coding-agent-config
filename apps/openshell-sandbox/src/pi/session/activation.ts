@@ -4,14 +4,14 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { SandboxEnvironment } from "../../configuration/index.ts";
+import type { SandboxEnvironment } from "../../configuration";
 import {
   captureHostContext,
   HostProcessError,
   type ManagedProcess,
-} from "../../host/index.ts";
-import type { RuntimeEffects, SandboxRuntime } from "../../runtime/index.ts";
-import type { PiNativeCapabilities } from "../index.ts";
+} from "../../host";
+import type { RuntimeEffects, SandboxRuntime } from "../../runtime";
+import type { PiNativeCapabilities } from "../";
 import { createRuntimeObserver, publishFailure } from "./ui.ts";
 
 /** Owns one adapter lifetime; no native ownership or failed-disposal result is inherited.
@@ -47,9 +47,7 @@ export class AdapterActivation {
   async prepare(pi: ExtensionAPI): Promise<void> {
     try {
       // SDK-dependent modules load only after the fail-closed Bash route is registered.
-      const { loadSandboxEnvironment } = await import(
-        "../../configuration/index.ts"
-      );
+      const { loadSandboxEnvironment } = await import("../../configuration");
       const environment = await loadSandboxEnvironment(
         {
           agentDir: (this.native?.agentDirectory ?? getAgentDir)(),
@@ -89,7 +87,7 @@ export class AdapterActivation {
   ): Promise<void> {
     // Static runtime imports would load SDK code before fail-closed host registration.
     const { createSandboxRuntime, createRuntimeEffects } = await import(
-      "../../runtime/index.ts"
+      "../../runtime"
     );
     if (!this.current) {
       return;
@@ -169,7 +167,7 @@ export class AdapterActivation {
           if (preflight) {
             // Static runtime imports would load SDK code before fail-closed registration.
             const { CLEANUP_TIMEOUT_MS, deadline, waitBounded } = await import(
-              "../../runtime/index.ts"
+              "../../runtime"
             );
             const limit = deadline(
               this.native?.runtime?.execution ?? {

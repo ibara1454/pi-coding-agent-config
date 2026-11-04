@@ -12,9 +12,9 @@ import {
 import type {
   ProviderConfiguration,
   SandboxEnvironment,
-} from "../../configuration/index.ts";
-import type { ManagedGateway } from "../../gateway/index.ts";
-import type { OwnedResource } from "../../host/index.ts";
+} from "../../configuration";
+import type { ManagedGateway } from "../../gateway";
+import type { OwnedResource } from "../../host";
 
 /** Select a second declared provider for collision and concurrent-creation cases. */
 export const OTHER_PROVIDER: ProviderConfiguration = {

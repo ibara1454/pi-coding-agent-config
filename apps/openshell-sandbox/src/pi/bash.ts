@@ -5,9 +5,9 @@ import type {
   ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { createBashTool } from "@earendil-works/pi-coding-agent";
-import { RuntimeFailure } from "../diagnostics/index.ts";
-import type { ExecutionEvents } from "../runtime/index.ts";
-import type { AdapterActivation } from "./session/index.ts";
+import { RuntimeFailure } from "../diagnostics";
+import type { ExecutionEvents } from "../runtime";
+import type { AdapterActivation } from "./session";
 
 interface BashResult {
   exitCode: number;

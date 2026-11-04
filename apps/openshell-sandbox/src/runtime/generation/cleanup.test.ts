@@ -1,5 +1,5 @@
 import { describe, expect, test as it } from "bun:test";
-import type { OwnedResource } from "../../host/index.ts";
+import type { OwnedResource } from "../../host";
 import { unitRuntimeFixture } from "../test/index.helper.ts";
 import { cleanupGeneration } from "./cleanup.ts";
 import { gateway, resources } from "./test/generation.helper.ts";

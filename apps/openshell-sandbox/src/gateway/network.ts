@@ -1,5 +1,5 @@
-import type { AcquisitionCapture, OwnedResource } from "../host/index.ts";
-import { dockerCommand } from "../host/index.ts";
+import type { AcquisitionCapture, OwnedResource } from "../host";
+import { dockerCommand } from "../host";
 import type { GatewayHostContext as HostContext } from "./types.ts";
 
 const DAEMON_ID = /^[A-Za-z0-9:-]{8,128}$/;

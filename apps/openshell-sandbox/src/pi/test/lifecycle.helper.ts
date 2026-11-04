@@ -4,7 +4,7 @@ import { runtimeFixture } from "../../runtime/test/index.helper.ts";
 import { adapterFixture } from "./adapter.helper.ts";
 import { baselinePolicy } from "./unit.helper.ts";
 
-const runtimeEffects = await import("../../runtime/index.ts");
+const runtimeEffects = await import("../../runtime");
 const filesystem = await import("node:fs/promises");
 
 /** Replaces only settings I/O and platform-effect construction, retaining real adapter/runtime logic.

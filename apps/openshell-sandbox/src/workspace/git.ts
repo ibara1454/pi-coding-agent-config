@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
-import type { HostPaths } from "../host/index.ts";
-import { nativeFailure } from "../host/index.ts";
+import type { HostPaths } from "../host";
+import { nativeFailure } from "../host";
 import type { GitProcess, WorkspaceFilesystem } from "./inspection.ts";
 import { validateMountPath } from "./paths.ts";
 

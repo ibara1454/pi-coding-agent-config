@@ -4,11 +4,8 @@ import {
   DefaultPackageManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { ToggleTarget } from "../catalog/index.ts";
-import {
-  packageResourcePaths,
-  resourceFilterPath,
-} from "../resource-paths/index.ts";
+import type { ToggleTarget } from "../catalog";
+import { packageResourcePaths, resourceFilterPath } from "../resource-paths";
 
 function existingCanonical(path: string, label: string): string {
   try {

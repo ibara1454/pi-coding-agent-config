@@ -1,10 +1,10 @@
 import { describe, expect, test as it, mock, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { RuntimeFailure } from "../diagnostics/index.ts";
-import type { ExecutionEvents } from "../runtime/index.ts";
+import { RuntimeFailure } from "../diagnostics";
+import type { ExecutionEvents } from "../runtime";
 import { registerModelBash } from "./bash.ts";
-import { AdapterActivation } from "./session/index.ts";
+import { AdapterActivation } from "./session";
 import { adapterFixture } from "./test/adapter.helper.ts";
 
 // Captures the live SDK capability used by the adapter's registration boundary.

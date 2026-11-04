@@ -2,9 +2,9 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_SANDBOX_IMAGE } from "../../image/index.ts";
-import type { SanitizedRuntimeStatus } from "../../runtime/index.ts";
-import { type AdapterSession, inlineText } from "../session/index.ts";
+import { DEFAULT_SANDBOX_IMAGE } from "../../image";
+import type { SanitizedRuntimeStatus } from "../../runtime";
+import { type AdapterSession, inlineText } from "../session";
 
 const HEX_RADIX = 16;
 const UNICODE_ESCAPE_DIGITS = 4;

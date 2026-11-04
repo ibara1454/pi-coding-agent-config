@@ -2,7 +2,7 @@ import { describe, expect, test as it } from "bun:test";
 import type { SpawnOptions, spawn } from "node:child_process";
 import { ChildProcess } from "node:child_process";
 import { PassThrough } from "node:stream";
-import type { OwnedResource } from "../host/index.ts";
+import type { OwnedResource } from "../host";
 import { runtimeFixture } from "../runtime/test/index.helper.ts";
 import { startPrivateGateway } from "./acquisition.ts";
 import type {

@@ -1,10 +1,6 @@
 import type { JsonObject } from "@bufbuild/protobuf";
 import type { ProviderProfile } from "@nvidia/openshell-sdk/raw";
-import {
-  invalid,
-  object,
-  SandboxConfigurationError,
-} from "../validation/index.ts";
+import { invalid, object, SandboxConfigurationError } from "../validation";
 import { credential } from "./credentials.ts";
 import { binary, endpoint } from "./network.ts";
 import {

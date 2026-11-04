@@ -1,12 +1,12 @@
 import type { EventEmitter } from "node:events";
-import type { SafeFailure } from "../diagnostics/index.ts";
-import type { ExecutionEvents, ExecutionOptions } from "./execution/index.ts";
+import type { SafeFailure } from "../diagnostics";
+import type { ExecutionEvents, ExecutionOptions } from "./execution";
 import type {
   CreationOutcome,
   GenerationEffects,
   PreparationStep,
   SandboxGeneration,
-} from "./generation/index.ts";
+} from "./generation";
 
 export type SandboxRuntime = Readonly<{
   exec: (

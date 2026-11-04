@@ -1,10 +1,6 @@
 import process from "node:process";
-import type { AcquisitionCapture } from "../host/index.ts";
-import {
-  HostProcessError,
-  nativeFailure,
-  runHostProcess,
-} from "../host/index.ts";
+import type { AcquisitionCapture } from "../host";
+import { HostProcessError, nativeFailure, runHostProcess } from "../host";
 import { connectGateway, reserveGatewayPort } from "./client.ts";
 import { prepareGatewayTls, writeGatewayConfig } from "./config.ts";
 import { createGatewayNetwork } from "./network.ts";

@@ -21,7 +21,7 @@ import type {
   ScopeCommitResult,
   SettingsMutation,
   ToggleTarget,
-} from "../catalog/index.ts";
+} from "../catalog";
 import {
   applySettingsMutations,
   hasSettingsConflict,

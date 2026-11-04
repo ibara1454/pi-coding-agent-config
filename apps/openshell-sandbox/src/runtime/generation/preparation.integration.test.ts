@@ -1,5 +1,5 @@
 import { describe, expect, test as it } from "bun:test";
-import { HostProcessError, type ProcessClose } from "../../host/index.ts";
+import { HostProcessError, type ProcessClose } from "../../host";
 import { runtimeFixture } from "../test/index.helper.ts";
 import { prepareGeneration } from "./preparation.ts";
 import { input } from "./test/generation.helper.ts";

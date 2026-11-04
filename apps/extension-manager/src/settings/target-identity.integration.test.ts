@@ -1,10 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  PackageToggleTarget,
-  TopLevelToggleTarget,
-} from "../catalog/index.ts";
+import type { PackageToggleTarget, TopLevelToggleTarget } from "../catalog";
 import { validateTargetIdentity } from "./target-identity.ts";
 import {
   basePackageTarget,

@@ -4,7 +4,7 @@ import type {
   CatalogSeed,
   ResourceKind,
   ToggleTarget,
-} from "../../catalog/index.ts";
+} from "../../catalog";
 
 // Inert catalog data shared by the panel state, rendering, and integration
 // suites. TUI, theme, committer, and lifecycle fixtures stay in each suite.

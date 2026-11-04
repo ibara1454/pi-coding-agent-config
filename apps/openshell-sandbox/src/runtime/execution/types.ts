@@ -1,6 +1,6 @@
 import type * as filesystem from "node:fs/promises";
-import type { SandboxGeneration } from "../generation/index.ts";
-import type { TimerEffects } from "../work/index.ts";
+import type { SandboxGeneration } from "../generation";
+import type { TimerEffects } from "../work";
 
 export interface ExecutionEvents {
   data: [chunk: Uint8Array];

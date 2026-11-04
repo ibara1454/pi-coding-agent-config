@@ -1,5 +1,5 @@
 import { describe, expect, test as it, mock } from "bun:test";
-import type { HostPaths } from "../host/index.ts";
+import type { HostPaths } from "../host";
 import {
   type GitProcess,
   inspectWorkspace,

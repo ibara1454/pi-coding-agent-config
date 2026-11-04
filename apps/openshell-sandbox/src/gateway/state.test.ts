@@ -1,7 +1,7 @@
 import { describe, expect, test as it, mock, spyOn } from "bun:test";
 import type { Stats } from "node:fs";
-import type { ManagedProcess, OwnedResource } from "../host/index.ts";
-import { HostProcessError } from "../host/index.ts";
+import type { ManagedProcess, OwnedResource } from "../host";
+import { HostProcessError } from "../host";
 import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { createGatewayState } from "./state.ts";
 import { directory, withStats } from "./test/acquisition-effects.helper.ts";

@@ -1,12 +1,12 @@
-import type { SandboxEnvironment } from "../configuration/index.ts";
-import type { SafeFailure } from "../diagnostics/index.ts";
-import { safeText } from "../diagnostics/index.ts";
-import type { GatewayRecoveryCoordinates } from "../gateway/index.ts";
+import type { SandboxEnvironment } from "../configuration";
+import type { SafeFailure } from "../diagnostics";
+import { safeText } from "../diagnostics";
+import type { GatewayRecoveryCoordinates } from "../gateway";
 import type {
   CreationOutcome,
   PreparedGateway,
   SandboxGeneration,
-} from "./generation/index.ts";
+} from "./generation";
 import type {
   RuntimeDiagnostics,
   RuntimeObserver,

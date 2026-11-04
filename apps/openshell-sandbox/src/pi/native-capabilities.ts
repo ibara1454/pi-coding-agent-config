@@ -1,5 +1,5 @@
-import type { HostCaptureEffects } from "../host/index.ts";
-import type { RuntimeNativeCapabilities } from "../runtime/index.ts";
+import type { HostCaptureEffects } from "../host";
+import type { RuntimeNativeCapabilities } from "../runtime";
 
 /** Native readers and adapters acquired separately for each session activation.
  * @example Each activation captures fresh host facts from the supplied readers.

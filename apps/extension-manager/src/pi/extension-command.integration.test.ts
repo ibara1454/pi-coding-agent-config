@@ -9,9 +9,9 @@ import type {
   CommitRequest,
   ResourceScope,
   SettingsDocument,
-} from "../catalog/index.ts";
-import { ExtensionCatalog } from "../catalog/index.ts";
-import { PackageResolutionFailure } from "../discovery/index.ts";
+} from "../catalog";
+import { ExtensionCatalog } from "../catalog";
+import { PackageResolutionFailure } from "../discovery";
 import {
   type ExtensionManagerApi,
   registerExtensionManager,

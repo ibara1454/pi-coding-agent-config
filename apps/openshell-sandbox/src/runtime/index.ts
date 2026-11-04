@@ -1,7 +1,7 @@
 export type { RuntimeNativeCapabilities } from "./effects.ts";
 export { createRuntimeEffects } from "./effects.ts";
-export type { ExecutionEvents, ExecutionOptions } from "./execution/index.ts";
-export type { PreparationStep } from "./generation/index.ts";
+export type { ExecutionEvents, ExecutionOptions } from "./execution";
+export type { PreparationStep } from "./generation";
 export { createSandboxRuntime } from "./runtime.ts";
 export type {
   RuntimeEffects,
@@ -9,4 +9,4 @@ export type {
   SandboxRuntime,
   SanitizedRuntimeStatus,
 } from "./types.ts";
-export { CLEANUP_TIMEOUT_MS, deadline, waitBounded } from "./work/index.ts";
+export { CLEANUP_TIMEOUT_MS, deadline, waitBounded } from "./work";

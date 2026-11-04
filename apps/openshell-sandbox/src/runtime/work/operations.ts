@@ -1,4 +1,4 @@
-import { RuntimeFailure } from "../../diagnostics/index.ts";
+import { RuntimeFailure } from "../../diagnostics";
 import type { TimerEffects } from "./types.ts";
 
 export const SETUP_TIMEOUT_MS = 600_000;

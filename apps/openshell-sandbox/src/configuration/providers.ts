@@ -5,7 +5,7 @@ import {
   object,
   SandboxConfigurationError,
   text,
-} from "./validation/index.ts";
+} from "./validation";
 
 const IDENTIFIER = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
 const ENVIRONMENT_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u;

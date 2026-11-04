@@ -1,7 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { CatalogSeed } from "../catalog/index.ts";
-import { ExtensionCatalog } from "../catalog/index.ts";
-import { PackageResolutionFailure } from "../discovery/index.ts";
+import type { CatalogSeed } from "../catalog";
+import { ExtensionCatalog } from "../catalog";
+import { PackageResolutionFailure } from "../discovery";
 import { commitNotification } from "./commit-notification.ts";
 import {
   createDefaultRuntime,

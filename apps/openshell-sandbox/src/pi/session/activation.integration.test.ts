@@ -2,14 +2,11 @@ import { describe, expect, test as it } from "bun:test";
 import { once } from "node:events";
 import { setImmediate } from "node:timers/promises";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ProcessEffects } from "../../host/index.ts";
+import type { ProcessEffects } from "../../host";
 import { processScenario } from "../../host/test/index.helper.ts";
-import {
-  CLEANUP_TIMEOUT_MS,
-  type SandboxRuntime,
-} from "../../runtime/index.ts";
+import { CLEANUP_TIMEOUT_MS, type SandboxRuntime } from "../../runtime";
 import { runtimeFixture } from "../../runtime/test/index.helper.ts";
-import type { PiNativeCapabilities } from "../index.ts";
+import type { PiNativeCapabilities } from "../";
 import {
   adapterFixture,
   adapterRuntimeFixture,

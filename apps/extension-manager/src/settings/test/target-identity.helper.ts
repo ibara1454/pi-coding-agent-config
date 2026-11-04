@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PackageToggleTarget } from "../../catalog/index.ts";
+import type { PackageToggleTarget } from "../../catalog";
 
 // Inert package toggle targets, real temporary package layouts, and the package
 // drift cases shared by the target identity and persistence integration suites.

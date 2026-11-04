@@ -5,7 +5,7 @@ import {
   ProviderProfileResponseSchema,
   ProviderResponseSchema,
 } from "@nvidia/openshell-sdk/raw";
-import type { OwnedResource } from "../host/index.ts";
+import type { OwnedResource } from "../host";
 import { provisionProviders } from "./provisioning.ts";
 import {
   environment,

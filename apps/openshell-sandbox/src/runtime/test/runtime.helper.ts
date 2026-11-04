@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { ProviderProfileResponseSchema } from "@nvidia/openshell-sdk/raw";
-import type { SandboxEnvironment } from "../../configuration/index.ts";
-import type { SafeFailure } from "../../diagnostics/index.ts";
-import type { GatewayHostContext } from "../../gateway/index.ts";
+import type { SandboxEnvironment } from "../../configuration";
+import type { SafeFailure } from "../../diagnostics";
+import type { GatewayHostContext } from "../../gateway";
 import { environment } from "../../providers/test/index.helper.ts";
 import { createSandboxRuntime } from "../runtime.ts";
 import type {

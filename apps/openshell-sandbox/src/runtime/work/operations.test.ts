@@ -1,6 +1,6 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import { getEventListeners } from "node:events";
-import { RuntimeFailure } from "../../diagnostics/index.ts";
+import { RuntimeFailure } from "../../diagnostics";
 import { runtimeFixture } from "../test/index.helper.ts";
 import { assertLive, deadline, waitBounded } from "./operations.ts";
 
