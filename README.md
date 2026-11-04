@@ -16,8 +16,8 @@ This repository contains personal configuration and customized extensions for
 
 ### Install a compatible Pi version
 
-The extensions' Pi peer dependencies declare `^1.2.0`:
-**`>=1.2.0 <2.0.0`**, excluding prereleases. Install **Pi `1.2.0`** to match
+The extensions' Pi peer dependencies declare `^1.4.0`:
+**`>=1.4.0 <2.0.0`**, excluding prereleases. Install **Pi `1.4.0`** to match
 `pi-coding-agent`, `pi-ai`, and `pi-tui` in [`bun.lock`](bun.lock).
 The range declares compatibility; it does not guarantee every 1.x release was tested.
 Versions outside it are unsupported. Avoid `@latest` and independent Pi upgrades;
@@ -32,7 +32,7 @@ No Node.js or npm installation is required:
 
 ```sh
 export PATH="$(bun pm bin -g):$PATH"
-bun install -g --ignore-scripts @earendil-works/pi-coding-agent@1.2.0
+bun install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
 bun run --bun pi --version
 ```
 
@@ -43,18 +43,18 @@ Use `bun run --bun pi` to override Pi's Node shebang.
 Install [Node.js](https://nodejs.org/en/download) **22.19.0+**, including npm:
 
 ```sh
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.2.0
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
 pi --version
 ```
 
-For either option, the version check must print `1.2.0`. An existing npm
+For either option, the version check must print `1.4.0`. An existing npm
 installation reporting this version needs no reinstall.
 
 The CLI examples below use `pi`; replace it with `bun run --bun pi` for the
 Bun-only option. Both options use the same repository setup.
 
 On first launch, run `/login` to connect a provider, or configure its API key;
-see [Pi's getting-started guide](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/README.md#getting-started).
+see [Pi's getting-started guide](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/README.md#getting-started).
 
 ### Use the entire repository
 
