@@ -474,6 +474,39 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual(["npm:convention:visible", "npm:default:visible"]);
   });
 
+  it.each([
+    [
+      "only changelog metadata",
+      { changelogPath: "CHANGELOG.md" },
+      ["npm:tool:visible"],
+    ],
+    [
+      "an invalid resource array",
+      { extensions: ["custom.ts", false] },
+      ["npm:tool:visible"],
+    ],
+    ["an explicitly empty extension array", { extensions: [] }, []],
+    ["an explicitly empty skills array", { skills: [] }, []],
+  ])(
+    "should list only enabled package extensions when the manifest has %s",
+    (_condition, pi, expected) => {
+      const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
+        [join(root, "package.json")]: JSON.stringify({ pi }),
+        [join(root, "extensions", "visible.ts")]: "",
+        [join(root, "custom.ts")]: "",
+      });
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir: AGENT_DIR,
+          projectTrusted: false,
+        }).map((row) => row.name),
+      ).toEqual(expected);
+    },
+  );
+
   it("should retain standalone file and directory packages while discarding malformed settings entries", () => {
     const standalone = join(AGENT_DIR, "standalone.ts");
     const directory = join(AGENT_DIR, "empty-package");

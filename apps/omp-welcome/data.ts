@@ -837,19 +837,29 @@ function packageExtensionFiles(
 
 type PackageCollectionMode = "package" | "default" | "filter";
 
+/**
+ * Discovers package extensions using Pi 1.5 resource declarations and filters.
+ * Reads metadata only; unavailable or invalid manifests use convention discovery.
+ * @param root Package directory containing optional package.json and extensions/.
+ * @param mode String package, default package object, or explicit object filter.
+ * @returns Extension files and whether the package declares or contains resources.
+ * @example With only pi.changelogPath, packageFiles("/pkg", "package") discovers /pkg/extensions/tool.ts.
+ */
 function packageFiles(
   root: string,
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
   const manifest = readJson(join(root, "package.json"));
-  const { pi } = manifest;
-  const hasPiManifest =
-    pi !== null && typeof pi === "object" && !Array.isArray(pi);
+  const { pi: rawPi } = manifest;
+  const pi =
+    rawPi !== null && typeof rawPi === "object" && !Array.isArray(rawPi)
+      ? (rawPi as Record<string, unknown>)
+      : undefined;
+  const rawExtensions = pi?.["extensions"];
   const extensions =
-    hasPiManifest && "extensions" in pi && Array.isArray(pi.extensions)
-      ? pi.extensions.filter(
-          (entry): entry is string => typeof entry === "string",
-        )
+    Array.isArray(rawExtensions) &&
+    rawExtensions.every((entry): entry is string => typeof entry === "string")
+      ? rawExtensions
       : undefined;
   const convention = () => {
     const extensionsDir = join(root, "extensions");
@@ -887,10 +897,8 @@ function packageFiles(
     };
   };
 
-  // Object filters use Pi's collectManifestFiles path: an absent or empty
-  // extension manifest falls back to the convention directory. Default package
-  // loading treats any pi manifest as authoritative, even when it lists no
-  // extensions.
+  // Object filters fall back for absent or empty extension arrays; string
+  // packages treat only valid resource arrays as authoritative.
   if (mode === "filter") {
     return extensions && extensions.length > 0
       ? fromManifest(extensions)
@@ -899,9 +907,19 @@ function packageFiles(
   if (extensions !== undefined) {
     return fromManifest(extensions);
   }
-  return mode === "default" || !hasPiManifest
-    ? convention()
-    : { files: [], hasPackageResources: true };
+  const hasOtherResources =
+    mode === "package" &&
+    pi !== undefined &&
+    ["skills", "prompts", "themes"].some((field) => {
+      const entries = pi[field];
+      return (
+        Array.isArray(entries) &&
+        entries.every((entry) => typeof entry === "string")
+      );
+    });
+  return hasOtherResources
+    ? { files: [], hasPackageResources: true }
+    : convention();
 }
 
 function compactPackageSourceLabel(source: string): string {
@@ -1160,7 +1178,7 @@ function* packageSnapshotResources(
 
 /**
  * Captures Pi's enabled startup extension set without loading or installing
- * anything again. It mirrors Pi 1.2.0's trust gate, scope precedence,
+ * anything again. It mirrors Pi 1.5.0's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
  * Reads local metadata only; it neither imports extensions nor installs packages.
  * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.
