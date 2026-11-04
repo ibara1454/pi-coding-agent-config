@@ -9,7 +9,7 @@ description: >-
 
 # Repository design
 
-Apply the requirements below to every affected function and interface. Requirement words and deviations are defined in [AGENTS.md](../../../AGENTS.md#repository-engineering).
+Apply the requirements below to every affected function and interface, together with the [minimal-change gate](../../../AGENTS.md#minimal-change-gate). Requirement words and deviations are defined in [AGENTS.md](../../../AGENTS.md#repository-engineering).
 
 Examples isolate the illustrated rule; surrounding imports, types, and fixture setup are omitted.
 
@@ -120,7 +120,7 @@ Before completing the change, check every added or modified function against the
 
 ## Validate before use and keep failures visible
 
-Validate host, process, configuration, filesystem, network, and terminal data before policy consumes it. Check trust or permission before touching guarded resources. Catch an effect failure in the module that owns the effect.
+Validate host, process, configuration, filesystem, network, and terminal data before policy consumes it. Check trust or permission before touching guarded resources. Let failures propagate unless the task or existing contract requires specific recovery; then catch only the relevant failure in the module that owns the effect.
 
 A required-operation failure MUST remain observable through the declared result, error, or notification. An optional integration MAY fail open without blocking unrelated host behavior.
 

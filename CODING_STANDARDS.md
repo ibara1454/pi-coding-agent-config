@@ -13,6 +13,7 @@ Repository **MUST** and **SHOULD** rules, including their negative forms, are re
 - Use **Bun** for root workspace dependency installation and tests. Run the affected workspace's test command before delivering a permanent behavior change.
 - **Implementation and interface review:** Before implementing, refactoring, or reviewing functions, methods, module boundaries, parameters/results, exports, validation/failures, effects, or resource lifetimes, MUST use the `repo-design` skill.
 - **Test design and review:** Before designing, adding, modifying, or reviewing tests, selecting test levels or mocks, naming suites/cases, building tables, or changing snapshots, MUST use the `repo-testing` skill.
+- **Scope review:** Apply the [minimal-change gate](AGENTS.md#minimal-change-gate). Flag added hunks, README explanations, and recovery boundaries without a concrete requested behavior, observed failure, or existing contract requiring them; require their removal before approval.
 
 ## TypeScript
 
@@ -39,7 +40,7 @@ function hasExpired(expiresAt: number): boolean {
 **Files:** `apps/**/*.ts` (runtime implementation, excluding test suites and test helpers).
 
 - Keep mutable session state closure-local, and release timers, subscriptions, panels, terminal modes, and retained host references on shutdown and every earlier exit path.
-- Wrap `pi.exec`, filesystem parsing, sockets, and other external operations in `try`/`catch`; degrade gracefully, retain usable cached state where appropriate, and never block the host tool flow on optional integration failure.
+- Preserve existing failure behavior. New catches, fallbacks, retries, and recovery paths require the task or existing contract to specify failure handling; catch only the relevant failure in the effect-owning module. Otherwise, let errors propagate.
 - For Pi refresh work triggered by events or renders, reuse matching in-flight work and invalidate cached results when relevant inputs change.
 
 ### Terminal UI
