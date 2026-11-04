@@ -233,7 +233,7 @@ export function effectiveQuietStartup(
   cwd: string,
   agentDir = getAgentDir(),
   projectTrusted = false,
-  argv: readonly string[] = process.argv,
+  argv = process.argv,
 ): boolean | "header" {
   if (argv.includes("--verbose")) {
     return false;

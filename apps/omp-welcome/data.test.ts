@@ -156,20 +156,26 @@ describe("effectiveQuietStartup", () => {
     },
   );
 
-  it.each([
+  it.each<{
+    condition: string;
+    user: string;
+    project: string;
+    argv: string[];
+    expected: boolean | "header";
+  }>([
     {
       condition: "the user selects header-only startup",
       user: '{"quietStartup":"header"}',
       project: "{}",
       argv: ["pi"],
-      expected: "header" as const,
+      expected: "header",
     },
     {
       condition: "the trusted project selects header-only startup",
       user: '{"quietStartup":true}',
       project: '{"quietStartup":"header"}',
       argv: ["pi"],
-      expected: "header" as const,
+      expected: "header",
     },
     {
       condition: "the trusted project disables header-only startup",
