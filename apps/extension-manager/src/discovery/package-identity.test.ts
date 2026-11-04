@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ResourceScope } from "../catalog/types.ts";
+import type { ResourceScope } from "../catalog/index.ts";
 import { packageIdentity } from "./package-identity.ts";
 
 const cwd = "/repo";

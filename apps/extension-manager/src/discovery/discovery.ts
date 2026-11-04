@@ -22,25 +22,23 @@ import type {
   ResourceScope,
   SettingsDocument,
   ToggleTarget,
-} from "../catalog/types.ts";
-import {
-  applyPatterns,
-  explainFilterState,
-  isEnabledByAutoloadDisabledPatterns,
-  matchesAutoloadDisabledPattern,
-  mutatePackagePatterns,
-} from "../settings/resource-filters.ts";
-import {
-  isJsonObject,
-  packageSource,
-  readSettingsDocument,
-} from "../settings/settings.ts";
-import { packageIdentity } from "./package-identity.ts";
+} from "../catalog/index.ts";
 import {
   canonicalizeResourcePath,
   packageResourcePaths,
   resourceFilterPath,
-} from "./package-resource-paths.ts";
+} from "../resource-paths/index.ts";
+import {
+  applyPatterns,
+  explainFilterState,
+  isEnabledByAutoloadDisabledPatterns,
+  isJsonObject,
+  matchesAutoloadDisabledPattern,
+  mutatePackagePatterns,
+  packageSource,
+  readSettingsDocument,
+} from "../settings/index.ts";
+import { packageIdentity } from "./package-identity.ts";
 
 const RESOURCE_FIELDS = ["extensions", "skills"] as const;
 const EXTENSION_SUFFIX = /\.(?:[cm]?[jt]s)$/i;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type {
   PackageToggleTarget,
   TopLevelToggleTarget,
-} from "../catalog/types.ts";
+} from "../catalog/index.ts";
 import { validateTargetIdentity } from "./target-identity.ts";
 import {
   basePackageTarget,

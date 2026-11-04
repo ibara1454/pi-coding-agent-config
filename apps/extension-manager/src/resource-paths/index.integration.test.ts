@@ -13,7 +13,7 @@ import {
   canonicalizeResourcePath,
   packageResourcePaths,
   resourceFilterPath,
-} from "./package-resource-paths.ts";
+} from "./index.ts";
 
 const MODULE = "export default () => {};\n";
 const roots: string[] = [];

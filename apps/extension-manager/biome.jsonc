@@ -13,6 +13,17 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/**/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            // Module index files define explicit package interfaces.
+            "noBarrelFile": "off"
+          }
+        }
+      }
     }
   ]
 }

@@ -7,7 +7,7 @@ import type {
   SettingsDocument,
   SettingsMutation,
   TopLevelToggleTarget,
-} from "../catalog/types.ts";
+} from "../catalog/index.ts";
 import { commitSettings, type PersistenceIo } from "./persistence.ts";
 import { parseSettingsDocument } from "./settings.ts";
 

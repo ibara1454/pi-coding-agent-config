@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { CommitResult } from "../catalog/types.ts";
-import type { PanelResult } from "../panel/panel.ts";
+import type { CommitResult } from "../catalog/index.ts";
+import type { PanelResult } from "../panel/index.ts";
 import { commitNotification } from "./commit-notification.ts";
 
 type CommitPanelResult = Extract<PanelResult, { type: "commit" }>;

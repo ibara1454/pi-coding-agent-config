@@ -3,11 +3,14 @@ import {
   type ExtensionCommandContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import type { CatalogCommitter, ExtensionCatalog } from "../catalog/catalog.ts";
-import type { CatalogSeed } from "../catalog/types.ts";
-import { discoverCatalog } from "../discovery/discovery.ts";
-import { ExtensionManagerPanel, type PanelResult } from "../panel/panel.ts";
-import { commitSettings } from "../settings/persistence.ts";
+import type {
+  CatalogCommitter,
+  CatalogSeed,
+  ExtensionCatalog,
+} from "../catalog/index.ts";
+import { discoverCatalog } from "../discovery/index.ts";
+import { ExtensionManagerPanel, type PanelResult } from "../panel/index.ts";
+import { commitSettings } from "../settings/index.ts";
 
 interface DiscoverInput {
   readonly agentDir: string;

@@ -8,8 +8,11 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { ExtensionCatalog } from "../catalog/catalog.ts";
-import type { CatalogView, CommitResult } from "../catalog/types.ts";
+import type {
+  CatalogView,
+  CommitResult,
+  ExtensionCatalog,
+} from "../catalog/index.ts";
 import { ExtensionManagerPanelState, TABS } from "./panel-state.ts";
 
 const ENABLE_MOUSE = "\u001b[?1000h\u001b[?1006h";

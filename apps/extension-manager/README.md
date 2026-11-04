@@ -227,11 +227,15 @@ The package keeps discovery and persistence behind two deep interfaces:
 `discoverCatalog(...)` computes the complete panel seed without executing
 extensions, and `commitSettings(...)` owns locked validation and writes.
 
+Cross-domain imports use the owning module's explicit `index.ts` exports;
+same-domain imports stay direct.
+
 | Area | Files |
 | --- | --- |
 | Host registration and lifecycle | `src/index.ts`, `src/pi/extension-command.ts`, `src/pi/extension-runtime.ts`, `src/pi/commit-notification.ts` |
 | Catalog and shared contracts | `src/catalog/catalog.ts`, `src/catalog/types.ts` |
-| Discovery and Pi resolution | `src/discovery/discovery.ts`, `src/discovery/package-identity.ts`, `src/discovery/package-resource-paths.ts` |
+| Discovery and Pi resolution | `src/discovery/discovery.ts`, `src/discovery/package-identity.ts` |
+| Shared resource paths | `src/resource-paths/index.ts` |
 | Staging and terminal UI | `src/panel/panel-state.ts`, `src/panel/panel.ts` |
 | Filter and settings policy | `src/settings/resource-filters.ts`, `src/settings/settings.ts` |
 | Safe persistence | `src/settings/persistence.ts`, `src/settings/target-identity.ts`, `src/settings/settings-serialization.ts` |

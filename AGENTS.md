@@ -32,7 +32,7 @@ Before editing and before delivery, ask: **Which requested behavior, observed fa
 
 ## Architecture & Data Flow
 
-- Extension manager: `apps/extension-manager/src/index.ts` delegates `/extensions` registration to `src/pi/extension-command.ts`; `src/pi/extension-runtime.ts` binds discovery, persistence, panel creation, and disposal. Implementation and tests are grouped under `src/{pi,catalog,discovery,settings,panel}`.
+- Extension manager: `apps/extension-manager/src/index.ts` delegates `/extensions` registration through `src/pi/index.ts`; `src/pi/extension-runtime.ts` binds discovery, persistence, panel creation, and disposal. Implementation and tests are grouped under `src/{pi,catalog,discovery,resource-paths,settings,panel}`, with explicit `index.ts` interfaces for cross-domain imports.
 - Status line: `apps/omp-status-line/src/index.ts` delegates to `src/pi/registration.ts`, which reads settings, aggregates session/context/git state, and wraps the editor and footer. Context, Git, and declarative rendering modules live under `src/{context,git,rendering}`.
 - Welcome UI: `apps/omp-welcome/src/index.ts` delegates to `src/pi/registration.ts`. `src/discovery/data.ts` handles discovery/settings snapshots; `src/rendering/welcome.ts` renders; `src/pi/resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
 - Provider base URL overrides: `apps/provider-base-url-overrides/src/index.ts` delegates to `src/pi/registration.ts`, which validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.

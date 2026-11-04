@@ -7,9 +7,9 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { KeybindingsManager, TUI } from "@earendil-works/pi-tui";
-import { ExtensionCatalog } from "../catalog/catalog.ts";
-import type { CatalogSeed } from "../catalog/types.ts";
-import type { PanelResult } from "../panel/panel.ts";
+import type { CatalogSeed } from "../catalog/index.ts";
+import { ExtensionCatalog } from "../catalog/index.ts";
+import type { PanelResult } from "../panel/index.ts";
 import { createDefaultRuntime } from "./extension-runtime.ts";
 
 // The panel restores the terminal by disabling mouse reporting on dispose.

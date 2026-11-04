@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { minimatch } from "minimatch";
-import { toPosixPath } from "../discovery/package-resource-paths.ts";
+import { toPosixPath } from "../resource-paths/index.ts";
 
 /**
  * Expands Pi's home-relative filter paths before exact or glob matching.

@@ -4,7 +4,7 @@ import type {
   PackageToggleTarget,
   SettingsMutation,
   TopLevelToggleTarget,
-} from "../catalog/types.ts";
+} from "../catalog/index.ts";
 import {
   applySettingsMutations,
   hasSettingsConflict,

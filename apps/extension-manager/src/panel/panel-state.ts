@@ -1,6 +1,5 @@
 import { fuzzyFilter } from "@earendil-works/pi-tui";
-import type { ExtensionCatalog } from "../catalog/catalog.ts";
-import type { CatalogRow } from "../catalog/types.ts";
+import type { CatalogRow, ExtensionCatalog } from "../catalog/index.ts";
 
 export const TABS = ["All", "Extensions", "Skills"] as const;
 

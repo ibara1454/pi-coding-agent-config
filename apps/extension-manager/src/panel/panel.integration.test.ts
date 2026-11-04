@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { ExtensionCatalog } from "../catalog/catalog.ts";
 import type {
   CatalogRow,
   CommitRequest,
   CommitResult,
-} from "../catalog/types.ts";
+} from "../catalog/index.ts";
+import { ExtensionCatalog } from "../catalog/index.ts";
 import { ExtensionManagerPanel, type PanelResult } from "./panel.ts";
 import {
   catalogRow,

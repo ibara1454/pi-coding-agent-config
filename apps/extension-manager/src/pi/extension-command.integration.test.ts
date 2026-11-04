@@ -4,14 +4,14 @@ import type {
   ExtensionHandler,
   SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
-import { ExtensionCatalog } from "../catalog/catalog.ts";
 import type {
   CatalogSeed,
   CommitRequest,
   ResourceScope,
   SettingsDocument,
-} from "../catalog/types.ts";
-import { PackageResolutionFailure } from "../discovery/discovery.ts";
+} from "../catalog/index.ts";
+import { ExtensionCatalog } from "../catalog/index.ts";
+import { PackageResolutionFailure } from "../discovery/index.ts";
 import {
   type ExtensionManagerApi,
   registerExtensionManager,

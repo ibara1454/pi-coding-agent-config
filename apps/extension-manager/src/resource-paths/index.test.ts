@@ -2,7 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import type { PathLike } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept live filesystem imports while resource traversal remains real.
 import * as fs from "node:fs";
-import { packageResourcePaths } from "./package-resource-paths.ts";
+import { packageResourcePaths } from "./index.ts";
 
 describe("packageResourcePaths", () => {
   it("should retain resolved files when skill enumeration fails and another resolver path is not a file", () => {
