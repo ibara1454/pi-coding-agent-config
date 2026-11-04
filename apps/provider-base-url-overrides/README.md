@@ -42,13 +42,15 @@ The root is trimmed once. Anthropic and Vertex use the exact trimmed root, inclu
 
 `PROVIDER_BASE_URL` is captured when the extension initializes. The only lifecycle hook is `session_start`; at that event, the extension snapshots unique provider IDs represented then and wraps those effective Providers. A same-ID wrapper copies `id`, `name`, `headers`, and `auth`, and sets its `baseUrl` to the trimmed proxy root. It delegates `getModels`, `stream`, and `streamSimple`, plus `refreshModels`, `filterModels`, `fetchDeferred`, and `cancelDeferred` when present, to the original Provider with the original receiver. Routed model objects are cloned. Azure transport options and env maps are cloned before endpoint fields are overwritten; non-Azure options retain their original identity. Original Providers, models, and caller option/env objects are not mutated.
 
+OpenRouter's per-key catalog refresh receives the routed `/v1` base, so its `/models/user` request uses the same API prefix as chat requests.
+
 Registry or hook inspection failures emit a generic warning and leave the extension inactive without blocking session startup. Invalid registry entries are ignored; invalid Providers and failed registrations skip only the affected override, warn without echoing external values, and allow remaining Providers to install. Once installed, a wrapper exposes malformed routed model data and Azure option/env data as `TypeError`; failures from original Provider methods propagate unchanged.
 
 Providers added later are not wrapped until a later `session_start`, such as after Pi `/reload`. Changing the process environment requires reinitialization; the extension does not poll. Unsupported API types keep their original model URLs. Custom transports that ignore `model.baseUrl` cannot be forced through this extension.
 
 ### Azure OpenAI
 
-For `azure-openai-responses`, the wrapper overwrites both `options.azureBaseUrl` and `options.env.AZURE_OPENAI_BASE_URL` with the routed `/v1` URL. Other option and environment fields are preserved, caller objects remain unchanged, and non-Azure option identity is preserved.
+For `azure-openai-responses` and the `azure` provider's `openai-completions` models, the wrapper overwrites both `options.azureBaseUrl` and `options.env.AZURE_OPENAI_BASE_URL` with the routed `/v1` URL. Other option and environment fields are preserved, caller objects remain unchanged, and non-Azure option identity is preserved.
 
 ## Focused test
 

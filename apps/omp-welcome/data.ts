@@ -292,6 +292,10 @@ function globPattern(pattern: string): RegExp {
   return new RegExp(`^${source}$`);
 }
 
+/**
+ * Matches Pi resource globs after expanding home-relative paths.
+ * @example matchesPattern("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
+ */
 function matchesPattern(
   filePath: string,
   patterns: readonly string[],
@@ -301,7 +305,10 @@ function matchesPattern(
   const fileBasename = basename(filePath);
   const absolute = toPosixPath(resolve(filePath));
   return patterns.some((pattern) => {
-    const normalized = toPosixPath(pattern).replace(RELATIVE_PREFIX, "");
+    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
+      RELATIVE_PREFIX,
+      "",
+    );
     const matcher = globPattern(normalized);
     return (
       matcher.test(relativePath) ||
@@ -311,6 +318,10 @@ function matchesPattern(
   });
 }
 
+/**
+ * Matches exact resource paths after Pi path and relative-prefix normalization.
+ * @example matchesExactPath("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
+ */
 function matchesExactPath(
   filePath: string,
   patterns: readonly string[],
@@ -319,7 +330,10 @@ function matchesExactPath(
   const relativePath = toPosixPath(relative(baseDir, filePath));
   const absolute = toPosixPath(resolve(filePath));
   return patterns.some((pattern) => {
-    const normalized = toPosixPath(pattern).replace(RELATIVE_PREFIX, "");
+    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
+      RELATIVE_PREFIX,
+      "",
+    );
     return normalized === relativePath || normalized === absolute;
   });
 }
@@ -1146,7 +1160,7 @@ function* packageSnapshotResources(
 
 /**
  * Captures Pi's enabled startup extension set without loading or installing
- * anything again. It mirrors Pi 0.84.1's trust gate, scope precedence,
+ * anything again. It mirrors Pi 1.2.0's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
  * Reads local metadata only; it neither imports extensions nor installs packages.
  * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.

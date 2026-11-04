@@ -220,6 +220,29 @@ describe("effectiveQuietStartup", () => {
 
 describe("collectWelcomeExtensions", () => {
   it.each([
+    "!~/agent/extensions/blocked*.ts",
+    "-~/agent/extensions/blocked.ts",
+  ])(
+    "should omit a home-relative excluded extension when the filter is %s",
+    (pattern) => {
+      const agentDir = "/unit/home/agent";
+      mockDiscovery({
+        [join(agentDir, "settings.json")]: JSON.stringify({
+          extensions: [pattern],
+        }),
+        [join(agentDir, "extensions", "blocked.ts")]: "",
+        [join(agentDir, "extensions", "kept.ts")]: "",
+      });
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir,
+          projectTrusted: false,
+        }).map((row) => row.name),
+      ).toEqual(["kept"]);
+    },
+  );
+  it.each([
     [
       "git:github:team/tool@main",
       "github.com/team/tool",
