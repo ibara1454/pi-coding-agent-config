@@ -23,15 +23,6 @@ The range declares compatibility; it does not guarantee every 1.x release was te
 Versions outside it are unsupported. Avoid `@latest` and independent Pi upgrades;
 recheck the pin when updating this repository.
 
-Root development dependencies pin the Pi SDK to `1.0.0`; `bun.lock` records the
-tested internal Pi package versions. Use `bun install --frozen-lockfile` to keep
-that graph. Recheck SDK compatibility when updating the lockfile: mixing newer
-internal Pi packages with the `1.0.0` SDK can break extension imports even when
-`pi --version` still prints `1.0.0`.
-
-Pi `1.0.0` defaults to fullscreen. Set `"tuiMode": "regular"` in Pi settings or
-pass `--tui-mode regular` to retain normal terminal scrollback.
-
 Install [Bun](https://bun.com/docs/installation) **1.4.4**, matching the root
 `packageManager`, for either option.
 
