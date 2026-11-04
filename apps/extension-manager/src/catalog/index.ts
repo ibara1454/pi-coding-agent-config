@@ -1,0 +1,21 @@
+export { type CatalogCommitter, ExtensionCatalog } from "./catalog.ts";
+export type {
+  CatalogDiagnostic,
+  CatalogRow,
+  CatalogSeed,
+  CatalogView,
+  CommitRequest,
+  CommitResult,
+  JsonObject,
+  PackageLocator,
+  PackageToggleTarget,
+  ResourceField,
+  ResourceKind,
+  ResourceOrigin,
+  ResourceScope,
+  ScopeCommitResult,
+  SettingsDocument,
+  SettingsMutation,
+  ToggleTarget,
+  TopLevelToggleTarget,
+} from "./types.ts";
