@@ -64,7 +64,7 @@ interface PackageSource {
 }
 
 interface PiSettings {
-  quietStartup?: boolean;
+  quietStartup?: boolean | "header";
   packages?: Array<string | PackageSource>;
   extensions?: string[];
 }
@@ -150,6 +150,12 @@ export function getAgentDir(env: NodeJS.ProcessEnv = process.env): string {
     : join(homedir(), ".pi", "agent");
 }
 
+/**
+ * Filters untrusted settings metadata to the fields used by the welcome snapshot.
+ * @param settings Parsed metadata; invalid fields and entries are ignored.
+ * @returns Validated quiet mode, package sources, and extension paths.
+ * @example cleanSettings({ quietStartup: "header" }) // { quietStartup: "header" }
+ */
 function cleanSettings(settings: Record<string, unknown>): PiSettings {
   const { packages: rawPackages } = settings;
   const packages = Array.isArray(rawPackages)
@@ -186,7 +192,7 @@ function cleanSettings(settings: Record<string, unknown>): PiSettings {
     : undefined;
   const cleaned: PiSettings = {};
   const { quietStartup } = settings;
-  if (typeof quietStartup === "boolean") {
+  if (typeof quietStartup === "boolean" || quietStartup === "header") {
     cleaned.quietStartup = quietStartup;
   }
   if (packages !== undefined) {
@@ -214,13 +220,21 @@ function scopedSettings(
   };
 }
 
-/** Mirrors Pi's effective quiet setting, including the public --verbose override. */
+/**
+ * Resolves Pi's quiet startup mode without reading untrusted project settings.
+ * @param cwd Project directory whose `.pi/settings.json` may override user settings.
+ * @param agentDir User configuration directory; defaults to Pi's agent directory.
+ * @param projectTrusted Whether project settings may be read.
+ * @param argv Process arguments; `--verbose` disables quiet startup.
+ * @returns The effective boolean or header-only mode; absent settings return false.
+ * @example effectiveQuietStartup("/project", "/agent", false, ["pi", "--verbose"]) // false
+ */
 export function effectiveQuietStartup(
   cwd: string,
   agentDir = getAgentDir(),
   projectTrusted = false,
   argv = process.argv,
-): boolean {
+): boolean | "header" {
   if (argv.includes("--verbose")) {
     return false;
   }
@@ -278,6 +292,10 @@ function globPattern(pattern: string): RegExp {
   return new RegExp(`^${source}$`);
 }
 
+/**
+ * Matches Pi resource globs after expanding home-relative paths.
+ * @example matchesPattern("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
+ */
 function matchesPattern(
   filePath: string,
   patterns: readonly string[],
@@ -287,7 +305,10 @@ function matchesPattern(
   const fileBasename = basename(filePath);
   const absolute = toPosixPath(resolve(filePath));
   return patterns.some((pattern) => {
-    const normalized = toPosixPath(pattern).replace(RELATIVE_PREFIX, "");
+    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
+      RELATIVE_PREFIX,
+      "",
+    );
     const matcher = globPattern(normalized);
     return (
       matcher.test(relativePath) ||
@@ -297,6 +318,10 @@ function matchesPattern(
   });
 }
 
+/**
+ * Matches exact resource paths after Pi path and relative-prefix normalization.
+ * @example matchesExactPath("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
+ */
 function matchesExactPath(
   filePath: string,
   patterns: readonly string[],
@@ -305,7 +330,10 @@ function matchesExactPath(
   const relativePath = toPosixPath(relative(baseDir, filePath));
   const absolute = toPosixPath(resolve(filePath));
   return patterns.some((pattern) => {
-    const normalized = toPosixPath(pattern).replace(RELATIVE_PREFIX, "");
+    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
+      RELATIVE_PREFIX,
+      "",
+    );
     return normalized === relativePath || normalized === absolute;
   });
 }
@@ -1132,7 +1160,7 @@ function* packageSnapshotResources(
 
 /**
  * Captures Pi's enabled startup extension set without loading or installing
- * anything again. It mirrors Pi 0.84.1's trust gate, scope precedence,
+ * anything again. It mirrors Pi 1.2.0's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
  * Reads local metadata only; it neither imports extensions nor installs packages.
  * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.

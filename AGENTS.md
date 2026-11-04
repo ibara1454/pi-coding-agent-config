@@ -22,6 +22,14 @@ This repository is a personal [Pi Coding Agent](https://github.com/earendil-work
         `-- domain.md          # Domain documentation conventions
 ```
 
+## Minimal-change gate
+
+Before editing and before delivery, ask: **Which requested behavior, observed failure, or existing contract requires each added hunk?** Remove additions without a concrete answer. Keep optional improvements out of the patch.
+
+- Update documentation or changelogs only when existing documentation becomes incorrect or required usage changes. README edits default to correcting affected instructions; add explanations only when the user must take a new action.
+- Preserve existing error protections. Add a catch, error boundary, fallback, retry, or recovery path only when the task or existing contract requires specific failure handling. An operation merely being fallible is not sufficient; otherwise, let errors propagate.
+- Never remove security checks, trust-boundary validation, or data-loss protection to reduce scope.
+
 ## Architecture & Data Flow
 
 - Extension manager: `apps/extension-manager/src/index.ts` delegates `/extensions` registration to `src/pi/extension-command.ts`; `src/pi/extension-runtime.ts` binds discovery, persistence, panel creation, and disposal. Implementation and tests are grouped under `src/{pi,catalog,discovery,settings,panel}`.

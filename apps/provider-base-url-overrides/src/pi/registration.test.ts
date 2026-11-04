@@ -966,6 +966,39 @@ describe("registerProviderBaseUrlOverrides", () => {
     expect(filtered?.[0]).not.toBe(model);
   });
 
+  it.each([
+    ["openrouter", "https://proxy.test/catalog/v1"],
+    ["other", "https://configured.test/api"],
+  ] as const)(
+    "should select the catalog refresh base without mutating context when provider is %s",
+    async (providerId, expectedBaseUrl) => {
+      const model = makeModel(providerId, "model", "https://origin.test/model");
+      const { provider, calls } = makeProvider(providerId, [model], true);
+      const harness = runExtension({
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+        PROVIDER_BASE_URL: "https://proxy.test/catalog",
+      });
+      const { registry } = makeRegistry([model], { [providerId]: provider });
+      await triggerSessionStart(harness, registry);
+      const wrapped = required(harness.registrations[0]);
+      const refreshContext: Parameters<RefreshModels>[0] = {
+        baseUrl: "https://configured.test/api",
+        credential: { type: "api_key", key: "secret" },
+        allowNetwork: true,
+        publish: async () => true,
+        signal: new AbortController().signal,
+      };
+
+      await wrapped.refreshModels?.(refreshContext);
+
+      expect(calls.refreshModels).toEqual([
+        { ...refreshContext, baseUrl: expectedBaseUrl },
+      ]);
+      expect(refreshContext.baseUrl).toBe("https://configured.test/api");
+      expect(calls.receivers).toEqual([provider]);
+    },
+  );
+
   it("should delegate deferred methods with routed models and unchanged options when API is not Azure", async () => {
     const originalModel = makeModel(
       "deferred",
@@ -1031,102 +1064,78 @@ describe("registerProviderBaseUrlOverrides", () => {
     expect(originalModel.baseUrl).toBe("https://origin.test/model");
   });
 
-  it("should override Azure endpoints without mutating caller options when transports are delegated", async () => {
-    const originalModel = makeModel(
-      "azure",
-      "model",
-      "https://origin.test/model",
-      "azure-openai-responses",
-    );
-    const { provider, calls } = makeProvider("azure", [originalModel], true);
-    const harness = runExtension({
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      PROVIDER_BASE_URL: "https://proxy.test/azure/",
-    });
-    const { registry } = makeRegistry([originalModel], { azure: provider });
-    await triggerSessionStart(harness, registry);
-    const wrapped = required(harness.registrations[0]);
-    const context = normalizeContext({ messages: [] });
-    const handle: Parameters<FetchDeferred>[1] = {
-      provider: "azure",
-      modelId: originalModel.id,
-      api: originalModel.api,
-      id: "azure-handle",
-    };
-    const callerEnv = {
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      AZURE_OPENAI_BASE_URL: "https://configured.azure",
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      AZURE_OPENAI_API_VERSION: "2024-10-21",
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      KEEP_ENV: "keep",
-    };
-    const callerOptions = {
-      apiKey: "key",
-      azureBaseUrl: "https://configured-option",
-      azureResourceName: "configured-resource",
-      env: callerEnv,
-      unrelated: { preserve: true },
-    };
-    const expectedBaseUrl = "https://proxy.test/azure/v1";
-    const expectedOptions = {
-      ...callerOptions,
-      azureBaseUrl: expectedBaseUrl,
-      env: {
-        ...callerEnv,
+  it.each(["azure-openai-responses", "openai-completions"])(
+    "should override Azure endpoints without mutating caller options when API is %s",
+    async (api) => {
+      const originalModel = makeModel(
+        "azure",
+        "model",
+        "https://origin.test/model",
+        api,
+      );
+      const { provider, calls } = makeProvider("azure", [originalModel], true);
+      const harness = runExtension({
         // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-        AZURE_OPENAI_BASE_URL: expectedBaseUrl,
-      },
-    };
-    const streamInput = {
-      ...originalModel,
-      baseUrl: "https://caller.test/stream",
-    };
-    const simpleInput = {
-      ...originalModel,
-      baseUrl: "https://caller.test/simple",
-    };
-    const fetchInput = {
-      ...originalModel,
-      baseUrl: "https://caller.test/fetch",
-    };
-    const cancelInput = {
-      ...originalModel,
-      baseUrl: "https://caller.test/cancel",
-    };
+        PROVIDER_BASE_URL: "https://proxy.test/azure/",
+      });
+      const { registry } = makeRegistry([originalModel], { azure: provider });
+      await triggerSessionStart(harness, registry);
+      const wrapped = required(harness.registrations[0]);
+      const context = normalizeContext({ messages: [] });
+      const handle: Parameters<FetchDeferred>[1] = {
+        provider: "azure",
+        modelId: originalModel.id,
+        api: originalModel.api,
+        id: "azure-handle",
+      };
+      const callerEnv = {
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+        AZURE_OPENAI_BASE_URL: "https://configured.azure",
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+        AZURE_OPENAI_API_VERSION: "2024-10-21",
+        // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+        KEEP_ENV: "keep",
+      };
+      const callerOptions = {
+        apiKey: "key",
+        azureBaseUrl: "https://configured-option",
+        azureResourceName: "configured-resource",
+        env: callerEnv,
+        unrelated: { preserve: true },
+      };
+      const originalOptions = structuredClone(callerOptions);
+      const expectedBaseUrl = "https://proxy.test/azure/v1";
+      const expectedOptions = {
+        ...callerOptions,
+        azureBaseUrl: expectedBaseUrl,
+        env: {
+          ...callerEnv,
+          // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
+          AZURE_OPENAI_BASE_URL: expectedBaseUrl,
+        },
+      };
 
-    wrapped.stream(streamInput, context, callerOptions);
-    wrapped.streamSimple(simpleInput, context, callerOptions);
-    await wrapped.fetchDeferred?.(fetchInput, handle, callerOptions);
-    await wrapped.cancelDeferred?.(cancelInput, handle, callerOptions);
+      wrapped.stream(originalModel, context, callerOptions);
+      wrapped.streamSimple(originalModel, context, callerOptions);
+      await wrapped.fetchDeferred?.(originalModel, handle, callerOptions);
+      await wrapped.cancelDeferred?.(originalModel, handle, callerOptions);
 
-    for (const call of [
-      required(calls.stream[0]),
-      required(calls.streamSimple[0]),
-      required(calls.fetchDeferred[0]),
-      required(calls.cancelDeferred[0]),
-    ]) {
-      expect(call.model.baseUrl).toBe(expectedBaseUrl);
-      expect(call.options).toEqual(expectedOptions);
-      expect(call.options).not.toBe(callerOptions);
-      expect(call.options?.env).not.toBe(callerEnv);
-    }
-    expect(callerOptions).toEqual({
-      apiKey: "key",
-      azureBaseUrl: "https://configured-option",
-      azureResourceName: "configured-resource",
-      env: callerEnv,
-      unrelated: { preserve: true },
-    });
-    expect(callerEnv).toEqual({
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      AZURE_OPENAI_BASE_URL: "https://configured.azure",
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      AZURE_OPENAI_API_VERSION: "2024-10-21",
-      // biome-ignore lint/style/useNamingConvention: preserve external environment variable key
-      KEEP_ENV: "keep",
-    });
-  });
+      for (const call of [
+        required(calls.stream[0]),
+        required(calls.streamSimple[0]),
+        required(calls.fetchDeferred[0]),
+        required(calls.cancelDeferred[0]),
+      ]) {
+        expect(call.model.baseUrl).toBe(expectedBaseUrl);
+        expect(call.options).toEqual(expectedOptions);
+        expect(call.options).not.toBe(callerOptions);
+        expect(call.options?.env).not.toBe(callerEnv);
+      }
+      expect(originalModel.baseUrl).toBe("https://origin.test/model");
+      expect(callerOptions).toEqual(originalOptions);
+      expect(callerEnv).toEqual(originalOptions.env);
+    },
+  );
 
   it("should delegate captured Azure options and env values when fields are accessors", async () => {
     const model = makeModel(

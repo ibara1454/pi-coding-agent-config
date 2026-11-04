@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   applyPatterns,
   explainFilterState,
@@ -541,6 +543,19 @@ describe("applyPatterns", () => {
       expect(enabled).toEqual(new Set(scenario.expected));
     },
   );
+  it.each(["!~/extensions/*.ts", "-~/extensions/alpha.ts"])(
+    "should exclude home-relative resources when the filter is %s",
+    (pattern) => {
+      const path = join(homedir(), "extensions", "alpha.ts");
+      expect(applyPatterns([path], [pattern], base)).toEqual(new Set());
+    },
+  );
+  it("should exclude a skill in the home directory when its exact filter is bare tilde", () => {
+    const homeSkill = join(homedir(), "SKILL.md");
+    expect(applyPatterns([homeSkill, alpha], ["-~"], base)).toEqual(
+      new Set([alpha]),
+    );
+  });
 });
 
 describe("explainFilterState", () => {
@@ -603,6 +618,17 @@ describe("mutateExactPattern", () => {
       expect(patterns).toEqual([...scenario.expected]);
     },
   );
+  it("should remove a home-relative skill exclusion when enabling the skill", () => {
+    expect(
+      mutateExactPattern({
+        baseDir: base,
+        desired: true,
+        filePath: join(homedir(), "skills", "pdf", "SKILL.md"),
+        filterPath: "~/skills/pdf",
+        patterns: ["~/skills/pdf", "-~/skills/pdf"],
+      }),
+    ).toEqual(["~/skills/pdf"]);
+  });
 });
 
 describe("mutatePackagePatterns", () => {

@@ -51,7 +51,7 @@ The original code was adapted to the extension APIs exposed by `@earendil-works/
 
 ## Extension discovery
 
-The Extensions section mirrors Pi 0.84.1 startup discovery without loading or installing resources a second time. It includes:
+The Extensions section mirrors Pi 1.2.0 startup discovery without loading or installing resources a second time. It includes:
 
 - Enabled extensions from `PI_CODING_AGENT_DIR`.
 - Enabled extensions from a trusted project's `.pi` directory.

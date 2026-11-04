@@ -11,8 +11,10 @@ Related issue: <!-- Use "Closes #123" only if this PR resolves it; otherwise "Re
 <!-- Document only verification beyond .github/workflows/check.yml.
 Do not list commands or results already covered by CI, including lint, type
 checking, workspace tests, existing snapshots, or narrower reruns of those checks.
-Describe additional manual checks, smoke/differential checks, or independent
-reviews with the exercised scenarios and observed results.
+Describe additional manual or smoke/differential checks with the exercised
+scenarios and observed results.
+Omit prior review status, review-session details, reviewer identities, and model
+names from PR descriptions.
 For terminal UI checks beyond CI, include Pi interaction steps and a screenshot
 or output.
 If no additional verification was needed, write:
