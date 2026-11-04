@@ -2,8 +2,8 @@
 
 [The root `biome.jsonc`](../biome.jsonc) is the authoritative configuration. It uses
 Biome's `all` preset with explicit project decisions and comments explaining disabled
-rules. This reference covers project-specific rule decisions, not every rule
-enabled by the preset or the custom Grit plugins.
+rules. This reference covers the 29 rules reviewed during the lint cleanup, not
+every rule enabled by the preset or the custom Grit plugins.
 
 Every workspace under `apps/*` and `packages/*` has a `biome.jsonc` with
 `"root": false` and `"extends": "//"` to inherit the root configuration. Put
@@ -91,14 +91,6 @@ All rules in this section use the `lint/style/` prefix.
 | `useExportsLast` | Requires exports after all non-export statements. | Off |
 | `noProcessEnv` | Prohibits direct access to `process.env`. | Off |
 | `useErrorCause` | Requests preservation of the original error when wrapping it in a new error. | Error |
-
-Relative imports and re-exports omit `/index.ts`: use `../catalog` instead of
-`../catalog/index.ts`, `.` instead of `./index.ts`, and `../` instead of
-`../index.ts`. Biome's built-in `noRestrictedImports` enforces this at **Error**
-severity, including type-only and dynamic imports. Package imports and filesystem
-paths are unchanged. `lint/correctness/useImportExtensions` is **Off** because it
-conflicts with directory imports supported by Bun and TypeScript's `bundler`
-resolution.
 
 ## Complexity and expression clarity
 
