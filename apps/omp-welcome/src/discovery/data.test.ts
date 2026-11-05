@@ -498,8 +498,17 @@ describe("collectWelcomeExtensions", () => {
       { extensions: ["custom.ts", false] },
       ["npm:tool:visible"],
     ],
+    [
+      "an invalid skills array",
+      { skills: ["skills", false] },
+      ["npm:tool:visible"],
+    ],
+    ["a non-object pi value", "invalid", ["npm:tool:visible"]],
+    ["a pi array", [], ["npm:tool:visible"]],
     ["an explicitly empty extension array", { extensions: [] }, []],
     ["an explicitly empty skills array", { skills: [] }, []],
+    ["an explicitly empty prompts array", { prompts: [] }, []],
+    ["an explicitly empty themes array", { themes: [] }, []],
   ])(
     "should list only enabled package extensions when the manifest has %s",
     (_condition, pi, expected) => {
