@@ -73,6 +73,71 @@ describe("collectWelcomeExtensions", () => {
     write(join(extensions, "index.ts"));
     expect(discovered()).toEqual(["index.ts"]);
   });
+
+  it("should distinguish authoritative package metadata from default convention discovery", () => {
+    const root = temporaryDirectory();
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const first = join(agentDir, "npm", "node_modules", "authoritative");
+    const second = join(agentDir, "npm", "node_modules", "default");
+    const third = join(agentDir, "npm", "node_modules", "convention");
+    write(
+      join(agentDir, "settings.json"),
+      JSON.stringify({
+        packages: [
+          "npm:authoritative",
+          { source: "npm:default" },
+          "npm:convention",
+        ],
+      }),
+    );
+    write(join(first, "package.json"), '{"pi":{"skills":["skills"]}}');
+    write(join(first, "extensions", "hidden.ts"));
+    write(join(second, "package.json"), '{"pi":{"skills":["skills"]}}');
+    write(join(second, "extensions", "visible.ts"));
+    write(join(third, "extensions", "visible.ts"));
+    expect(
+      collectWelcomeExtensions({
+        cwd,
+        agentDir,
+        projectTrusted: false,
+      }).map((row) => row.name),
+    ).toEqual(["npm:convention:visible", "npm:default:visible"]);
+  });
+
+  const packageCases: [
+    condition: string,
+    metadata: Record<string, unknown>,
+    extensions: string[],
+  ][] = [
+    ["no pi field", {}, ["extensions/visible.ts"]],
+    [
+      "only changelog metadata",
+      { pi: { changelogPath: "CHANGELOG.md" } },
+      ["extensions/visible.ts"],
+    ],
+    ["an explicit empty extensions list", { pi: { extensions: [] } }, []],
+  ];
+
+  it.each(packageCases)(
+    "should discover package extensions from real metadata when it contains %s",
+    (_condition, metadata, extensions) => {
+      const root = temporaryDirectory();
+      const agentDir = join(root, "agent");
+      const cwd = join(root, "project");
+      const packageRoot = join(agentDir, "pkg");
+      write(join(packageRoot, "package.json"), JSON.stringify(metadata));
+      write(join(packageRoot, "extensions", "visible.ts"));
+      write(join(agentDir, "settings.json"), '{"packages":["./pkg"]}');
+      expect(
+        collectWelcomeExtensions({
+          cwd,
+          agentDir,
+          projectTrusted: false,
+        }).map((row) => row.path),
+      ).toEqual(extensions.map((entry) => join(packageRoot, entry)));
+    },
+  );
 });
 
 describe("welcome extension snapshot", () => {

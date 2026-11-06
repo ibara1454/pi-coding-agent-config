@@ -21,6 +21,12 @@ import {
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import {
+  mergeWithDefaultPackageJson,
+  type PackageCollectionMode,
+  readPackageJson,
+} from "./package-json.ts";
+
 const RELATIVE_PREFIX = /^\.\//;
 const LINE_BREAK = /\r?\n/;
 const ESCAPED_IGNORE_PREFIX = /^\\([#!])/;
@@ -42,12 +48,6 @@ const MILLISECONDS_PER_HOUR = 3_600_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
 const RELATIVE_AGE_DAY_LIMIT = 7;
 const MAX_WELCOME_SESSIONS = 4;
-const PACKAGE_RESOURCE_FIELDS = [
-  "extensions",
-  "skills",
-  "prompts",
-  "themes",
-] as const;
 
 export type ExtensionScope = "project" | "user";
 
@@ -61,23 +61,6 @@ export interface WelcomeExtension {
 export interface WelcomeSession {
   name: string;
   timeAgo: string;
-}
-
-interface PiPackageResources {
-  extensions?: string[];
-  skills?: string[];
-  prompts?: string[];
-  themes?: string[];
-}
-
-interface PackageJson {
-  pi?: PiPackageResources;
-}
-
-interface ResolvedPackageJson {
-  pi: PiPackageResources & { extensions: string[] };
-  /** Whether to discover extensions/ instead of using the resolved declaration. */
-  useConvention: boolean;
 }
 
 interface PackageSource {
@@ -139,32 +122,6 @@ function readJson(filePath: string): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-/**
- * Reads the Pi resource fields used by package discovery without importing code.
- * Missing or invalid pi metadata stays absent; unreadable or malformed JSON yields {}.
- * @param filePath Package metadata file to read.
- * @returns Validated string-array declarations; missing fields stay absent.
- * @example For {"name":"tool"}, returns {}; for {"pi":{"skills":[]}}, returns { pi: { skills: [] } }.
- */
-function readPackageJson(filePath: string): PackageJson {
-  const { pi: rawPi } = readJson(filePath);
-  if (rawPi === null || typeof rawPi !== "object" || Array.isArray(rawPi)) {
-    return {};
-  }
-  const manifest = rawPi as Record<string, unknown>;
-  const pi: PiPackageResources = {};
-  for (const field of PACKAGE_RESOURCE_FIELDS) {
-    const entries = manifest[field];
-    if (
-      Array.isArray(entries) &&
-      entries.every((entry): entry is string => typeof entry === "string")
-    ) {
-      pi[field] = entries;
-    }
-  }
-  return { pi };
 }
 
 function normalizePiPath(input: string): string {
@@ -882,39 +839,6 @@ function packageExtensionFiles(
     }
   }
   return files;
-}
-
-type PackageCollectionMode = "package" | "default" | "filter";
-
-/**
- * Resolves welcome-inventory defaults without changing the supplied record.
- * Only extensions is defaulted because packageFiles inventories extensions only;
- * skills, prompts, and themes remain declaration markers. This is not Pi's complete
- * default schema: Pi applies the manifest-vs-convention rule uniformly to all resources.
- * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
- * @param packageJson Validated metadata, which may omit pi entirely.
- * @param mode Package source's existing discovery policy.
- * @returns Required pi.extensions and an explicit convention policy, preserving absent-vs-empty semantics.
- * @example mergeWithDefaultPackageJson({}, "package") // { pi: { extensions: [] }, useConvention: true }
- */
-function mergeWithDefaultPackageJson(
-  packageJson: PackageJson,
-  mode: PackageCollectionMode,
-): ResolvedPackageJson {
-  const declarations = packageJson.pi;
-  const extensions = declarations?.extensions;
-  const pi = { ...declarations, extensions: extensions ?? [] };
-  if (mode === "filter") {
-    return { pi, useConvention: pi.extensions.length === 0 };
-  }
-  if (extensions !== undefined) {
-    return { pi, useConvention: false };
-  }
-  const hasResourceManifest =
-    mode === "package" &&
-    declarations !== undefined &&
-    PACKAGE_RESOURCE_FIELDS.some((field) => declarations[field] !== undefined);
-  return { pi, useConvention: !hasResourceManifest };
 }
 
 /**

@@ -12,6 +12,8 @@ import {
   getAgentDir,
   welcomeSessions,
 } from "./data.ts";
+// biome-ignore lint/performance/noNamespaceImport: Bun spies must isolate the live package metadata imports used by discovery.
+import * as packageJson from "./package-json.ts";
 
 const MILLISECONDS_PER_MINUTE = 60_000;
 const MILLISECONDS_PER_HOUR = 3_600_000;
@@ -23,8 +25,11 @@ const DAYS_BEFORE_WEEK = 6;
 const STALE_SESSION_DAYS = 9;
 
 /**
- * Plans discovery I/O without touching the host filesystem; directories are
- * inferred from file parents and optional links model their target kinds.
+ * Plans discovery I/O and package-resolution responses without touching host state.
+ * Direct package metadata helpers are mocked; directories follow file parents and links.
+ * @param files Planned file contents; unlisted reads fail.
+ * @param options Filesystem edge cases and the resolved package-discovery response.
+ * @returns Nothing; shared test setup restores all filesystem and package spies.
  * @example mockDiscovery({ "/unit/agent/settings.json": "{}" });
  */
 function mockDiscovery(
@@ -34,8 +39,16 @@ function mockDiscovery(
     directories?: string[];
     unreadableDirectories?: string[];
     statFailures?: string[];
+    packageResult?: packageJson.ResolvedPackageJson;
   } = {},
 ): void {
+  spyOn(packageJson, "readPackageJson").mockReturnValue({});
+  spyOn(packageJson, "mergeWithDefaultPackageJson").mockReturnValue(
+    options.packageResult ?? {
+      pi: { extensions: [] },
+      useConvention: true,
+    },
+  );
   const links = options.links ?? {};
   const directories = new Set(options.directories ?? []);
   for (const path of [...Object.keys(files), ...Object.keys(links)]) {
@@ -285,8 +298,6 @@ describe("collectWelcomeExtensions", () => {
         [join(AGENT_DIR, "settings.json")]: JSON.stringify({
           packages: [source],
         }),
-        [join(root, "package.json")]:
-          '{"pi":{"extensions":["extensions/feature.ts"]}}',
         [extension]: "",
       });
       expect(
@@ -358,16 +369,6 @@ describe("collectWelcomeExtensions", () => {
             },
           ],
         }),
-        [join(root, "package.json")]: JSON.stringify({
-          pi: {
-            extensions: [
-              "extensions/**/?.ts",
-              "extensions/*.ts",
-              "extensions/missing/*.ts",
-              "missing.ts",
-            ],
-          },
-        }),
         [keep]: "",
         [forced]: "",
         [join(root, "extensions", "blocked.ts")]: "",
@@ -377,6 +378,17 @@ describe("collectWelcomeExtensions", () => {
         links: {
           [join(root, "extensions", "cycle")]: join(root, "extensions"),
           [join(root, "extensions", "broken")]: join(root, "missing"),
+        },
+        packageResult: {
+          pi: {
+            extensions: [
+              "extensions/**/?.ts",
+              "extensions/*.ts",
+              "extensions/missing/*.ts",
+              "missing.ts",
+            ],
+          },
+          useConvention: false,
         },
       },
     );
@@ -397,25 +409,30 @@ describe("collectWelcomeExtensions", () => {
 
   it("should use absolute manifest globs and directory entries while applying manifest-level exclusions", () => {
     const root = join(AGENT_DIR, "npm", "node_modules", "tool");
-    mockDiscovery({
-      [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
-      [join(root, "package.json")]: JSON.stringify({
-        pi: {
-          extensions: [
-            join(root, "entries", "*.js"),
-            "nested",
-            "root/index.ts",
-            "!**/hidden.js",
-          ],
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
+        [join(root, "entries", "visible.js")]: "",
+        [join(root, "entries", "hidden.js")]: "",
+        [join(root, "nested", "package.json")]:
+          '{"pi":{"extensions":["start.ts",42,"unavailable.ts"]}}',
+        [join(root, "nested", "start.ts")]: "",
+        [join(root, "root", "index.ts")]: "",
+      },
+      {
+        packageResult: {
+          pi: {
+            extensions: [
+              join(root, "entries", "*.js"),
+              "nested",
+              "root/index.ts",
+              "!**/hidden.js",
+            ],
+          },
+          useConvention: false,
         },
-      }),
-      [join(root, "entries", "visible.js")]: "",
-      [join(root, "entries", "hidden.js")]: "",
-      [join(root, "nested", "package.json")]:
-        '{"pi":{"extensions":["start.ts",42,"unavailable.ts"]}}',
-      [join(root, "nested", "start.ts")]: "",
-      [join(root, "root", "index.ts")]: "",
-    });
+      },
+    );
     const rows = collectWelcomeExtensions({
       cwd: PROJECT_DIR,
       agentDir: AGENT_DIR,
@@ -430,27 +447,34 @@ describe("collectWelcomeExtensions", () => {
 
   it("should honor ordered exact filters when autoload is disabled", () => {
     const root = join(AGENT_DIR, "npm", "node_modules", "tool");
-    mockDiscovery({
-      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
-        packages: [
-          {
-            source: "npm:tool",
-            autoload: false,
-            extensions: [
-              "**/*.ts",
-              "-extensions/blocked.ts",
-              "!**/excluded.ts",
-              "+extensions/forced.ts",
-            ],
-          },
-        ],
-      }),
-      [join(root, "package.json")]: '{"pi":{"extensions":["extensions/*.ts"]}}',
-      [join(root, "extensions", "blocked.ts")]: "",
-      [join(root, "extensions", "excluded.ts")]: "",
-      [join(root, "extensions", "forced.ts")]: "",
-      [join(root, "extensions", "normal.ts")]: "",
-    });
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+          packages: [
+            {
+              source: "npm:tool",
+              autoload: false,
+              extensions: [
+                "**/*.ts",
+                "-extensions/blocked.ts",
+                "!**/excluded.ts",
+                "+extensions/forced.ts",
+              ],
+            },
+          ],
+        }),
+        [join(root, "extensions", "blocked.ts")]: "",
+        [join(root, "extensions", "excluded.ts")]: "",
+        [join(root, "extensions", "forced.ts")]: "",
+        [join(root, "extensions", "normal.ts")]: "",
+      },
+      {
+        packageResult: {
+          pi: { extensions: ["extensions/*.ts"] },
+          useConvention: false,
+        },
+      },
+    );
     expect(
       collectWelcomeExtensions({
         cwd: PROJECT_DIR,
@@ -459,76 +483,6 @@ describe("collectWelcomeExtensions", () => {
       }).map((row) => row.name),
     ).toEqual(["npm:tool:forced", "npm:tool:normal"]);
   });
-
-  it("should distinguish authoritative package metadata from default convention discovery", () => {
-    const first = join(AGENT_DIR, "npm", "node_modules", "authoritative");
-    const second = join(AGENT_DIR, "npm", "node_modules", "default");
-    const third = join(AGENT_DIR, "npm", "node_modules", "convention");
-    mockDiscovery({
-      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
-        packages: [
-          "npm:authoritative",
-          { source: "npm:default" },
-          "npm:convention",
-        ],
-      }),
-      [join(first, "package.json")]: '{"pi":{"skills":["skills"]}}',
-      [join(first, "extensions", "hidden.ts")]: "",
-      [join(second, "package.json")]: '{"pi":{"skills":["skills"]}}',
-      [join(second, "extensions", "visible.ts")]: "",
-      [join(third, "extensions", "visible.ts")]: "",
-    });
-    expect(
-      collectWelcomeExtensions({
-        cwd: PROJECT_DIR,
-        agentDir: AGENT_DIR,
-        projectTrusted: false,
-      }).map((row) => row.name),
-    ).toEqual(["npm:convention:visible", "npm:default:visible"]);
-  });
-
-  it.each([
-    [
-      "only changelog metadata",
-      { changelogPath: "CHANGELOG.md" },
-      ["npm:tool:visible"],
-    ],
-    [
-      "an invalid resource array",
-      { extensions: ["custom.ts", false] },
-      ["npm:tool:visible"],
-    ],
-    [
-      "an invalid skills array",
-      { skills: ["skills", false] },
-      ["npm:tool:visible"],
-    ],
-    ["a non-object pi value", "invalid", ["npm:tool:visible"]],
-    ["a pi array", [], ["npm:tool:visible"]],
-    ["no pi field", undefined, ["npm:tool:visible"]],
-    ["an explicitly empty extension array", { extensions: [] }, []],
-    ["an explicitly empty skills array", { skills: [] }, []],
-    ["an explicitly empty prompts array", { prompts: [] }, []],
-    ["an explicitly empty themes array", { themes: [] }, []],
-  ])(
-    "should list only enabled package extensions when the manifest has %s",
-    (_condition, pi, expected) => {
-      const root = join(AGENT_DIR, "npm", "node_modules", "tool");
-      mockDiscovery({
-        [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
-        [join(root, "package.json")]: JSON.stringify({ pi }),
-        [join(root, "extensions", "visible.ts")]: "",
-        [join(root, "custom.ts")]: "",
-      });
-      expect(
-        collectWelcomeExtensions({
-          cwd: PROJECT_DIR,
-          agentDir: AGENT_DIR,
-          projectTrusted: false,
-        }).map((row) => row.name),
-      ).toEqual(expected);
-    },
-  );
 
   it("should retain standalone file and directory packages while discarding malformed settings entries", () => {
     const standalone = join(AGENT_DIR, "standalone.ts");
@@ -577,18 +531,24 @@ describe("collectWelcomeExtensions", () => {
 
   it("should use the last project package filter when duplicate package identities have different versions", () => {
     const root = join(PROJECT_DIR, ".pi", "npm", "node_modules", "tool");
-    mockDiscovery({
-      [join(PROJECT_DIR, ".pi", "settings.json")]: JSON.stringify({
-        packages: [
-          { source: "npm:tool@1", extensions: ["first.ts"] },
-          { source: "npm:tool@2", extensions: ["last.ts"] },
-        ],
-      }),
-      [join(root, "package.json")]:
-        '{"pi":{"extensions":["first.ts","last.ts"]}}',
-      [join(root, "first.ts")]: "",
-      [join(root, "last.ts")]: "",
-    });
+    mockDiscovery(
+      {
+        [join(PROJECT_DIR, ".pi", "settings.json")]: JSON.stringify({
+          packages: [
+            { source: "npm:tool@1", extensions: ["first.ts"] },
+            { source: "npm:tool@2", extensions: ["last.ts"] },
+          ],
+        }),
+        [join(root, "first.ts")]: "",
+        [join(root, "last.ts")]: "",
+      },
+      {
+        packageResult: {
+          pi: { extensions: ["first.ts", "last.ts"] },
+          useConvention: false,
+        },
+      },
+    );
     expect(
       collectWelcomeExtensions({
         cwd: PROJECT_DIR,
