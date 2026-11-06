@@ -347,6 +347,10 @@ describe("collectWelcomeExtensions", () => {
         projectTrusted: false,
       }).map((row) => row.path),
     ).toEqual([extensionPath]);
+    expect(packageJson.mergeWithDefaultPackageJson).toHaveBeenCalledWith(
+      expect.anything(),
+      "default",
+    );
   });
 
   it.each([
