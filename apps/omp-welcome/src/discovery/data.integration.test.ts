@@ -14,7 +14,7 @@ import { collectWelcomeExtensions } from "./data.ts";
 const temporaryRoots: string[] = [];
 
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "pi-welcome-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "pi-welcome-")));
   temporaryRoots.push(directory);
   return directory;
 }
