@@ -8,7 +8,7 @@ const runtimeEffects = await import("../../runtime/index.ts");
 const filesystem = await import("node:fs/promises");
 
 /** Replaces only settings I/O and platform-effect construction, retaining real adapter/runtime logic.
- * All native/fs/RPC effects are existing in-memory runtime fixtures; no native child is launched.
+ * All native/fs/RPC effects are in-memory runtime fixtures. Restore after retiring every activation.
  * @example await f.events.get("session_start")?.({}, f.context) prepares a simulated native runtime.
  */
 export function adapterRuntimeFixture() {
@@ -50,7 +50,16 @@ export function adapterRuntimeFixture() {
       activationSignal: controller.signal,
     });
   });
-  return { ...f, runtimes, readSettings, factory };
+  return {
+    ...f,
+    runtimes,
+    readSettings,
+    factory,
+    restore: () => {
+      factory.mockRestore();
+      readSettings.mockRestore();
+    },
+  };
 }
 
 /** Invokes Pi's actual Bash tool formatting through the registered model-only route.

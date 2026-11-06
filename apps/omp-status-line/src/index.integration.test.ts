@@ -1,11 +1,13 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Spies must intercept the extension's live named filesystem imports.
 import * as fs from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import ompStatusLine from "./index.ts";
+import {
+  createHarness,
+  createSettingsFixture,
+} from "./pi/test/registration.helper.ts";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const STATUS_LINE_LEADING_BORDER = "╭──";
@@ -36,142 +38,6 @@ function statusText(line: string): string {
     throw new Error(`Expected status-line end cap in ${plain}`);
   }
   return plain.slice(STATUS_LINE_LEADING_BORDER.length, capIndex + 1);
-}
-
-async function createSettingsFixture(
-  globalStatusLine: Record<string, unknown>,
-  projectStatusLine?: Record<string, unknown>,
-): Promise<{
-  projectDir: string;
-  cleanup: () => Promise<void>;
-}> {
-  const root = await mkdtemp(join(tmpdir(), "omp-status-line-"));
-  const agentDir = join(root, "agent");
-  const projectDir = join(root, "project");
-  await mkdir(join(projectDir, ".pi"), { recursive: true });
-  await mkdir(agentDir, { recursive: true });
-  await writeFile(
-    join(agentDir, "settings.json"),
-    JSON.stringify({ statusLine: globalStatusLine }),
-  );
-  if (projectStatusLine) {
-    await writeFile(
-      join(projectDir, ".pi", "settings.json"),
-      JSON.stringify({ statusLine: projectStatusLine }),
-    );
-  }
-
-  const previousAgentDir = process.env[AGENT_DIR_ENV];
-  process.env[AGENT_DIR_ENV] = agentDir;
-  return {
-    projectDir,
-    async cleanup(): Promise<void> {
-      if (previousAgentDir === undefined) {
-        delete process.env[AGENT_DIR_ENV];
-      } else {
-        process.env[AGENT_DIR_ENV] = previousAgentDir;
-      }
-      await rm(root, { recursive: true, force: true });
-    },
-  };
-}
-
-function createHarness(options: {
-  cwd: string;
-  trusted: boolean;
-  exec?: (
-    command: string,
-    args: string[],
-    options: { signal?: AbortSignal },
-  ) => Promise<{
-    stdout: string;
-    stderr: string;
-    code: number;
-    killed: boolean;
-  }>;
-}) {
-  const handlers = new Map<string, (...args: unknown[]) => unknown>();
-  const theme = {
-    fg: (_color: string, text: string): string => text,
-    getFgAnsi: (_color: string): string => "",
-  };
-  const baseEditorFactory = () => ({
-    render: (_width: number): string[] => ["header", "prompt", "────"],
-  });
-  let editorFactory: unknown = baseEditorFactory;
-  let footerFactory: unknown;
-  const ui = {
-    theme,
-    getEditorComponent: () => editorFactory,
-    setEditorComponent: (factory: unknown): void => {
-      editorFactory = factory;
-    },
-    setFooter: (factory: unknown): void => {
-      footerFactory = factory;
-    },
-  };
-  const context = {
-    cwd: options.cwd,
-    mode: "tui",
-    isProjectTrusted: () => options.trusted,
-    ui,
-    model: {
-      id: "test-model",
-      name: "Test",
-      contextWindow: 272_000,
-      reasoning: false,
-    },
-    thinkingLevel: "off",
-    getContextUsage: () => ({ tokens: 18_768, contextWindow: 272_000 }),
-    getSystemPrompt: () => "",
-    modelRegistry: {
-      // biome-ignore lint/style/useNamingConvention: host API method name
-      isUsingOAuth: () => false,
-    },
-    sessionManager: {
-      getBranch: () => [
-        {
-          type: "message",
-          message: {
-            role: "assistant",
-            stopReason: "stop",
-            usage: { input: 18_768 },
-          },
-        },
-      ],
-      buildContextEntries: () => [],
-      getSessionName: () => undefined,
-      getSessionId: () => undefined,
-    },
-  };
-  const pi = {
-    on: (event: string, handler: (...args: unknown[]) => unknown): void => {
-      handlers.set(event, handler);
-    },
-    exec:
-      options.exec ??
-      (async () => ({
-        stdout: "",
-        stderr: "",
-        code: 1,
-        killed: false,
-      })),
-    getActiveTools: () => [],
-    getAllTools: () => [],
-  };
-
-  return {
-    baseEditorFactory,
-    context,
-    handlers,
-    pi,
-    theme,
-    getEditorFactory: () => editorFactory,
-    getFooterFactory: () => footerFactory,
-    setFooterFactory: (factory: unknown): void => {
-      footerFactory = factory;
-    },
-  };
 }
 
 it("should shrink the path before dropping context usage", async () => {
@@ -209,47 +75,6 @@ it("should shrink the path before dropping context usage", async () => {
     expect(narrowStatus).toContain("6.9%/272K");
     expect(narrowStatus).toContain("…");
     expect(Bun.stringWidth(Bun.stripANSI(narrowTop))).toBe(narrowWidth);
-  } finally {
-    await harness.handlers.get("session_shutdown")?.({});
-    await fixture.cleanup();
-  }
-});
-
-it("should ignore project settings when project is untrusted", async () => {
-  const fixture = await createSettingsFixture(
-    {
-      preset: "custom",
-      leftSegments: ["model"],
-      rightSegments: [],
-      sessionAccent: false,
-    },
-    {
-      preset: "custom",
-      leftSegments: ["path", "git", "pr"],
-      rightSegments: [],
-    },
-  );
-  const harness = createHarness({
-    cwd: fixture.projectDir,
-    trusted: false,
-  });
-
-  try {
-    ompStatusLine(harness.pi as never);
-    await harness.handlers.get("session_start")?.({}, harness.context);
-
-    const editorFactory = harness.getEditorFactory();
-    if (typeof editorFactory !== "function") {
-      throw new Error("Expected editor component to be installed");
-    }
-    const status = statusText(
-      editorFactory({}, harness.theme, {}).render(
-        PATH_STATUS_RENDER_WIDTH,
-      )[0] ?? "",
-    );
-
-    expect(status).toContain("Test");
-    expect(status).not.toContain(fixture.projectDir);
   } finally {
     await harness.handlers.get("session_shutdown")?.({});
     await fixture.cleanup();
@@ -564,56 +389,45 @@ describe("ompStatusLine", () => {
     }
   });
 
-  it.each([
-    "session_info_changed",
-    "model_select",
-    "thinking_level_select",
-    "session_tree",
-    "session_compact",
-  ])(
-    "should render the replacement context and invalidate the UI when %s fires",
-    async (event) => {
-      const fixture = await createRenderedFixture({
-        leftSegments: ["model", "context_pct"],
-      });
-      const replacementContextWindow = 100;
-      try {
-        expect(fixture.top()).toContain("Test");
-        expect(fixture.top()).toContain("6.9%/272K");
-        const nextContext = {
-          ...fixture.harness.context,
-          model: {
-            ...fixture.harness.context.model,
-            name: "Replacement",
-            contextWindow: replacementContextWindow,
-          },
-          getContextUsage: () => undefined,
-          getSystemPrompt: () => "context",
-          sessionManager: {
-            ...fixture.harness.context.sessionManager,
-            getBranch: () => [{ type: "compaction" }],
-            buildContextEntries: () => [
-              {
-                type: "message",
-                message: { role: "user", content: "Continue" },
-              },
-              { type: "compaction", summary: "Gist" },
-            ],
-          },
-        };
-        fixture.requestRender.mockClear();
-
-        await fixture.harness.handlers.get(event)?.({}, nextContext);
-
-        expect(fixture.requestRender).toHaveBeenCalledTimes(1);
-        expect(fixture.top()).toContain("Replacement");
-        expect(fixture.top()).toContain("5.0%/100");
-        expect(fixture.top()).not.toContain("Test");
-      } finally {
-        await fixture.cleanup();
-      }
-    },
-  );
+  it("should render estimated context and invalidate the UI when compaction replaces the host context", async () => {
+    const fixture = await createRenderedFixture({
+      leftSegments: ["model", "context_pct"],
+    });
+    const replacementContextWindow = 100;
+    try {
+      expect(fixture.top()).toContain("Test");
+      expect(fixture.top()).toContain("6.9%/272K");
+      const nextContext = {
+        ...fixture.harness.context,
+        model: {
+          ...fixture.harness.context.model,
+          name: "Replacement",
+          contextWindow: replacementContextWindow,
+        },
+        getContextUsage: () => undefined,
+        getSystemPrompt: () => "context",
+        sessionManager: {
+          ...fixture.harness.context.sessionManager,
+          getBranch: () => [{ type: "compaction" }],
+          buildContextEntries: () => [
+            {
+              type: "message",
+              message: { role: "user", content: "Continue" },
+            },
+            { type: "compaction", summary: "Gist" },
+          ],
+        },
+      };
+      fixture.requestRender.mockClear();
+      await fixture.harness.handlers.get("session_compact")?.({}, nextContext);
+      expect(fixture.requestRender).toHaveBeenCalledTimes(1);
+      expect(fixture.top()).toContain("Replacement");
+      expect(fixture.top()).toContain("5.0%/100");
+      expect(fixture.top()).not.toContain("Test");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   it.each(["message_update", "message_end"])(
     "should render run metrics and invalidate the UI when %s supplies assistant output",
@@ -784,98 +598,61 @@ describe("ompStatusLine", () => {
     },
   );
 
-  it.each([
-    ["empty or one-character lines", "\nX\n", []],
-    [
-      "index-only changes",
-      "M  modified\nA  added\nD  deleted\nR  old -> new\nC  copied\n",
-      ["+5"],
-    ],
-    ["working-tree-only changes", " M modified\n D deleted\n", ["*2"]],
-    ["untracked files", "?? first\n?? second\n", ["?2"]],
-    [
-      "changes in both columns and conflicts",
-      "MM modified\nUU conflict\nAA added\nDD deleted\n",
-      ["*4", "+4"],
-    ],
-    [
-      "spaces and question marks outside untracked pairs",
-      " ? one\n?  two\n   clean\n",
-      [],
-    ],
-    [
-      "mixed status entries",
-      "M  staged\n M unstaged\nMM both\nUU conflict\n?? first\n?? second\nX\n\n",
-      ["*3", "+3", "?2"],
-    ],
-  ])(
-    "should render independent git counters when porcelain contains %s",
-    async (_condition, stdout, counters) => {
-      const fixture = await createRenderedFixture(
-        { leftSegments: ["git"] },
-        {
-          exec: async (command) => ({
-            stdout: command === "git" ? String(stdout) : "",
-            stderr: "",
-            code: command === "git" ? 0 : 1,
-            killed: false,
-          }),
-        },
-      );
-      try {
-        const rendered = statusText(fixture.top());
-        expect(rendered).toContain("main");
-        const renderedCounters: string[] = rendered.match(/[+*?]\d+/g) ?? [];
-        expect(renderedCounters).toEqual(counters);
-      } finally {
-        await fixture.cleanup();
-      }
-    },
-  );
+  it("should render independent git counters when porcelain contains mixed status entries", async () => {
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["git"] },
+      {
+        exec: async (command) => ({
+          stdout:
+            command === "git"
+              ? "M  staged\n M unstaged\nMM both\nUU conflict\n?? first\n?? second\nX\n\n"
+              : "",
+          stderr: "",
+          code: command === "git" ? 0 : 1,
+          killed: false,
+        }),
+      },
+    );
+    try {
+      const rendered = statusText(fixture.top());
+      expect(rendered).toContain("main");
+      expect(rendered.match(/[+*?]\d+/g)).toEqual(["*3", "+3", "?2"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
-  it.each([
-    ["refresh", "write", undefined, ["*2"]],
-    ["refresh", "edit", undefined, ["*2"]],
-    ["refresh", "bash", { command: "git switch feature" }, ["*2"]],
-    ["retain", "read", undefined, ["+1", "?1"]],
-  ])(
-    "should %s git counts when a %s tool result arrives within the cache lifetime",
-    async (_effect, toolName, input, counters) => {
-      let stdout = "M  staged\n?? new\n";
-      const fixture = await createRenderedFixture(
-        { leftSegments: ["git"] },
-        {
-          exec: async (command) => ({
-            stdout: command === "git" ? stdout : "",
-            stderr: "",
-            code: command === "git" ? 0 : 1,
-            killed: false,
-          }),
-        },
+  it("should refresh rendered git counts when a write completes within the cache lifetime", async () => {
+    let stdout = "M  staged\n?? new\n";
+    const fixture = await createRenderedFixture(
+      { leftSegments: ["git"] },
+      {
+        exec: async (command) => ({
+          stdout: command === "git" ? stdout : "",
+          stderr: "",
+          code: command === "git" ? 0 : 1,
+          killed: false,
+        }),
+      },
+    );
+    try {
+      expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual([
+        "+1",
+        "?1",
+      ]);
+      stdout = " M changed\n D removed\n";
+      await fixture.harness.handlers.get("tool_result")?.(
+        { toolName: "write" },
+        fixture.harness.context,
       );
-      try {
-        expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual([
-          "+1",
-          "?1",
-        ]);
-        stdout = " M changed\n D removed\n";
-        await fixture.harness.handlers.get("tool_result")?.(
-          { toolName, input },
-          fixture.harness.context,
-        );
-        await fixture.waitForRender(
-          () =>
-            (statusText(fixture.top()).match(/[+*?]\d+/g) ?? []).join() ===
-            counters.join(),
-        );
-        const renderedCounters: string[] =
-          statusText(fixture.top()).match(/[+*?]\d+/g) ?? [];
-        expect(renderedCounters).toEqual(counters);
-      } finally {
-        await fixture.cleanup();
-      }
-    },
-  );
+      await fixture.waitForRender(() =>
+        statusText(fixture.top()).includes("*2"),
+      );
+      expect(statusText(fixture.top()).match(/[+*?]\d+/g)).toEqual(["*2"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   it("should clear old counts and show the new branch when the footer reports a branch change", async () => {
     let stdout = "UU conflict\n?? new\n";

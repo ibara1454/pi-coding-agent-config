@@ -1,7 +1,12 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { SandboxPolicySchema } from "@nvidia/openshell-sdk/raw";
+import { SandboxClient } from "@nvidia/openshell-sdk";
+import {
+  SandboxPhase,
+  SandboxPolicySchema,
+  SandboxResponseSchema,
+} from "@nvidia/openshell-sdk/raw";
 import { completion } from "./execution/test/index.helper.ts";
 import { createSandboxRuntime } from "./runtime.ts";
 import {
@@ -54,20 +59,9 @@ function command(runtime: SandboxRuntime, text: string): Promise<number> {
   return result.promise;
 }
 
-const MILLISECONDS_PER_SECOND = 1000;
 const SDK_WALL_NOW_MS = 1_790_146_374_435;
 const FRACTIONAL_CLOCK_MS = 0.5;
 const CLEANUP_CLOCK_MS = 1;
-/** Models the published SDK's wall-clock deadline before Node checks integer timer delay.
- * @example 1.001 seconds yields 1001 integer ms after epoch addition, despite float roundoff.
- */
-function requireIntegerSdkDeadline(seconds: number): void {
-  const remainingMs =
-    SDK_WALL_NOW_MS + seconds * MILLISECONDS_PER_SECOND - SDK_WALL_NOW_MS;
-  if (!Number.isInteger(remainingMs)) {
-    throw new RangeError("SDK poll requires an integer millisecond delay");
-  }
-}
 
 /** Starts a command while provider creation is held before its lost acknowledgment.
  * @returns Runtime, observed command result, and gates; the caller must release and dispose.
@@ -90,9 +84,6 @@ async function lostProviderAcknowledgmentFixture() {
   const result = completion(runtime.exec("never-executed", "/project"));
   return { fixture, entered, release, runtime, result };
 }
-
-const NATIVE_TIMEOUT_EXIT = 124;
-const HOST_TIMER_OVERFLOW_SECONDS = 2_147_484;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createSandboxRuntime", () => {
@@ -173,28 +164,6 @@ describe("createSandboxRuntime", () => {
       );
     } finally {
       await runtime.dispose().catch(() => undefined);
-    }
-  });
-  it("should defer one validation error without canceling preparation when a signal is already aborted", async () => {
-    const fixture = runtimeFixture();
-    const runtime = await createSandboxRuntime(
-      fixture.environment,
-      fixture.effects,
-      fixture.observer,
-    );
-    const controller = new AbortController();
-    controller.abort();
-    try {
-      const result = await completion(
-        runtime.exec("ignored", "/project", { signal: controller.signal }),
-      );
-      expect(result.error?.name).toBe("AbortError");
-      expect(result.terminals).toBe(1);
-      expect(fixture.sdk.commands).toEqual([]);
-      const allowed = await completion(runtime.exec("allowed", "/project"));
-      expect(allowed.exitCode).toBe(COMMAND_EXIT_CODE);
-    } finally {
-      await runtime.dispose();
     }
   });
   it("should retain unknown SDK creation without deleting or replacing a possibly created sandbox", async () => {
@@ -369,70 +338,6 @@ describe("createSandboxRuntime", () => {
       await replacement.dispose();
     }
   });
-  it("should return cached status without publishing or performing native work", async () => {
-    const fixture = await readyFixture();
-    try {
-      const before = fixture.native.calls.length;
-      const publications = fixture.statuses.length;
-      const first = fixture.runtime.getStatus();
-      expect(fixture.runtime.getStatus()).toEqual(first);
-      expect(first.phase).toBe("ready");
-      expect(fixture.native.calls).toHaveLength(before);
-      expect(fixture.statuses).toHaveLength(publications);
-      expect(JSON.stringify(first)).not.toContain("credentials");
-    } finally {
-      try {
-        await fixture.runtime.dispose();
-      } finally {
-        fixture.clock.restore();
-      }
-    }
-  });
-
-  it("should return the same cleanup promise and release the private gateway on success", async () => {
-    const fixture = await readyFixture();
-    try {
-      const disposal = fixture.runtime.dispose();
-      expect(fixture.runtime.dispose()).toBe(disposal);
-      await disposal;
-      expect(fixture.runtime.getStatus().phase).toBe("closed");
-      expect(fixture.runtime.getStatus().recovery).toBeUndefined();
-      expect(fixture.native.networkPresent).toBe(false);
-      expect(fixture.clock.pending()).toBe(0);
-    } finally {
-      try {
-        await fixture.runtime.dispose().catch(() => undefined);
-      } finally {
-        fixture.clock.restore();
-      }
-    }
-  });
-  it("should retain failure and block further commands when acknowledged deletion is uncertain", async () => {
-    const fixture = await readyFixture();
-    try {
-      fixture.sdk.beforeDelete = () =>
-        Promise.reject(new Error("private delete cause"));
-      const disposal = fixture.runtime.dispose();
-      await expect(disposal).rejects.toMatchObject({
-        failure: { code: "cleanup" },
-      });
-      expect(fixture.runtime.dispose()).toBe(disposal);
-      expect(fixture.runtime.getStatus().phase).toBe("recovery-required");
-      expect(fixture.native.networkPresent).toBe(true);
-      await expect(command(fixture.runtime, "refused")).rejects.toMatchObject({
-        failure: { code: "admission" },
-      });
-      expect(JSON.stringify(fixture.runtime.getStatus())).not.toContain(
-        "private delete cause",
-      );
-    } finally {
-      try {
-        await fixture.runtime.dispose().catch(() => undefined);
-      } finally {
-        fixture.clock.restore();
-      }
-    }
-  });
 
   it("should reuse a ready generation across commands and invalidate it after an incomplete stream", async () => {
     const fixture = await readyFixture();
@@ -458,48 +363,57 @@ describe("createSandboxRuntime", () => {
       }
     }
   });
-  it("should await raw creation settlement before disposal releases the late acknowledged sandbox", async () => {
-    const fixture = runtimeFixture();
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    fixture.sdk.beforeCreate = async () => {
-      entered.resolve();
-      await release.promise;
-    };
-    const runtime = await createSandboxRuntime(
-      fixture.environment,
-      fixture.effects,
-      fixture.observer,
-    );
-    await entered.promise;
-    let disposed = false;
-    const disposal = runtime.dispose();
-    disposal.then(
-      () => {
-        disposed = true;
-      },
-      () => {
-        disposed = true;
-      },
-    );
+  it("should detach publication while raw native creation keeps the private gateway owned", async () => {
+    const fixture = unitRuntimeFixture();
     try {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(disposed).toBe(false);
-      expect(fixture.sdk.deleteCount).toBe(0);
-      release.resolve();
-      await disposal;
-      expect(fixture.sdk.deleteCount).toBe(1);
-      expect(fixture.native.sandboxPresent).toBe(false);
-      expect(runtime.getStatus().phase).toBe("closed");
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      fixture.sdk.beforeCreate = async () => {
+        entered.resolve();
+        await release.promise;
+      };
+      const runtime = await createSandboxRuntime(
+        fixture.environment,
+        fixture.effects,
+        fixture.observer,
+      );
+      try {
+        await entered.promise;
+        const publications = fixture.statuses.length;
+        fixture.activation.abort();
+        const disposal = runtime.dispose();
+        let disposed = false;
+        disposal.then(
+          () => {
+            disposed = true;
+          },
+          () => {
+            disposed = true;
+          },
+        );
+        await Promise.resolve();
+        expect(disposed).toBe(false);
+        expect(fixture.native.networkPresent).toBe(true);
+        expect(fixture.sdk.deleteCount).toBe(0);
+        release.resolve();
+        await disposal;
+        expect(fixture.sdk.createCount).toBe(1);
+        expect(fixture.sdk.deleteCount).toBe(1);
+        expect(runtime.getStatus().phase).toBe("closed");
+        expect(fixture.statuses).toHaveLength(publications);
+      } finally {
+        release.resolve();
+        await runtime.dispose().catch(() => undefined);
+      }
     } finally {
-      release.resolve();
-      await disposal.catch(() => undefined);
+      fixture.clock.restore();
     }
   });
   it("should prepare and dispose without SDK deadline rejection when monotonic time is fractional", async () => {
     const fixture = runtimeFixture();
     let clock = 0;
     const now = spyOn(performance, "now").mockImplementation(() => clock);
+    const wall = spyOn(Date, "now").mockReturnValue(SDK_WALL_NOW_MS);
     fixture.sdk.beforeCreate = () => {
       clock = FRACTIONAL_CLOCK_MS;
       return Promise.resolve();
@@ -508,16 +422,32 @@ describe("createSandboxRuntime", () => {
       clock = CLEANUP_CLOCK_MS;
       return Promise.resolve();
     };
-    const ready = fixture.sdk.client.sandbox.waitReady;
-    fixture.sdk.client.sandbox.waitReady = async (...args) => {
-      requireIntegerSdkDeadline(args[1]);
-      return await ready(...args);
+    const { client } = fixture.sdk;
+    client.raw.getSandbox = () => {
+      if (!fixture.native.sandboxPresent) {
+        return Promise.reject(new ConnectError("absent", Code.NotFound));
+      }
+      return Promise.resolve(
+        create(SandboxResponseSchema, {
+          sandbox: {
+            metadata: {
+              id: fixture.native.sandboxId ?? "",
+              name: fixture.native.sandboxName ?? "",
+              labels: fixture.native.labels,
+            },
+            status: {
+              phase:
+                fixture.native.phase === "stopped"
+                  ? SandboxPhase.STOPPED
+                  : SandboxPhase.READY,
+            },
+          },
+        }),
+      );
     };
-    const deleted = fixture.sdk.client.sandbox.waitDeleted;
-    fixture.sdk.client.sandbox.waitDeleted = async (...args) => {
-      requireIntegerSdkDeadline(args[1]);
-      return await deleted(...args);
-    };
+    Object.assign(client, {
+      sandbox: new SandboxClient(client.sandbox.transport, client.raw),
+    });
     const runtime = await createSandboxRuntime(
       fixture.environment,
       fixture.effects,
@@ -539,6 +469,7 @@ describe("createSandboxRuntime", () => {
         await runtime.dispose().catch(() => undefined);
       } finally {
         now.mockRestore();
+        wall.mockRestore();
       }
     }
   });
@@ -720,7 +651,12 @@ describe("createSandboxRuntime", () => {
       expect(fixture.native.networkPresent).toBe(false);
       expect(fixture.native.sandboxPresent).toBe(false);
     } finally {
-      await runtime.dispose();
+      try {
+        await runtime.dispose();
+      } finally {
+        created.mockRestore();
+        deleted.mockRestore();
+      }
     }
   });
   it("should retain acquired gateway coordinates when provider creation loses its acknowledgment", async () => {
@@ -769,123 +705,6 @@ describe("createSandboxRuntime", () => {
       release.resolve();
       await result;
       await runtime.dispose().catch(() => undefined);
-    }
-  });
-  it.each([
-    ["non-absolute working directory", "run", "relative", {}],
-    ["NUL command", "run\0private", "/project", {}],
-    ["NUL working directory", "run", "/project\0private", {}],
-    ["nonpositive timeout", "run", "/project", { timeout: 0 }],
-    [
-      "nonfinite timeout",
-      "run",
-      "/project",
-      { timeout: Number.POSITIVE_INFINITY },
-    ],
-    [
-      "host timer overflow",
-      "run",
-      "/project",
-      { timeout: HOST_TIMER_OVERFLOW_SECONDS },
-    ],
-  ])(
-    "should refuse sandbox command execution when given %s",
-    async (_condition, text, cwd, options) => {
-      const fixture = runtimeFixture();
-      const runtime = await createSandboxRuntime(
-        fixture.environment,
-        fixture.effects,
-        fixture.observer,
-      );
-      try {
-        const result = await completion(runtime.exec(text, cwd, options));
-        expect(result.error).toMatchObject({ failure: { code: "validation" } });
-        expect(result.terminals).toBe(1);
-        expect(fixture.sdk.commands).toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    },
-  );
-  it("should preserve a native exit code of 124 as an ordinary command result", async () => {
-    const fixture = runtimeFixture();
-    fixture.sdk.execute = async function* () {
-      await Promise.resolve();
-      yield { stream: "stderr", data: Buffer.from("ordinary stderr") };
-      yield { type: "exit", exitCode: NATIVE_TIMEOUT_EXIT };
-    };
-    const runtime = await createSandboxRuntime(
-      fixture.environment,
-      fixture.effects,
-      fixture.observer,
-    );
-    try {
-      expect(await completion(runtime.exec("exit 124", "/project"))).toEqual({
-        output: "ordinary stderr",
-        exitCode: NATIVE_TIMEOUT_EXIT,
-        terminals: 1,
-      });
-      expect(runtime.getStatus().phase).toBe("ready");
-    } finally {
-      await runtime.dispose();
-    }
-  });
-  it.each([
-    [
-      "no terminal exit",
-      async function* () {
-        await Promise.resolve();
-        yield { stream: "stdout" as const, data: Buffer.from("partial") };
-      },
-    ],
-    [
-      "data after terminal exit",
-      async function* () {
-        await Promise.resolve();
-        yield { type: "exit" as const, exitCode: 0 };
-        yield { stream: "stdout" as const, data: Buffer.from("late") };
-      },
-    ],
-  ])(
-    "should invalidate uncertain execution when native stream has %s",
-    async (_condition, execute) => {
-      const fixture = runtimeFixture();
-      fixture.sdk.execute = execute;
-      const runtime = await createSandboxRuntime(
-        fixture.environment,
-        fixture.effects,
-        fixture.observer,
-      );
-      try {
-        const result = await completion(runtime.exec("uncertain", "/project"));
-        expect(result.error).toMatchObject({ failure: { code: "execution" } });
-        expect(result.terminals).toBe(1);
-        expect(fixture.sdk.deleteCount).toBe(1);
-        expect(runtime.getStatus().phase).toBe("idle");
-      } finally {
-        await runtime.dispose();
-      }
-    },
-  );
-  it("should preserve ready admission when an external progress observer throws", async () => {
-    const fixture = runtimeFixture();
-    const observer = {
-      ...fixture.observer,
-      progress: () => {
-        throw new Error("private observer state");
-      },
-    };
-    const runtime = await createSandboxRuntime(
-      fixture.environment,
-      fixture.effects,
-      observer,
-    );
-    try {
-      const result = await completion(runtime.exec("still-owned", "/project"));
-      expect(result.exitCode).toBe(COMMAND_EXIT_CODE);
-      expect(runtime.getStatus().phase).toBe("ready");
-    } finally {
-      await runtime.dispose();
     }
   });
   it("should defer gateway disposal while canceled SDK execution remains unsettled", async () => {

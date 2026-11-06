@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Dirent, PathLike, PathOrFileDescriptor, Stats } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named ESM filesystem imports used by discovery.
 import * as fs from "node:fs";
@@ -114,6 +114,10 @@ function mockDiscovery(
 const AGENT_DIR = "/unit/agent";
 const PROJECT_DIR = "/unit/project";
 
+afterEach(() => {
+  mock.restore();
+});
+
 describe("getAgentDir", () => {
   it.each([
     ["absent", undefined, "/unit/home/.pi/agent"],
@@ -216,9 +220,152 @@ describe("effectiveQuietStartup", () => {
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith(join(AGENT_DIR, "settings.json"), "utf8");
   });
+
+  it.each([
+    ["the project is untrusted", false, ["pi"], true],
+    ["the trusted project disables quiet startup", true, ["pi"], false],
+    [
+      "verbose startup overrides user settings",
+      false,
+      ["pi", "--verbose"],
+      false,
+    ],
+  ] as const)(
+    "should honor quiet startup when %s",
+    (_condition, trusted, argv, expected) => {
+      mockDiscovery({
+        [join(AGENT_DIR, "settings.json")]: '{"quietStartup":true}',
+        [join(PROJECT_DIR, ".pi", "settings.json")]: '{"quietStartup":false}',
+      });
+      expect(
+        effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, trusted, [...argv]),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("collectWelcomeExtensions", () => {
+  it("should apply project precedence and package filters while retaining user-only package resources", () => {
+    const projectDir = join(PROJECT_DIR, ".pi");
+    const userPackage = join(AGENT_DIR, "npm", "node_modules", "@scope");
+    const projectPackage = join(projectDir, "npm", "node_modules", "@scope");
+    mockDiscovery({
+      [join(AGENT_DIR, "extensions", "user.ts")]: "",
+      [join(AGENT_DIR, "extensions", "disabled.ts")]: "",
+      [join(AGENT_DIR, "extensions", "user-dir", "index.ts")]: "",
+      [join(AGENT_DIR, "configured.ts")]: "",
+      [join(projectDir, "extensions", "project.ts")]: "",
+      [join(projectDir, "extensions", "project-dir", "index.js")]: "",
+      [join(projectDir, "configured.ts")]: "",
+      [join(userPackage, "pkg", "package.json")]:
+        '{"pi":{"extensions":["extensions/one.ts"]}}',
+      [join(userPackage, "pkg", "extensions", "one.ts")]: "",
+      [join(projectPackage, "pkg", "package.json")]:
+        '{"pi":{"extensions":["extensions/one.ts"]}}',
+      [join(projectPackage, "pkg", "extensions", "one.ts")]: "",
+      [join(userPackage, "delta", "package.json")]:
+        '{"pi":{"extensions":["extensions/one.ts","extensions/two.ts"]}}',
+      [join(userPackage, "delta", "extensions", "one.ts")]: "",
+      [join(userPackage, "delta", "extensions", "two.ts")]: "",
+      [join(userPackage, "filtered", "package.json")]:
+        '{"pi":{"extensions":["extensions/hidden.ts"]}}',
+      [join(userPackage, "filtered", "extensions", "hidden.ts")]: "",
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+        extensions: ["configured.ts", "!extensions/disabled.ts"],
+        packages: [
+          "npm:@scope/pkg",
+          "npm:@scope/delta",
+          { source: "npm:@scope/filtered", extensions: [] },
+        ],
+      }),
+      [join(projectDir, "settings.json")]: JSON.stringify({
+        extensions: ["configured.ts"],
+        packages: [
+          "npm:@scope/pkg",
+          {
+            source: "npm:@scope/delta",
+            autoload: false,
+            extensions: ["extensions/one.ts"],
+          },
+        ],
+      }),
+    });
+
+    const rows = collectWelcomeExtensions({
+      cwd: PROJECT_DIR,
+      agentDir: AGENT_DIR,
+      projectTrusted: true,
+    });
+    expect(
+      rows.filter((row) => row.scope === "project").map((row) => row.name),
+    ).toEqual([
+      "configured",
+      "npm:@scope/delta:one",
+      "npm:@scope/pkg:one",
+      "project",
+      "project-dir",
+    ]);
+    expect(
+      rows.filter((row) => row.scope === "user").map((row) => row.name),
+    ).toEqual(["configured", "npm:@scope/delta:two", "user", "user-dir"]);
+    expect(rows.filter((row) => row.name === "npm:@scope/pkg:one")).toEqual([
+      {
+        name: "npm:@scope/pkg:one",
+        scope: "project",
+        path: join(projectPackage, "pkg", "extensions", "one.ts"),
+        packageSource: "npm:@scope/pkg",
+      },
+    ]);
+  });
+
+  it("should use convention files for a filtered empty manifest and normalize glob entries", () => {
+    const packageRoot = join(AGENT_DIR, "pkg");
+    mockDiscovery({
+      [join(packageRoot, "package.json")]: '{"pi":{"extensions":[]}}',
+      [join(packageRoot, "extensions", "enabled.ts")]: "",
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+        packages: [{ source: " ./pkg ", extensions: ["./extensions/*.ts"] }],
+      }),
+    });
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: true,
+      }),
+    ).toEqual([
+      {
+        name: "enabled",
+        scope: "user",
+        path: join(packageRoot, "extensions", "enabled.ts"),
+        packageSource: " ./pkg ",
+      },
+    ]);
+  });
+
+  it("should omit project files and avoid reading project settings or packages when the project is untrusted", () => {
+    const projectDir = join(PROJECT_DIR, ".pi");
+    mockDiscovery({
+      [join(AGENT_DIR, "extensions", "user.ts")]: "",
+      [join(projectDir, "extensions", "project.ts")]: "",
+      [join(projectDir, "configured.ts")]: "",
+      [join(projectDir, "settings.json")]:
+        '{"extensions":["configured.ts"],"packages":["npm:@scope/project"]}',
+    });
+    const read = spyOn(fs, "readFileSync");
+    const rows = collectWelcomeExtensions({
+      cwd: PROJECT_DIR,
+      agentDir: AGENT_DIR,
+      projectTrusted: false,
+    });
+    expect(rows.map((row) => `${row.name}:${row.scope}`)).toEqual([
+      "user:user",
+    ]);
+    expect(
+      read.mock.calls.some(([file]) => String(file).startsWith(projectDir)),
+    ).toBe(false);
+  });
+
   it.each([
     "!~/agent/extensions/blocked*.ts",
     "-~/agent/extensions/blocked.ts",

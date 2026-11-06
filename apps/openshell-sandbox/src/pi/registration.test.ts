@@ -31,6 +31,10 @@ describe("registerSandbox", () => {
         throw new Error("missing registered operations");
       }
       expect(prepare).not.toHaveBeenCalled();
+      expect([...f.commands.keys()]).toEqual(["sandbox"]);
+      expect(f.events.has("user_bash")).toBe(false);
+      await f.events.get("session_shutdown")?.({}, f.context);
+      expect(dispose).not.toHaveBeenCalled();
       await expect(
         operations.exec("pwd", "/project", { onData: () => undefined }),
       ).rejects.toThrow("OpenShell has not started");

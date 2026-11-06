@@ -1,16 +1,28 @@
-import { mock } from "bun:test";
-import { runtimeFixture } from "../../test/index.helper.ts";
-import type { CleanupEffects } from "../types.ts";
+import { type Mock, mock } from "bun:test";
+import {
+  type RuntimeFixture,
+  unitRuntimeFixture,
+} from "../../test/index.helper.ts";
+import type { CleanupEffects, GenerationResources } from "../types.ts";
 import { gateway, resources } from "./generation.helper.ts";
 
 const STOP_POLL_MS = 100;
 
-/** Supplies an acknowledged SDK identity and a separately owned release capability.
+export type AcknowledgedCleanup = Readonly<{
+  fixture: RuntimeFixture & {
+    clock: { pending: () => number; restore: () => void };
+  };
+  owned: GenerationResources;
+  release: Mock<() => Promise<void>>;
+}>;
+
+/** Supplies an acknowledged SDK identity, controlled deadline, and separately owned release capability.
+ * Callers restore the fixture clock after cleanup settles.
  * @returns Isolated effects, acknowledged identity, and an observable release callback.
  * @example acknowledgedCleanup().fixture.native.phase = "stopped" selects direct deletion.
  */
-export function acknowledgedCleanup() {
-  const fixture = runtimeFixture();
+export function acknowledgedCleanup(): AcknowledgedCleanup {
+  const fixture = unitRuntimeFixture();
   const prepared = gateway(fixture);
   fixture.native.sandboxId = "sandbox-1";
   fixture.native.sandboxName = "test-sandbox";

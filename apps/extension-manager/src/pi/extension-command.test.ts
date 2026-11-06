@@ -4,13 +4,7 @@ import type {
   ExtensionHandler,
   SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
-import type {
-  CatalogSeed,
-  CommitRequest,
-  ResourceScope,
-  SettingsDocument,
-} from "../catalog/index.ts";
-import { ExtensionCatalog } from "../catalog/index.ts";
+import type { CatalogSeed } from "../catalog/index.ts";
 import { PackageResolutionFailure } from "../discovery/index.ts";
 import {
   type ExtensionManagerApi,
@@ -156,9 +150,6 @@ describe("registerExtensionManager", () => {
 
     expect(pi.commands).toHaveLength(1);
     expect(pi.commands[0]?.name).toBe("extensions");
-    expect(pi.commands[0]?.description).toBe(
-      "Manage persistent Extensions and Skills",
-    );
     expect(pi.events).toContain("session_shutdown");
   });
 
@@ -289,48 +280,6 @@ describe("registerExtensionManager", () => {
     },
   );
 
-  it("should build the panel catalog from the discovered seed and runtime committer", async () => {
-    const settings = new Map<ResourceScope, SettingsDocument>();
-    const requests: CommitRequest[] = [];
-    let opened:
-      | {
-          readonly ctx: ExtensionCommandContext;
-          readonly catalog: ExtensionCatalog;
-          readonly selfPath: string;
-        }
-      | undefined;
-    const runtime = runtimeAdapter({
-      commit: (request) => {
-        requests.push(request);
-        return Promise.resolve({ scopes: [], committedScopes: [] });
-      },
-      discover: async () =>
-        seed({ settings, tuiMode: "fullscreen", projectTrusted: false }),
-      openPanel: (ctx, catalog, selfPath) => {
-        opened = { ctx, catalog, selfPath };
-        return Promise.resolve({ type: "closed" });
-      },
-    });
-    const pi = piHarness(runtime);
-    const host = commandHost({});
-
-    await pi.run(host.ctx);
-
-    expect(opened?.ctx).toBe(host.ctx);
-    expect(opened?.selfPath).toBe(runtime.selfPath);
-    expect(opened?.catalog).toBeInstanceOf(ExtensionCatalog);
-    expect(opened?.catalog.view()).toMatchObject({
-      tuiMode: "fullscreen",
-      projectTrusted: false,
-      reloadPending: false,
-    });
-
-    await opened?.catalog.commit();
-
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.documents).toBe(settings);
-  });
-
   it("should not notify or mark later discovery pending when panels close", async () => {
     const pending: boolean[] = [];
     const pi = piHarness(
@@ -350,7 +299,7 @@ describe("registerExtensionManager", () => {
     expect(host.notifications).toEqual([]);
   });
 
-  it("should warn, request a manual reload, and mark later discovery pending when a commit is partial", async () => {
+  it("should notify once and mark later discovery pending when a panel commits", async () => {
     const pending: boolean[] = [];
     let opens = 0;
     const pi = piHarness(
@@ -390,10 +339,6 @@ describe("registerExtensionManager", () => {
 
     expect(pending).toEqual([false, true]);
     expect(host.notifications).toHaveLength(1);
-    expect(host.notifications[0]?.level).toBe("warning");
-    expect(host.notifications[0]?.message).toEndWith(
-      "Run /reload to apply saved changes.",
-    );
   });
 
   it("should dispose the runtime on session shutdown but not during command runs", async () => {

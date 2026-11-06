@@ -3,11 +3,14 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
   NetworkPolicyRuleSchema,
+  type SandboxPolicy,
   SandboxPolicySchema,
 } from "@nvidia/openshell-sdk/raw";
 import { runtimeFixture, unitRuntimeFixture } from "../test/index.helper.ts";
 import { createNativeSandbox, isRejectedCreate } from "./provision.ts";
 import { gateway, input, workspace } from "./test/generation.helper.ts";
+
+const HTTPS_PORT = 443;
 
 /** Captures ownership transition and native submission with one selected binding and no SDK I/O.
  * @example boundProviderFixture().captured.events records "attempt" before "create".
@@ -16,12 +19,26 @@ function boundProviderFixture() {
   const fixture = unitRuntimeFixture();
   const prepared = gateway(fixture);
   const { sdkPolicy: policy } = fixture.environment.policy;
+  Object.assign(
+    policy,
+    create(SandboxPolicySchema, {
+      version: 1,
+      filesystem: { readOnly: ["/etc"], readWrite: ["/project"] },
+      process: { runAsUser: "sandbox", runAsGroup: "sandbox" },
+    }),
+  );
   policy.networkPolicies["registry"] = create(NetworkPolicyRuleSchema, {
+    name: "registry",
+    binaries: [{ path: "/usr/bin/curl" }],
     endpoints: [
       {
         host: "registry.example",
+        ports: [HTTPS_PORT],
+        protocol: "rest",
+        enforcement: "enforce",
         credentialBinding: { provider: "registry" },
       },
+      { host: "public.example", ports: [HTTPS_PORT] },
     ],
   });
   const originalPolicy = structuredClone(policy);
@@ -51,6 +68,7 @@ const BAD_ACKNOWLEDGMENTS = [
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("createNativeSandbox", () => {
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: One submission asserts matching bindings and preservation of caller-owned policy.
   it("should submit matching attachment and credential binding without changing selected policy or mounts", async () => {
     const { fixture, prepared, policy, originalPolicy, captured } =
       boundProviderFixture();
@@ -81,6 +99,7 @@ describe("createNativeSandbox", () => {
                     host: "registry.example",
                     credentialBinding: { provider: "unique-provider" },
                   },
+                  { host: "public.example" },
                 ],
               },
             },
@@ -104,6 +123,26 @@ describe("createNativeSandbox", () => {
           },
         },
       });
+      // The in-process request above was recorded as unknown by the fixture.
+      const submitted = captured.request as {
+        spec: { policy: SandboxPolicy };
+      };
+      const submittedPolicy = submitted.spec.policy;
+      expect(submittedPolicy).not.toBe(policy);
+      expect(Object.isFrozen(submittedPolicy)).toBe(true);
+      const submittedBinding =
+        submittedPolicy.networkPolicies["registry"]?.endpoints[0]
+          ?.credentialBinding;
+      expect(Object.isFrozen(submittedBinding)).toBe(true);
+      const restoredPolicy = structuredClone(submittedPolicy);
+      const restoredBinding =
+        restoredPolicy.networkPolicies["registry"]?.endpoints[0]
+          ?.credentialBinding;
+      if (!restoredBinding) {
+        throw new Error("Missing submitted credential binding.");
+      }
+      restoredBinding.provider = "registry";
+      expect(restoredPolicy).toEqual(originalPolicy);
       expect(policy).toEqual(originalPolicy);
     } finally {
       fixture.clock.restore();

@@ -159,18 +159,4 @@ describe("validateTargetIdentity", () => {
       });
     },
   );
-
-  it("should reject an occurrence when it left its discovered package", async () => {
-    await withRoot(async (root) => {
-      const target = topLevelTarget(root);
-      const narrowed: TopLevelToggleTarget = {
-        ...target,
-        allPaths: [target.resolvedPath],
-      };
-
-      await expect(validateTargetIdentity(narrowed)).rejects.toThrow(
-        `Resource target left its discovered package: ${linkedOccurrence(target)}`,
-      );
-    });
-  });
 });

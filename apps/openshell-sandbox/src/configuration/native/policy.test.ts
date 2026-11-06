@@ -127,6 +127,18 @@ network_middlewares:
     ["policy version exceeds uint32", "version: 4294967296"],
     ["a policy field is unknown", "version: 1\nallow_everything: true"],
     [
+      "a policy include is unsupported",
+      "version: 1\ninclude: ./untrusted.yaml",
+    ],
+    [
+      "a process identity is numeric",
+      "version: 1\nprocess: {run_as_user: 1000}",
+    ],
+    [
+      "a filesystem flag is not boolean",
+      "version: 1\nfilesystem_policy: {include_workdir: 'false'}",
+    ],
+    [
       "network policy entry is not an object",
       "version: 1\nnetwork_policies: {outbound: []}",
     ],

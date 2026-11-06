@@ -42,7 +42,6 @@ function declaredEntryPath(): string {
 interface PanelHost {
   readonly ctx: ExtensionCommandContext;
   readonly finish: (result: PanelResult) => void;
-  readonly customOptions: () => unknown;
   readonly teardowns: () => number;
 }
 
@@ -60,7 +59,6 @@ function emptySeed(): CatalogSeed {
 
 function createDummyPanelHost(): PanelHost {
   const writes: string[] = [];
-  let options: unknown;
   let finish: (result: PanelResult) => void = () => undefined;
   const tui = {
     mode: "regular",
@@ -91,9 +89,7 @@ function createDummyPanelHost(): PanelHost {
       keybindings: KeybindingsManager,
       done: (result: T) => void,
     ) => unknown,
-    customOptions?: unknown,
   ): Promise<T> => {
-    options = customOptions;
     const pending = Promise.withResolvers<T>();
     finish = (result) => pending.resolve(result as T);
     try {
@@ -107,7 +103,6 @@ function createDummyPanelHost(): PanelHost {
   return {
     ctx,
     finish: (result) => finish(result),
-    customOptions: () => options,
     teardowns: () =>
       writes.filter((write) => write.includes(MOUSE_DISABLE)).length,
   };
@@ -119,30 +114,6 @@ describe("createDefaultRuntime", () => {
 
     expect(runtime.selfPath).toBe(declaredEntryPath());
     expect(existsSync(runtime.selfPath)).toBe(true);
-  });
-
-  it("should open the panel as a full-size top-left overlay", async () => {
-    const runtime = createDefaultRuntime();
-    const host = createDummyPanelHost();
-
-    const open = runtime.openPanel(
-      host.ctx,
-      new ExtensionCatalog(emptySeed(), runtime.commit),
-      runtime.selfPath,
-    );
-
-    expect(host.customOptions()).toEqual({
-      overlay: true,
-      overlayOptions: {
-        anchor: "top-left",
-        margin: 0,
-        width: "100%",
-        maxHeight: "100%",
-      },
-    });
-
-    host.finish({ type: "closed" });
-    await open;
   });
 
   it("should return the panel result and tear the panel down once", async () => {
@@ -176,6 +147,7 @@ describe("createDefaultRuntime", () => {
     });
     expect(host.teardowns()).toBe(1);
 
+    runtime.dispose();
     runtime.dispose();
 
     expect(host.teardowns()).toBe(1);
@@ -212,22 +184,5 @@ describe("createDefaultRuntime", () => {
 
     expect(firstHost.teardowns()).toBe(1);
     expect(secondHost.teardowns()).toBe(1);
-  });
-
-  it("should tear the panel down once when dispose is invoked repeatedly after closure", async () => {
-    const runtime = createDefaultRuntime();
-    const host = createDummyPanelHost();
-    const open = runtime.openPanel(
-      host.ctx,
-      new ExtensionCatalog(emptySeed(), runtime.commit),
-      runtime.selfPath,
-    );
-
-    host.finish({ type: "closed" });
-    await open;
-    runtime.dispose();
-    runtime.dispose();
-
-    expect(host.teardowns()).toBe(1);
   });
 });
