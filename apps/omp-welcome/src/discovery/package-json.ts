@@ -20,14 +20,10 @@ export interface PackageJson {
   pi?: PiPackageResources;
 }
 
-/** Resolved extension declarations and their convention-discovery policy. */
+/** Package metadata after applying the extension inventory's defaults. */
 export interface ResolvedPackageJson {
   pi: PiPackageResources & { extensions: string[] };
-  /** Whether to discover extensions/ instead of using the resolved declaration. */
-  useConvention: boolean;
 }
-
-export type PackageCollectionMode = "package" | "default" | "filter";
 
 const ajv = new Ajv();
 const validatePackageRecord = ajv.compile<{
@@ -70,32 +66,22 @@ export function readPackageJson(filePath: string): PackageJson {
 }
 
 /**
- * Resolves welcome-inventory defaults without changing the supplied record.
+ * Merges validated metadata with extension-inventory defaults without changing the input.
  * Only extensions is defaulted because packageFiles inventories extensions only;
  * skills, prompts, and themes remain declaration markers. This is not Pi's complete
  * default schema: Pi applies the manifest-vs-convention rule uniformly to all resources.
  * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
  * @param packageJson Validated metadata, which may omit pi entirely.
- * @param mode Package source's existing discovery policy.
- * @returns Required pi.extensions and an explicit convention policy, preserving absent-vs-empty semantics.
- * @example mergeWithDefaultPackageJson({}, "package") // { pi: { extensions: [] }, useConvention: true }
+ * @returns A new pi object with required extensions and otherwise unchanged declarations.
+ * @example mergeWithDefaultPackageJson({}) // { pi: { extensions: [] } }
  */
 export function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
-  mode: PackageCollectionMode,
 ): ResolvedPackageJson {
-  const declarations = packageJson.pi;
-  const extensions = declarations?.extensions;
-  const pi = { ...declarations, extensions: extensions ?? [] };
-  if (mode === "filter") {
-    return { pi, useConvention: pi.extensions.length === 0 };
-  }
-  if (extensions !== undefined) {
-    return { pi, useConvention: false };
-  }
-  const hasResourceManifest =
-    mode === "package" &&
-    declarations !== undefined &&
-    PACKAGE_RESOURCE_FIELDS.some((field) => declarations[field] !== undefined);
-  return { pi, useConvention: !hasResourceManifest };
+  return {
+    pi: {
+      ...packageJson.pi,
+      extensions: packageJson.pi?.extensions ?? [],
+    },
+  };
 }

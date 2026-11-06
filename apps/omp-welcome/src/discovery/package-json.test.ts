@@ -3,8 +3,8 @@ import { describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import {
   mergeWithDefaultPackageJson,
-  type PackageCollectionMode,
   type PackageJson,
+  type ResolvedPackageJson,
   readPackageJson,
 } from "./package-json.ts";
 
@@ -83,104 +83,50 @@ describe("mergeWithDefaultPackageJson", () => {
   const cases: [
     condition: string,
     metadata: PackageJson,
-    mode: PackageCollectionMode,
-    expected: { extensions: string[]; useConvention: boolean },
+    expected: ResolvedPackageJson,
   ][] = [
+    ["pi is absent", {}, { pi: { extensions: [] } }],
+    ["pi is empty", { pi: {} }, { pi: { extensions: [] } }],
     [
-      "a string package omits pi",
-      {},
-      "package",
-      { extensions: [], useConvention: true },
+      "other resource declarations omit extensions",
+      {
+        pi: {
+          skills: [],
+          prompts: ["prompts/*.md"],
+          themes: ["dark.json"],
+        },
+      },
+      {
+        pi: {
+          extensions: [],
+          skills: [],
+          prompts: ["prompts/*.md"],
+          themes: ["dark.json"],
+        },
+      },
     ],
     [
-      "a string package has metadata-only pi",
-      { pi: {} },
-      "package",
-      { extensions: [], useConvention: true },
+      "extension files are declared",
+      { pi: { extensions: ["first.ts", "last.ts"] } },
+      { pi: { extensions: ["first.ts", "last.ts"] } },
     ],
     [
-      "a string package explicitly disables extensions",
+      "extensions is explicitly empty",
       { pi: { extensions: [] } },
-      "package",
-      { extensions: [], useConvention: false },
-    ],
-    [
-      "a string package declares extension files",
-      { pi: { extensions: ["tool.ts"] } },
-      "package",
-      { extensions: ["tool.ts"], useConvention: false },
-    ],
-    [
-      "a string package declares only skills",
-      { pi: { skills: [] } },
-      "package",
-      { extensions: [], useConvention: false },
-    ],
-    [
-      "a string package declares only prompts",
-      { pi: { prompts: ["prompt.md"] } },
-      "package",
-      { extensions: [], useConvention: false },
-    ],
-    [
-      "a string package declares only themes",
-      { pi: { themes: [] } },
-      "package",
-      { extensions: [], useConvention: false },
-    ],
-    [
-      "a default object omits pi",
-      {},
-      "default",
-      { extensions: [], useConvention: true },
-    ],
-    [
-      "a default object declares only skills",
-      { pi: { skills: [] } },
-      "default",
-      { extensions: [], useConvention: true },
-    ],
-    [
-      "a default object explicitly disables extensions",
       { pi: { extensions: [] } },
-      "default",
-      { extensions: [], useConvention: false },
-    ],
-    [
-      "a filtered object omits extensions",
-      { pi: { skills: ["skills"] } },
-      "filter",
-      { extensions: [], useConvention: true },
-    ],
-    [
-      "a filtered object has an empty extensions list",
-      { pi: { extensions: [] } },
-      "filter",
-      { extensions: [], useConvention: true },
-    ],
-    [
-      "a filtered object declares extension files",
-      { pi: { extensions: ["tool.ts"] } },
-      "filter",
-      { extensions: ["tool.ts"], useConvention: false },
     ],
   ];
 
   it.each(cases)(
-    "should resolve extension discovery when %s",
-    (_condition, metadata, mode, expected) => {
-      const result = mergeWithDefaultPackageJson(metadata, mode);
-      expect(result.pi.extensions).toEqual(expected.extensions);
-      expect(result.useConvention).toBe(expected.useConvention);
+    "should merge package defaults when %s",
+    (_condition, metadata, expected) => {
+      expect(mergeWithDefaultPackageJson(metadata)).toEqual(expected);
     },
   );
 
-  it("should preserve later object-mode discovery when the same metadata was merged in package mode", () => {
+  it("should preserve the input declarations when adding defaults", () => {
     const metadata = { pi: { skills: ["skills"] } };
-    const fromPackage = mergeWithDefaultPackageJson(metadata, "package");
-    const fromObject = mergeWithDefaultPackageJson(metadata, "default");
-    expect(fromPackage.useConvention).toBe(false);
-    expect(fromObject.useConvention).toBe(true);
-    expect(fromObject.pi.extensions).toEqual([]);
+    mergeWithDefaultPackageJson(metadata);
+    expect(metadata).toEqual({ pi: { skills: ["skills"] } });
   });
 });

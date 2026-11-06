@@ -23,7 +23,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   mergeWithDefaultPackageJson,
-  type PackageCollectionMode,
   readPackageJson,
 } from "./package-json.ts";
 
@@ -68,6 +67,8 @@ interface PackageSource {
   autoload?: boolean;
   extensions?: string[];
 }
+
+type PackageCollectionMode = "package" | "default" | "filter";
 
 interface PiSettings {
   quietStartup?: boolean | "header";
@@ -843,7 +844,7 @@ function packageExtensionFiles(
 
 /**
  * Discovers package extensions using Pi 1.5 resource declarations and filters.
- * Uses validated metadata and mode-specific defaults; missing resources follow convention discovery.
+ * Keeps original declaration presence separate from defaults when selecting discovery.
  * @param root Package directory containing optional package.json and extensions/.
  * @param mode String package, default package object, or explicit object filter.
  * @returns Extension files and whether the package declares or contains resources.
@@ -853,11 +854,9 @@ function packageFiles(
   root: string,
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
-  const packageJson = mergeWithDefaultPackageJson(
-    readPackageJson(join(root, "package.json")),
-    mode,
-  );
-  const { extensions } = packageJson.pi;
+  const packageJson = readPackageJson(join(root, "package.json"));
+  const declarations = packageJson.pi;
+  const { extensions } = mergeWithDefaultPackageJson(packageJson).pi;
   const convention = () => {
     const extensionsDir = join(root, "extensions");
     return existsSync(extensionsDir)
@@ -894,10 +893,19 @@ function packageFiles(
     };
   };
 
-  if (packageJson.useConvention) {
-    return convention();
+  if (mode === "filter") {
+    return extensions.length === 0 ? convention() : fromManifest(extensions);
   }
-  return fromManifest(extensions);
+  if (
+    declarations?.extensions !== undefined ||
+    (mode === "package" &&
+      (declarations?.skills !== undefined ||
+        declarations?.prompts !== undefined ||
+        declarations?.themes !== undefined))
+  ) {
+    return fromManifest(extensions);
+  }
+  return convention();
 }
 
 function compactPackageSourceLabel(source: string): string {
