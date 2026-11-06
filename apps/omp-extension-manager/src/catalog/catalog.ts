@@ -390,7 +390,7 @@ export class ExtensionCatalog {
 
   /**
    * Checks whether a proposed toggle would disable this extension after reload.
-   * @param path - Extension-manager entry path to canonicalize.
+   * @param path - Extension entry path to canonicalize.
    * @param id - Row receiving the proposed toggle.
    * @param enabled - Proposed configured state.
    * @returns `true` only for a currently resolved self-extension that becomes disabled.

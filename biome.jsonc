@@ -1,6 +1,6 @@
 // Rule meanings and severity policy: ./docs/lint-policy.md
 {
-  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "plugins": [
     "biome-rules/presets/source",
     {

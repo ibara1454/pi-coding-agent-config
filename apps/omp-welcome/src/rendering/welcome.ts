@@ -313,8 +313,8 @@ function renderExtensions(
  * @example
  * With an unstyled theme:
  * ```ts
- * renderExtension(theme, { name: "extension-manager", scope: "user" }, 16);
- * // " • extensi… user": only the name is shortened; the scope stays visible.
+ * renderExtension(theme, { name: "omp-extension-manager", scope: "user" }, 16);
+ * // " • omp-ext… user": only the name is shortened; the scope stays visible.
  * ```
  */
 function renderExtension(

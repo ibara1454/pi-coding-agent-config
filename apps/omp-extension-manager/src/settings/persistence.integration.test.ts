@@ -60,7 +60,7 @@ function request(
 }
 
 async function withRoot(run: (root: string) => Promise<void>): Promise<void> {
-  await withTemporaryRoot("extension-manager-commit-", run);
+  await withTemporaryRoot("omp-extension-manager-commit-", run);
 }
 
 /**

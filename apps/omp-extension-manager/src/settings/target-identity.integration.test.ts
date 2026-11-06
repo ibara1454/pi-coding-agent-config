@@ -17,7 +17,7 @@ import {
 const linkName = "alpha-link.ts";
 
 async function withRoot(run: (root: string) => Promise<void>): Promise<void> {
-  await withTemporaryRoot("extension-manager-identity-", run);
+  await withTemporaryRoot("omp-extension-manager-identity-", run);
 }
 
 function topLevelTarget(root: string): TopLevelToggleTarget {
