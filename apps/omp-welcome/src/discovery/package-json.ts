@@ -26,6 +26,10 @@ export interface ResolvedPackageJson {
   pi: PiPackageResources & { extensions: string[] };
 }
 
+const DEFAULT_PACKAGE_JSON: ResolvedPackageJson = {
+  pi: { extensions: [] },
+};
+
 const ajv = new Ajv();
 const validatePackageRecord = ajv.compile<{
   pi?: Record<string, unknown>;
@@ -80,7 +84,7 @@ export function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
 ): ResolvedPackageJson {
   return deepmerge<ResolvedPackageJson, PackageJson>(
-    { pi: { extensions: [] } },
+    DEFAULT_PACKAGE_JSON,
     packageJson,
   );
 }

@@ -129,4 +129,12 @@ describe("mergeWithDefaultPackageJson", () => {
     mergeWithDefaultPackageJson(metadata);
     expect(metadata).toEqual({ pi: { skills: ["skills"] } });
   });
+
+  it("should preserve later defaults when a previous result is modified", () => {
+    const earlier = mergeWithDefaultPackageJson({});
+    earlier.pi.extensions.push("custom.ts");
+    expect(mergeWithDefaultPackageJson({})).toEqual({
+      pi: { extensions: [] },
+    });
+  });
 });
