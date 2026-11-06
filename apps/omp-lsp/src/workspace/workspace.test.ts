@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Dirent, Stats } from "node:fs";
-import fs from "node:fs/promises";
+// A namespace spy intercepts workspace checkers' named access import.
+import fs, * as filesystemPromises from "node:fs/promises";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies intercept retry delays without waiting on wall-clock timers.
 import * as delays from "node:timers/promises";
 import type {
@@ -2009,7 +2010,7 @@ function registerDocumentActionTests(): void {
       });
       expect(unmatched.text).toBe("No files matched pattern: *.py");
       expect(get).toHaveBeenCalledTimes(acquisitions);
-      spyOn(fs, "access").mockRejectedValue(
+      spyOn(filesystemPromises, "access").mockRejectedValue(
         Object.assign(new Error("missing marker"), { code: "ENOENT" }),
       );
       const unknown = await workspace.execute({

@@ -20,14 +20,15 @@ const RENDER_WIDTH = 200;
 const OUTPUT_LIMIT = 65_536;
 
 /**
- * Registers real host policy with a workspace double owning only external effects.
- * @returns The tool, events, context and planned workspace effects; afterEach releases the session.
- * @example await fixture().execute({ action: "status" }) returns sanitized workspace text.
+ * Creates independent effects so lifecycle tests detect reuse after disposal.
+ * @param text - Command output identifying this workspace's lifetime.
+ * @returns A workspace double with its own execution and disposal history.
+ * @example mockWorkspace("replacement") distinguishes newly acquired session state.
  */
-function fixture() {
-  const workspace = {
+function mockWorkspace(text = "ready") {
+  return {
     warnings: [] as string[],
-    execute: mock(async (): Promise<LspResult> => ({ text: "ready" })),
+    execute: mock(async (): Promise<LspResult> => ({ text })),
     afterMutation: mock(
       async (_files: readonly string[]): Promise<LspResult | undefined> => ({
         text: "feedback",
@@ -35,6 +36,15 @@ function fixture() {
     ),
     dispose: mock(async () => undefined),
   };
+}
+
+/**
+ * Registers real host policy with a workspace double owning only external effects.
+ * @returns The tool, events, context and planned workspace effects; afterEach releases the session.
+ * @example await fixture().execute({ action: "status" }) returns sanitized workspace text.
+ */
+function fixture() {
+  const workspace = mockWorkspace();
   const workspaceFactory: {
     create: (
       ...args: Parameters<typeof LspWorkspace.create>
@@ -155,7 +165,7 @@ describe("registerLsp.execute", () => {
     );
   });
 
-  it("should release the cached workspace and reject access when project trust is revoked", async () => {
+  it("should reject untrusted requests and acquire fresh state when project trust returns", async () => {
     const { context, execute, create, workspace } = fixture();
     await execute({ action: "status" });
     context.isProjectTrusted = () => false;
@@ -165,13 +175,19 @@ describe("registerLsp.execute", () => {
     expect(workspace.dispose).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(1);
 
+    const replacement = mockWorkspace("restored workspace");
+    create.mockResolvedValueOnce(replacement);
     context.isProjectTrusted = () => true;
-    await execute({ action: "status" });
+    expect((await execute({ action: "status" })).content).toEqual([
+      { type: "text", text: "restored workspace" },
+    ]);
+    expect(workspace.execute).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("should dispose the prior workspace before acquiring the replacement when the host changes roots", async () => {
+  it("should use the replacement after disposing the prior workspace when the host changes roots", async () => {
     const { context, execute, create, workspace } = fixture();
+    const replacement = mockWorkspace("second project");
     await execute({ action: "status" });
     context.cwd = "/second-project";
     create.mockImplementationOnce((options) => {
@@ -181,9 +197,12 @@ describe("registerLsp.execute", () => {
         agentDir: "/agent",
         trusted: true,
       });
-      return Promise.resolve(workspace);
+      return Promise.resolve(replacement);
     });
-    await execute({ action: "status" });
+    expect((await execute({ action: "status" })).content).toEqual([
+      { type: "text", text: "second project" },
+    ]);
+    expect(workspace.execute).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(2);
   });
 
@@ -491,10 +510,13 @@ describe("registerLsp.session_shutdown", () => {
       await shutdown;
       expect(await result).toContain("LSP session ended");
       expect(workspace.dispose).toHaveBeenCalledTimes(1);
+      const replacement = mockWorkspace("fresh session");
+      create.mockResolvedValueOnce(replacement);
       await emit("session_start");
-      expect((await execute({ action: "status" })).details).toMatchObject({
-        success: true,
-      });
+      expect((await execute({ action: "status" })).content).toEqual([
+        { type: "text", text: "fresh session" },
+      ]);
+      expect(workspace.execute).not.toHaveBeenCalled();
     } finally {
       pending.resolve(workspace);
       await result;
