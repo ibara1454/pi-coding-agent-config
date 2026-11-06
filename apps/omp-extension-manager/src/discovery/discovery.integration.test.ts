@@ -46,7 +46,7 @@ interface Fixture {
  * @example const { agentDir, cwd } = fixture(); // both paths are test-owned
  */
 function fixture(): Fixture {
-  const created = mkdtempSync(join(tmpdir(), "extension-manager-"));
+  const created = mkdtempSync(join(tmpdir(), "omp-extension-manager-"));
   roots.push(created);
   const root = realpathSync.native(created);
   const agentDir = join(root, "agent");
@@ -223,7 +223,7 @@ describe("discoverCatalog", () => {
     const installRoot = join(agentDir, "npm");
     put(extensionPath, sideEffect(marker));
     settings(join(agentDir, "settings.json"), {
-      packages: ["npm:extension-manager-missing-fixture"],
+      packages: ["npm:omp-extension-manager-missing-fixture"],
     });
 
     const catalog = await discoverCatalog({
@@ -241,7 +241,7 @@ describe("discoverCatalog", () => {
       resolutionParticipant: true,
     });
     expect(catalog.settings.get("global")?.value.packages).toEqual([
-      "npm:extension-manager-missing-fixture",
+      "npm:omp-extension-manager-missing-fixture",
     ]);
     expect(existsSync(installRoot)).toBe(false);
     expect(existsSync(marker)).toBe(false);

@@ -1,4 +1,4 @@
-# Extension Manager for Pi
+# oh-my-pi Extension Manager for Pi
 
 A [Pi Coding Agent](https://github.com/earendil-works/pi) extension that adds
 `/extensions`: a terminal panel for inspecting and persistently enabling or
@@ -8,6 +8,8 @@ Originally copied from
 [oh-my-pi's extension manager](https://github.com/can1357/oh-my-pi/tree/main/packages/coding-agent/src/modes/components/extensions),
 this port keeps its searchable list, inspector, and keyboard and mouse
 navigation while adapting persistence to Pi's public extension APIs.
+
+Upstream attribution and MIT license terms are preserved in [LICENSE](./LICENSE).
 
 The manager edits Pi settings only. Discovery does not execute extension
 modules, install packages, or reload the running session.
@@ -164,7 +166,7 @@ paths for rows you switched and leaves other settings alone.
 ```json
 {
   "extensions": [
-    "/path/to/extension-manager"
+    "/path/to/omp-extension-manager"
   ]
 }
 ```
@@ -176,8 +178,8 @@ The plain path tells Pi where to find Extension Manager.
 ```json
 {
   "extensions": [
-    "/path/to/extension-manager",
-    "-/path/to/extension-manager/index.ts"
+    "/path/to/omp-extension-manager",
+    "-/path/to/omp-extension-manager/src/index.ts"
   ]
 }
 ```
@@ -209,12 +211,12 @@ failed, the same notification reports both results.
 
 If the manager was disabled, recover with `pi config` or edit the applicable
 global or project `settings.json`. Remove any exact
-`-.../extension-manager/src/index.ts` filter, then add the extension directory:
+`-.../omp-extension-manager/src/index.ts` filter, then add the extension directory:
 
 ```json
 {
   "extensions": [
-    "/path/to/extension-manager"
+    "/path/to/omp-extension-manager"
   ]
 }
 ```
@@ -245,7 +247,7 @@ same-domain imports stay direct.
 Run the focused suite from the repository root:
 
 ```sh
-bun test apps/extension-manager
+bun test apps/omp-extension-manager
 ```
 
 Discovery integration fixtures isolate `HOME`, npm configuration, and global package storage. Keep npm lookups within test-owned directories and restore environment overrides during teardown.
@@ -259,5 +261,5 @@ bun run check
 For panel work, run the focused test file:
 
 ```sh
-bun test apps/extension-manager/src/panel/panel.test.ts
+bun test apps/omp-extension-manager/src/panel/panel.test.ts
 ```
