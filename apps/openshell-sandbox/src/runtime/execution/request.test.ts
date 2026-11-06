@@ -106,8 +106,9 @@ describe("executeRequest", () => {
       fixture.clock.restore();
     }
   });
-  it("should deliver bytes before one nonzero exit", async () => {
-    const { owner, fixture, raw } = requestFixture();
+  it("should stream bytes before one ordinary exit without invalidation when Bash exits with 124", async () => {
+    const { owner, fixture, raw, handle } = requestFixture();
+    const invalidate = spyOn(handle, "invalidate");
     try {
       fixture.sdk.execute = async function* () {
         await Promise.resolve();
@@ -124,7 +125,9 @@ describe("executeRequest", () => {
         terminals: 1,
       });
       expect(raw).toHaveLength(1);
+      expect(invalidate).not.toHaveBeenCalled();
     } finally {
+      invalidate.mockRestore();
       fixture.clock.restore();
     }
   });

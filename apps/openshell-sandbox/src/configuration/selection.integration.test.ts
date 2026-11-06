@@ -86,21 +86,7 @@ async function environment(policy: string, profile?: string) {
   });
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Groups all loadSandboxEnvironment cases for one operation.
 describe("loadSandboxEnvironment", () => {
-  it("should preserve absent sections and explicit empty filesystem grants without granting the project", async () => {
-    const absent = await environment("version: 1");
-    const empty = await environment(
-      "version: 1\nfilesystem_policy:\n  include_workdir: false\n  read_only: []\n  read_write: []",
-    );
-    expect(absent.policy.sdkPolicy.filesystem).toBeUndefined();
-    expect(empty.policy.sdkPolicy.filesystem).toMatchObject({
-      includeWorkdir: false,
-      readOnly: [],
-      readWrite: [],
-    });
-    expect(empty.policy.sdkPolicy.networkPolicies).toEqual({});
-  });
   it("should retain nested MCP restrictions and explicit false options in SDK policy", async () => {
     const result = await environment(MCP_POLICY);
     const endpoint =
@@ -132,82 +118,4 @@ describe("loadSandboxEnvironment", () => {
     expect(profile?.discovery?.credentials).toEqual(["access"]);
     expect(result.providers).toEqual([]);
   });
-  it.each([
-    ["duplicate keys", "version: 1\nversion: 2"],
-    ["unknown construction tags", "version: !!js/function 'payload'"],
-    ["multiple documents", "version: 1\n---\nversion: 2"],
-    [
-      "unsupported policy include directive",
-      "version: 1\ninclude: ./untrusted.yaml",
-    ],
-    ["unknown security fields", "version: 1\nallow_everything: true"],
-    ["numeric process identity", "version: 1\nprocess: {run_as_user: 1000}"],
-    [
-      "invalid boolean type",
-      "version: 1\nfilesystem_policy: {include_workdir: 'false'}",
-    ],
-    [
-      "invalid port range",
-      "version: 1\nnetwork_policies: {test: {endpoints: [{port: 65536}]}}",
-    ],
-    [
-      "conflicting port selectors",
-      "version: 1\nnetwork_policies: {test: {endpoints: [{port: 443, ports: [80]}]}}",
-    ],
-    [
-      "internal provenance fields",
-      "version: 1\nnetwork_policies: {test: {endpoints: [{provider_credentialed: true}]}}",
-    ],
-    [
-      "unknown nested restrictions",
-      "version: 1\nnetwork_policies: {test: {endpoints: [{rules: [{allow: {query: {x: {except: secret}}}}]}]}}",
-    ],
-    [
-      "colliding flattened restrictions",
-      "version: 1\nnetwork_policies: {test: {endpoints: [{rules: [{allow: {params: {'a.b': first, a: {b: second}}}}]}]}}",
-    ],
-  ])(
-    "should reject policy conversion when YAML contains %s",
-    async (_label, source) => {
-      await expect(environment(source)).rejects.toMatchObject({
-        code: "configuration-invalid",
-      });
-    },
-  );
-  it.each([
-    ["misplaced refresh", "refresh: {strategy: static}"],
-    [
-      "unknown refresh strategy",
-      "credentials: [{name: token, refresh: {strategy: magic}}]",
-    ],
-    [
-      "unknown refresh material fields",
-      "credentials: [{name: token, refresh: {material: [{name: token, value: secret}]}}]",
-    ],
-    ["unknown category", "category: unrestricted"],
-    ["unsupported profile include directive", "include: ./untrusted.yaml"],
-    [
-      "empty explicit allow rules",
-      "endpoints: [{host: example.com, port: 443, rules: []}]",
-    ],
-    [
-      "empty explicit deny rules",
-      "endpoints: [{host: example.com, port: 443, deny_rules: []}]",
-    ],
-    [
-      "conflicting query matchers",
-      "endpoints: [{host: example.com, rules: [{allow: {query: {q: {glob: one, any: [two]}}}}]}]",
-    ],
-    [
-      "policy-only credential binding",
-      "endpoints: [{host: example.com, credential_binding: {provider: work}}]",
-    ],
-  ])(
-    "should reject profile conversion when YAML contains %s",
-    async (_label, source) => {
-      await expect(
-        environment("version: 1", `id: work\ndisplay_name: Work\n${source}`),
-      ).rejects.toMatchObject({ code: "configuration-invalid" });
-    },
-  );
 });

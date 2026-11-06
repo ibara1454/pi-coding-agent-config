@@ -14,18 +14,15 @@ import lockfile from "proper-lockfile";
 import type {
   CommitRequest,
   CommitResult,
-  PackageToggleTarget,
   ResourceScope,
   SettingsDocument,
   SettingsMutation,
   TopLevelToggleTarget,
 } from "../catalog/index.ts";
-import { commitSettings, type PersistenceIo } from "./persistence.ts";
+import { commitSettings } from "./persistence.ts";
 import { parseSettingsDocument } from "./settings.ts";
-import { validateTargetIdentity } from "./target-identity.ts";
 import {
   manifestPackage,
-  packageDrifts,
   withTemporaryRoot,
 } from "./test/target-identity.helper.ts";
 
@@ -60,46 +57,6 @@ function request(
     ),
     mutations,
   };
-}
-
-/**
- * Keeps settings I/O in memory while validating real, test-owned package identity.
- * @example fakeIo(contents).io.validateTarget(target) // reads the package fixture
- */
-function fakeIo(contents: Map<string, string | undefined>): {
-  readonly io: PersistenceIo;
-  readonly events: string[];
-} {
-  const events: string[] = [];
-  return {
-    events,
-    io: {
-      lock(path) {
-        events.push(`lock:${path}`);
-        return Promise.resolve(() => {
-          events.push(`release:${path}`);
-          return Promise.resolve();
-        });
-      },
-      read(path) {
-        events.push(`read:${path}`);
-        return Promise.resolve(contents.get(path));
-      },
-      async validateTarget(target) {
-        events.push(`validate:${target.id}`);
-        await validateTargetIdentity(target);
-      },
-      writeAtomic(path, content) {
-        events.push(`write:${path}`);
-        contents.set(path, content);
-        return Promise.resolve();
-      },
-    },
-  };
-}
-
-function wrote(events: readonly string[]): boolean {
-  return events.some((event) => event.startsWith("write:"));
 }
 
 async function withRoot(run: (root: string) => Promise<void>): Promise<void> {
@@ -384,36 +341,34 @@ describe("commitSettings", () => {
     });
   });
 
-  it.each(packageDrifts)(
-    "should leave settings untouched when %s",
-    async (_label: string, prepare: (
-      root: string,
-    ) => PackageToggleTarget, drift: (
-      target: PackageToggleTarget,
-    ) => void, message: string) => {
-      await withRoot(async (root) => {
-        const target = prepare(root);
-        const path = join(root, "settings.json");
-        const content = '{"packages":["npm:kit"]}\n';
-        const snapshot = parseSettingsDocument("global", path, content);
-        const contents = new Map<string, string | undefined>([[path, content]]);
-        const { io, events } = fakeIo(contents);
+  it("should leave settings untouched when a staged child is removed from the package manifest", async () => {
+    await withRoot(async (root) => {
+      const target = manifestPackage(root);
+      const path = join(root, "settings.json");
+      const content = '{"packages":["npm:kit"]}\n';
+      const snapshot = parseSettingsDocument("global", path, content);
+      await writeFile(path, content);
+      await writeFile(
+        join(target.packageRoot, "package.json"),
+        JSON.stringify({ pi: { extensions: ["./beta.ts"] } }),
+      );
 
-        drift(target);
+      const result = await commitSettings(
+        request([snapshot], [{ scope: "global", target, enabled: false }]),
+      );
 
-        const result = await commitSettings(
-          request([snapshot], [{ scope: "global", target, enabled: false }]),
-          io,
-        );
-
-        expect(result.committedScopes).toEqual([]);
-        expect(result.scopes[0]?.status).toBe("failed");
-        expect(result.scopes[0]?.message).toContain(message);
-        expect(wrote(events)).toBe(false);
-        expect(contents.get(path)).toBe(content);
-      });
-    },
-  );
+      expect(result.committedScopes).toEqual([]);
+      expect(result.scopes[0]?.status).toBe("failed");
+      expect(result.scopes[0]?.message).toContain(
+        "Resource no longer resolves from its package",
+      );
+      expect(await readFile(path, "utf8")).toBe(content);
+      expect((await readdir(root)).sort()).toEqual([
+        "package",
+        "settings.json",
+      ]);
+    });
+  });
 
   it("should commit when the real target identity still holds", async () => {
     await withRoot(async (root) => {
@@ -421,19 +376,17 @@ describe("commitSettings", () => {
       const path = join(root, "settings.json");
       const content = '{"packages":["npm:kit"]}\n';
       const snapshot = parseSettingsDocument("global", path, content);
-      const contents = new Map<string, string | undefined>([[path, content]]);
-      const { io } = fakeIo(contents);
+      await writeFile(path, content);
 
       const result = await commitSettings(
         request([snapshot], [{ scope: "global", target, enabled: false }]),
-        io,
       );
 
       expect(result).toEqual({
         scopes: [{ scope: "global", status: "committed" }],
         committedScopes: ["global"],
       });
-      expect(JSON.parse(contents.get(path) ?? "{}")).toEqual({
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
         packages: [{ source: "npm:kit", extensions: ["-alpha.ts"] }],
       });
     });

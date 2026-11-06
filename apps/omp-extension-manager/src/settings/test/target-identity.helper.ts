@@ -11,9 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PackageToggleTarget } from "../../catalog/index.ts";
 
-// Inert package toggle targets, real temporary package layouts, and the package
-// drift cases shared by the target identity and persistence integration suites.
-// Top-level target fixtures and suite behavior stay in each suite.
+// Inert toggle targets and real temporary package layouts. Target identity owns
+// the drift matrix; persistence keeps representative accepted and rejected targets.
 
 export async function withTemporaryRoot(
   prefix: string,

@@ -20,14 +20,15 @@ const RENDER_WIDTH = 200;
 const OUTPUT_LIMIT = 65_536;
 
 /**
- * Registers real host policy with a workspace double owning only external effects.
- * @returns The tool, events, context and planned workspace effects; afterEach releases the session.
- * @example await fixture().execute({ action: "status" }) returns sanitized workspace text.
+ * Creates independent effects so lifecycle tests detect reuse after disposal.
+ * @param text - Command output identifying this workspace's lifetime.
+ * @returns A workspace double with its own execution and disposal history.
+ * @example mockWorkspace("replacement") distinguishes newly acquired session state.
  */
-function fixture() {
-  const workspace = {
+function mockWorkspace(text = "ready") {
+  return {
     warnings: [] as string[],
-    execute: mock(async (): Promise<LspResult> => ({ text: "ready" })),
+    execute: mock(async (): Promise<LspResult> => ({ text })),
     afterMutation: mock(
       async (_files: readonly string[]): Promise<LspResult | undefined> => ({
         text: "feedback",
@@ -35,6 +36,15 @@ function fixture() {
     ),
     dispose: mock(async () => undefined),
   };
+}
+
+/**
+ * Registers real host policy with a workspace double owning only external effects.
+ * @returns The tool, events, context and planned workspace effects; afterEach releases the session.
+ * @example await fixture().execute({ action: "status" }) returns sanitized workspace text.
+ */
+function fixture() {
+  const workspace = mockWorkspace();
   const workspaceFactory: {
     create: (
       ...args: Parameters<typeof LspWorkspace.create>
@@ -100,11 +110,11 @@ function fixture() {
      * @returns Host content and details, rejecting required-operation failures.
      * @example await execute({ action: "status" }) returns a text content block.
      */
-    execute(params: LspParams) {
+    execute(params: LspParams, signal?: AbortSignal) {
       return tool.execute(
         "host-policy",
         params,
-        undefined,
+        signal,
         undefined,
         context as ExtensionToolContext,
       );
@@ -153,6 +163,61 @@ describe("registerLsp.execute", () => {
     await expect(execute({ action: "status" })).rejects.toThrow(
       "failed  request",
     );
+  });
+
+  it("should reject untrusted requests and acquire fresh state when project trust returns", async () => {
+    const { context, execute, create, workspace } = fixture();
+    await execute({ action: "status" });
+    context.isProjectTrusted = () => false;
+    await expect(execute({ action: "status" })).rejects.toThrow(
+      "trusted project",
+    );
+    expect(workspace.dispose).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+
+    const replacement = mockWorkspace("restored workspace");
+    create.mockResolvedValueOnce(replacement);
+    context.isProjectTrusted = () => true;
+    expect((await execute({ action: "status" })).content).toEqual([
+      { type: "text", text: "restored workspace" },
+    ]);
+    expect(workspace.execute).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("should use the replacement after disposing the prior workspace when the host changes roots", async () => {
+    const { context, execute, create, workspace } = fixture();
+    const replacement = mockWorkspace("second project");
+    await execute({ action: "status" });
+    context.cwd = "/second-project";
+    create.mockImplementationOnce((options) => {
+      expect(workspace.dispose).toHaveBeenCalledTimes(1);
+      expect(options).toEqual({
+        cwd: "/second-project",
+        agentDir: "/agent",
+        trusted: true,
+      });
+      return Promise.resolve(replacement);
+    });
+    expect((await execute({ action: "status" })).content).toEqual([
+      { type: "text", text: "second project" },
+    ]);
+    expect(workspace.execute).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("should retain the workspace when only the caller cancels a request", async () => {
+    const { execute, create, workspace } = fixture();
+    const before = await execute({ action: "status" });
+    await expect(
+      execute(
+        { action: "status" },
+        AbortSignal.abort(new Error("caller cancelled")),
+      ),
+    ).rejects.toThrow("caller cancelled");
+    expect(workspace.dispose).not.toHaveBeenCalled();
+    expect(await execute({ action: "status" })).toEqual(before);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -249,6 +314,66 @@ describe("registerLsp.renderResult", () => {
 
 describe("registerLsp.tool_result", () => {
   it.each([
+    {
+      condition: "the host operation failed",
+      toolName: "write",
+      isError: true,
+      path: "example.ts",
+      trusted: true,
+    },
+    {
+      condition: "the operation is not a mutation",
+      toolName: "read",
+      isError: false,
+      path: "example.ts",
+      trusted: true,
+    },
+    {
+      condition: "project trust was not granted",
+      toolName: "write",
+      isError: false,
+      path: "example.ts",
+      trusted: false,
+    },
+    {
+      condition: "the mutation path is not a string",
+      toolName: "edit",
+      isError: false,
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Deliberately reject an external host mutation with a null path.
+      path: null,
+      trusted: true,
+    },
+  ])(
+    "should leave host output untouched without acquiring a workspace when $condition",
+    async ({ toolName, isError, path, trusted }) => {
+      const { context, emit, create } = fixture();
+      context.isProjectTrusted = () => trusted;
+      expect(
+        await emit("tool_result", {
+          toolName,
+          isError,
+          input: { path },
+          content: [{ type: "text", text: "host output" }],
+        }),
+      ).toBeUndefined();
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("should preserve committed output without requesting feedback when the mutation path uses an unsupported URI scheme", async () => {
+    const { emit, workspace } = fixture();
+    expect(
+      await emit("tool_result", {
+        toolName: "edit",
+        isError: false,
+        input: { path: "https://example.com/file.ts" },
+        content: [{ type: "text", text: "host edit succeeded" }],
+      }),
+    ).toBeUndefined();
+    expect(workspace.afterMutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["~", homedir()],
     ["~/source.ts", join(homedir(), "source.ts")],
     [pathToFileURL("/project/source.ts").href, "/project/source.ts"],
@@ -312,25 +437,92 @@ describe("registerLsp.tool_result", () => {
 });
 
 describe("registerLsp.session_start", () => {
-  it("should notify initialization failure and allow recovery when workspace acquisition rejects", async () => {
-    const { create, emit, notifications, execute } = fixture();
-    create.mockRejectedValueOnce(
-      new Error("\u001b[31mconfiguration\tfailed\u0007"),
-    );
+  it("should avoid acquiring a workspace when the project is untrusted", async () => {
+    const { context, emit, create, notifications } = fixture();
+    context.isProjectTrusted = () => false;
     await emit("session_start");
-    expect(notifications).toEqual([
-      {
-        message: "LSP initialization failed: Error: configuration  failed",
-        level: "error",
-      },
-    ]);
-    expect((await execute({ action: "status" })).content).toEqual([
-      { type: "text", text: "ready" },
-    ]);
+    expect(create).not.toHaveBeenCalled();
+    expect(notifications).toEqual([]);
   });
+
+  it.each([
+    { mode: "interactive", hasUi: true, notificationCount: 1 },
+    { mode: "non-interactive", hasUi: false, notificationCount: 0 },
+  ])(
+    "should sanitize configuration warnings and gate notifications when the host is $mode",
+    async ({ hasUi, notificationCount }) => {
+      const { context, emit, workspace, notifications } = fixture();
+      context.hasUI = hasUi;
+      workspace.warnings.push("\u001b[31munsafe\tconfiguration\u0007");
+      await emit("session_start");
+      expect(notifications).toEqual(
+        Array.from({ length: notificationCount }, () => ({
+          message: "LSP: unsafe  configuration",
+          level: "warning",
+        })),
+      );
+    },
+  );
+
+  it.each([
+    { mode: "interactive", hasUi: true, notificationCount: 1 },
+    { mode: "non-interactive", hasUi: false, notificationCount: 0 },
+  ])(
+    "should recover from initialization failure and gate notifications when the host is $mode",
+    async ({ hasUi, notificationCount }) => {
+      const { context, create, emit, notifications, execute } = fixture();
+      context.hasUI = hasUi;
+      create.mockRejectedValueOnce(
+        new Error("\u001b[31mconfiguration\tfailed\u0007"),
+      );
+      await emit("session_start");
+      expect(notifications).toEqual(
+        Array.from({ length: notificationCount }, () => ({
+          message: "LSP initialization failed: Error: configuration  failed",
+          level: "error",
+        })),
+      );
+      expect((await execute({ action: "status" })).details).toMatchObject({
+        success: true,
+      });
+      expect(create).toHaveBeenCalledTimes(2);
+    },
+  );
 });
 
 describe("registerLsp.session_shutdown", () => {
+  it("should dispose pending acquisition and allow a fresh session when shutdown interrupts initialization", async () => {
+    const { create, workspace, emit, execute } = fixture();
+    const pending = Promise.withResolvers<typeof workspace>();
+    const loading = Promise.withResolvers<void>();
+    create.mockImplementationOnce(() => {
+      loading.resolve();
+      return pending.promise;
+    });
+    const result = execute({ action: "status" }).then(
+      () => "unexpected success",
+      (error: unknown) => String(error),
+    );
+    try {
+      await loading.promise;
+      const shutdown = emit("session_shutdown");
+      pending.resolve(workspace);
+      await shutdown;
+      expect(await result).toContain("LSP session ended");
+      expect(workspace.dispose).toHaveBeenCalledTimes(1);
+      const replacement = mockWorkspace("fresh session");
+      create.mockResolvedValueOnce(replacement);
+      await emit("session_start");
+      expect((await execute({ action: "status" })).content).toEqual([
+        { type: "text", text: "fresh session" },
+      ]);
+      expect(workspace.execute).not.toHaveBeenCalled();
+    } finally {
+      pending.resolve(workspace);
+      await result;
+    }
+  });
+
   it("should report sanitized disposal failures and release state when the session shuts down", async () => {
     const { workspace, emit, notifications, execute } = fixture();
     await execute({ action: "status" });

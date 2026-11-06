@@ -1,7 +1,10 @@
-import { describe, expect, test as it } from "bun:test";
-import { plannedRealpath, unitRuntimeFixture } from "../test/index.helper.ts";
+import { describe, expect, test as it, spyOn } from "bun:test";
+import { HostProcessError, type ProcessClose } from "../../host/index.ts";
+import { unitRuntimeFixture } from "../test/index.helper.ts";
 import { prepareGeneration } from "./preparation.ts";
-import { gateway, input } from "./test/generation.helper.ts";
+// biome-ignore lint/performance/noNamespaceImport: Scoped spies must replace the live setup boundary.
+import * as setupBoundary from "./setup.ts";
+import { input } from "./test/generation.helper.ts";
 import type { GenerationEvent } from "./types.ts";
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
@@ -56,58 +59,68 @@ describe("prepareGeneration", () => {
     }
   });
 
-  it("should hold raw workspace setup through cancellation before deleting acquired resources", async () => {
+  it("should hold raw setup through cancellation before confirming cleanup", async () => {
     const fixture = unitRuntimeFixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const setup = spyOn(setupBoundary, "runGenerationSetup").mockImplementation(
+      (current) =>
+        current.step(async () => {
+          entered.resolve();
+          await release.promise;
+          throw new Error("Setup canceled.");
+        }),
+    );
+    const generation = prepareGeneration(
+      input(fixture),
+      fixture.effects,
+      () => undefined,
+    );
     try {
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<string>();
-      const generation = prepareGeneration(
-        input(fixture),
-        {
-          ...fixture.effects,
-          filesystem: {
-            ...fixture.effects.filesystem,
-            realpath: plannedRealpath(() => {
-              entered.resolve();
-              return release.promise;
-            }),
-          },
-        },
-        () => undefined,
-      );
       await entered.promise;
       const cleanup = generation.invalidate();
       expect(generation.invalidate()).toBe(cleanup);
+      let settled = false;
+      const trackedCleanup = cleanup.finally(() => {
+        settled = true;
+      });
       await Promise.resolve();
-      expect(fixture.native.launches).toBe(0);
-      release.resolve("/project");
-      expect(await cleanup).toEqual({ kind: "confirmed" });
+      expect(settled).toBe(false);
+      release.resolve();
+      expect(await trackedCleanup).toEqual({ kind: "confirmed" });
       await expect(generation.readiness).rejects.toThrow();
       expect(fixture.clock.pending()).toBe(0);
     } finally {
+      release.resolve();
+      await generation.invalidate().catch(() => undefined);
+      setup.mockRestore();
       fixture.clock.restore();
     }
   });
   it("should report unconfirmed cleanup when raw setup outlives the deadline", async () => {
     const fixture = unitRuntimeFixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    const events: GenerationEvent[] = [];
+    const setup = spyOn(setupBoundary, "runGenerationSetup").mockImplementation(
+      (current) =>
+        current.step(async () => {
+          entered.resolve();
+          try {
+            await release.promise;
+            throw new Error("Setup canceled.");
+          } finally {
+            finished.resolve();
+          }
+        }),
+    );
+    const generation = prepareGeneration(
+      input(fixture),
+      fixture.effects,
+      (event) => events.push(event),
+    );
     try {
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<string>();
-      const events: GenerationEvent[] = [];
-      const generation = prepareGeneration(
-        input(fixture),
-        {
-          ...fixture.effects,
-          filesystem: {
-            ...fixture.effects.filesystem,
-            realpath: plannedRealpath(() => {
-              entered.resolve();
-              return release.promise;
-            }),
-          },
-        },
-        (event) => events.push(event),
-      );
       await entered.promise;
       const cleanup = generation.invalidate();
       fixture.clock.fire();
@@ -118,42 +131,66 @@ describe("prepareGeneration", () => {
         failure: { code: "cleanup" },
       });
       expect(events.some((event) => event.kind === "stopped")).toBe(false);
-      release.resolve("/project");
     } finally {
+      release.resolve();
+      await finished.promise;
+      await generation.invalidate().catch(() => undefined);
+      setup.mockRestore();
       fixture.clock.restore();
     }
   });
-  it("should share SDK readiness and delete an acknowledged sandbox once", async () => {
+  it("should wait for captured Git child closure before confirming canceled setup", async () => {
     const fixture = unitRuntimeFixture();
+    const closed = Promise.withResolvers<ProcessClose>();
+    const entered = Promise.withResolvers<void>();
+    const events: GenerationEvent[] = [];
+    const setup = spyOn(setupBoundary, "runGenerationSetup").mockImplementation(
+      async (current) => {
+        await current.step(() => current.gitProcess(["rev-parse"]));
+        throw new Error("Expected Git failure.");
+      },
+    );
+    const generation = prepareGeneration(
+      input(fixture),
+      {
+        ...fixture.effects,
+        gitProcess: () => {
+          entered.resolve();
+          return Promise.reject(
+            new HostProcessError("Git child failed", {
+              closed: closed.promise,
+              terminate: async () => undefined,
+            }),
+          );
+        },
+      },
+      (event) => events.push(event),
+    );
     try {
-      const prepared = gateway(fixture);
-      fixture.native.namespace = `pi-openshell-${fixture.effects.host.instanceId}`;
-      fixture.native.labels = { ...prepared.handle.labels };
-      const events: GenerationEvent[] = [];
-      const generation = prepareGeneration(
-        input(fixture, prepared),
-        fixture.effects,
-        (event) => events.push(event),
+      await entered.promise;
+      const stopping = generation.invalidate();
+      let settled = false;
+      const onSettled = () => {
+        settled = true;
+      };
+      const observed = stopping.then(onSettled, onSettled);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(events.some((event) => event.kind === "stopped")).toBe(false);
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Node reports null for a normal numeric child exit.
+      closed.resolve({ exitCode: 1, signal: null });
+      expect(await stopping).toEqual({ kind: "confirmed" });
+      await observed;
+      await expect(generation.readiness).rejects.toThrow();
+      expect(events.filter((event) => event.kind === "stopped")).toHaveLength(
+        1,
       );
-      try {
-        expect((await generation.readiness).gateway).toBe(prepared);
-        expect(
-          events.some(
-            (event) =>
-              event.kind === "creation" && event.outcome === "acknowledged",
-          ),
-        ).toBe(true);
-        const stopped = generation.invalidate();
-        expect(generation.invalidate()).toBe(stopped);
-        expect(await stopped).toEqual({ kind: "confirmed" });
-        expect(fixture.sdk.deleteCount).toBe(1);
-        expect(events.filter((event) => event.kind === "stopped")).toHaveLength(
-          1,
-        );
-      } finally {
-        await generation.invalidate().catch(() => undefined);
-      }
+      expect(fixture.native.launches).toBe(0);
     } finally {
+      // biome-ignore lint/plugin/biome-rules/use-undefined: Node reports null for a normal numeric child exit.
+      closed.resolve({ exitCode: 1, signal: null });
+      await generation.invalidate().catch(() => undefined);
+      setup.mockRestore();
       fixture.clock.restore();
     }
   });
