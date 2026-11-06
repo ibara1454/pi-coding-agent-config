@@ -132,12 +132,14 @@ Copying only `src/index.ts` is insufficient for extensions with supporting modul
 For a one-off run from the repository root after installing workspace dependencies:
 
 ```sh
-pi -e "$(realpath apps/extension-manager/src/index.ts)"
+pi -e "$(realpath apps/omp-extension-manager/src/index.ts)"
 ```
 
 Direct file references must use `apps/<package>/src/index.ts`; root `index.ts`
-entrypoints are no longer provided. Directory-based extension settings need no
-change because Pi follows each package's `pi.extensions` manifest.
+entrypoints are no longer provided. Update explicit manager paths to
+`apps/omp-extension-manager` (or its `src/index.ts` entrypoint). The tracked
+`../../apps` setting needs no change because Pi discovers each package through
+its `pi.extensions` manifest.
 
 See Pi's [extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 for other loading options.
@@ -151,7 +153,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`provider-base-url-overrides`](apps/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs with `PROVIDER_BASE_URL`. | `bun test apps/provider-base-url-overrides` |
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
-| [`extension-manager`](apps/extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/extension-manager` |
+| [`omp-extension-manager`](apps/omp-extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/omp-extension-manager` |
 | [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Tests and native limits](apps/openshell-sandbox/README.md#automatic-tests) |
 | [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
@@ -207,8 +209,8 @@ other suites in a direct root run.
 Narrow a run to one file while working on the extension manager panel:
 
 ```bash
-bun test apps/extension-manager
-bun test apps/extension-manager/src/panel/panel.test.ts
+bun test apps/omp-extension-manager
+bun test apps/omp-extension-manager/src/panel/panel.test.ts
 ```
 
 ### Coverage

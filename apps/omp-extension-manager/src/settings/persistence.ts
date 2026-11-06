@@ -67,7 +67,7 @@ async function atomicReplace(path: string, content: string): Promise<void> {
   await mkdir(directory, { recursive: true });
   const temporaryPath = join(
     directory,
-    `.${path.split("/").at(-1) ?? "settings"}.extension-manager-${process.pid}-${randomUUID()}.tmp`,
+    `.${path.split("/").at(-1) ?? "settings"}.omp-extension-manager-${process.pid}-${randomUUID()}.tmp`,
   );
 
   let mode: number | undefined;
