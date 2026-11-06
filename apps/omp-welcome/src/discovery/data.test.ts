@@ -505,6 +505,7 @@ describe("collectWelcomeExtensions", () => {
     ],
     ["a non-object pi value", "invalid", ["npm:tool:visible"]],
     ["a pi array", [], ["npm:tool:visible"]],
+    ["no pi field", undefined, ["npm:tool:visible"]],
     ["an explicitly empty extension array", { extensions: [] }, []],
     ["an explicitly empty skills array", { skills: [] }, []],
     ["an explicitly empty prompts array", { prompts: [] }, []],

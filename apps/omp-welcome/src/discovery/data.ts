@@ -63,13 +63,21 @@ export interface WelcomeSession {
   timeAgo: string;
 }
 
+interface PiPackageResources {
+  extensions?: string[];
+  skills?: string[];
+  prompts?: string[];
+  themes?: string[];
+}
+
 interface PackageJson {
-  pi: {
-    extensions?: readonly string[];
-    skills?: readonly string[];
-    prompts?: readonly string[];
-    themes?: readonly string[];
-  };
+  pi?: PiPackageResources;
+}
+
+interface ResolvedPackageJson {
+  pi: PiPackageResources & { extensions: string[] };
+  /** Whether to discover extensions/ instead of using the resolved declaration. */
+  useConvention: boolean;
 }
 
 interface PackageSource {
@@ -135,28 +143,28 @@ function readJson(filePath: string): Record<string, unknown> {
 
 /**
  * Reads the Pi resource fields used by package discovery without importing code.
- * Invalid fields are ignored; unreadable or malformed JSON yields an empty pi object.
+ * Missing or invalid pi metadata stays absent; unreadable or malformed JSON yields {}.
  * @param filePath Package metadata file to read.
  * @returns Validated string-array declarations; missing fields stay absent.
- * @example For {"pi":{"skills":[],"extensions":["tool.ts",false]}}, returns { pi: { skills: [] } }.
+ * @example For {"name":"tool"}, returns {}; for {"pi":{"skills":[]}}, returns { pi: { skills: [] } }.
  */
 function readPackageJson(filePath: string): PackageJson {
   const { pi: rawPi } = readJson(filePath);
-  const packageJson: PackageJson = { pi: {} };
   if (rawPi === null || typeof rawPi !== "object" || Array.isArray(rawPi)) {
-    return packageJson;
+    return {};
   }
-  const pi = rawPi as Record<string, unknown>;
+  const manifest = rawPi as Record<string, unknown>;
+  const pi: PiPackageResources = {};
   for (const field of PACKAGE_RESOURCE_FIELDS) {
-    const entries = pi[field];
+    const entries = manifest[field];
     if (
       Array.isArray(entries) &&
       entries.every((entry): entry is string => typeof entry === "string")
     ) {
-      packageJson.pi[field] = entries;
+      pi[field] = entries;
     }
   }
-  return packageJson;
+  return { pi };
 }
 
 function normalizePiPath(input: string): string {
@@ -879,27 +887,34 @@ function packageExtensionFiles(
 type PackageCollectionMode = "package" | "default" | "filter";
 
 /**
- * Applies Pi's default extension declaration without changing the supplied record.
- * Only string-configured resource manifests default to no extensions; metadata-only
- * manifests and package-object modes retain their missing fields for convention discovery.
- * @param packageJson Validated package metadata.
+ * Resolves welcome-inventory defaults without changing the supplied record.
+ * Only extensions is defaulted because packageFiles inventories extensions only;
+ * skills, prompts, and themes remain declaration markers. This is not Pi's complete
+ * default schema: Pi applies the manifest-vs-convention rule uniformly to all resources.
+ * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
+ * @param packageJson Validated metadata, which may omit pi entirely.
  * @param mode Package source's existing discovery policy.
- * @returns The input or a copy with an empty extension default; explicit arrays are preserved.
- * @example mergeWithDefaultPackageJson({ pi: { skills: [] } }, "package") // { pi: { extensions: [], skills: [] } }
+ * @returns Required pi.extensions and an explicit convention policy, preserving absent-vs-empty semantics.
+ * @example mergeWithDefaultPackageJson({}, "package") // { pi: { extensions: [] }, useConvention: true }
  */
 function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
   mode: PackageCollectionMode,
-): PackageJson {
-  const { pi } = packageJson;
-  if (
-    mode !== "package" ||
-    pi.extensions !== undefined ||
-    !PACKAGE_RESOURCE_FIELDS.some((field) => pi[field] !== undefined)
-  ) {
-    return packageJson;
+): ResolvedPackageJson {
+  const declarations = packageJson.pi;
+  const extensions = declarations?.extensions;
+  const pi = { ...declarations, extensions: extensions ?? [] };
+  if (mode === "filter") {
+    return { pi, useConvention: pi.extensions.length === 0 };
   }
-  return { pi: { extensions: [], ...pi } };
+  if (extensions !== undefined) {
+    return { pi, useConvention: false };
+  }
+  const hasResourceManifest =
+    mode === "package" &&
+    declarations !== undefined &&
+    PACKAGE_RESOURCE_FIELDS.some((field) => declarations[field] !== undefined);
+  return { pi, useConvention: !hasResourceManifest };
 }
 
 /**
@@ -955,10 +970,7 @@ function packageFiles(
     };
   };
 
-  if (
-    extensions === undefined ||
-    (mode === "filter" && extensions.length === 0)
-  ) {
+  if (packageJson.useConvention) {
     return convention();
   }
   return fromManifest(extensions);
