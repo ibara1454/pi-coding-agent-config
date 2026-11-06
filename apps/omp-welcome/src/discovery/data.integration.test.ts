@@ -74,37 +74,6 @@ describe("collectWelcomeExtensions", () => {
     expect(discovered()).toEqual(["index.ts"]);
   });
 
-  it("should distinguish authoritative package metadata from default convention discovery", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    const first = join(agentDir, "npm", "node_modules", "authoritative");
-    const second = join(agentDir, "npm", "node_modules", "default");
-    const third = join(agentDir, "npm", "node_modules", "convention");
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({
-        packages: [
-          "npm:authoritative",
-          { source: "npm:default" },
-          "npm:convention",
-        ],
-      }),
-    );
-    write(join(first, "package.json"), '{"pi":{"skills":["skills"]}}');
-    write(join(first, "extensions", "hidden.ts"));
-    write(join(second, "package.json"), '{"pi":{"skills":["skills"]}}');
-    write(join(second, "extensions", "visible.ts"));
-    write(join(third, "extensions", "visible.ts"));
-    expect(
-      collectWelcomeExtensions({
-        cwd,
-        agentDir,
-        projectTrusted: false,
-      }).map((row) => row.name),
-    ).toEqual(["npm:convention:visible", "npm:default:visible"]);
-  });
-
   const packageCases: [
     condition: string,
     metadata: Record<string, unknown>,

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import Ajv from "ajv";
 
 const PACKAGE_RESOURCE_FIELDS = [
   "extensions",
@@ -28,9 +29,22 @@ export interface ResolvedPackageJson {
 
 export type PackageCollectionMode = "package" | "default" | "filter";
 
+const ajv = new Ajv();
+const validatePackageRecord = ajv.compile<{
+  pi?: Record<string, unknown>;
+}>({
+  type: "object",
+  properties: { pi: { type: "object" } },
+});
+const validateResourcePaths = ajv.compile<string[]>({
+  type: "array",
+  items: { type: "string" },
+});
+
 /**
  * Reads the Pi resource fields used by package discovery without importing code.
- * Missing or invalid pi metadata stays absent; unreadable or malformed JSON yields {}.
+ * Missing/non-object pi and unreadable/malformed JSON yield {}.
+ * Resource fields are validated independently, preserving valid siblings.
  * @param filePath Package metadata file to read.
  * @returns Validated string-array declarations; missing fields stay absent.
  * @example For {"name":"tool"}, returns {}; for {"pi":{"skills":[]}}, returns { pi: { skills: [] } }.
@@ -42,26 +56,13 @@ export function readPackageJson(filePath: string): PackageJson {
   } catch {
     return {};
   }
-  if (
-    packageJson === null ||
-    typeof packageJson !== "object" ||
-    Array.isArray(packageJson) ||
-    !("pi" in packageJson)
-  ) {
+  if (!validatePackageRecord(packageJson) || packageJson.pi === undefined) {
     return {};
   }
-  const { pi: rawPi } = packageJson;
-  if (rawPi === null || typeof rawPi !== "object" || Array.isArray(rawPi)) {
-    return {};
-  }
-  const manifest = rawPi as Record<string, unknown>;
   const pi: PiPackageResources = {};
   for (const field of PACKAGE_RESOURCE_FIELDS) {
-    const entries = manifest[field];
-    if (
-      Array.isArray(entries) &&
-      entries.every((entry): entry is string => typeof entry === "string")
-    ) {
+    const entries = packageJson.pi[field];
+    if (validateResourcePaths(entries)) {
       pi[field] = entries;
     }
   }

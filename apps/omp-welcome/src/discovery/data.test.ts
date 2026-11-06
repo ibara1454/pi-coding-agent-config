@@ -325,6 +325,30 @@ describe("collectWelcomeExtensions", () => {
     ).toEqual([{ name: "omp-welcome", scope: "user", path: welcomePath }]);
   });
 
+  it("should discover package extensions when a source object has no resource filters", () => {
+    const extensionPath = join(
+      AGENT_DIR,
+      "npm",
+      "node_modules",
+      "tool",
+      "extensions",
+      "visible.ts",
+    );
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: JSON.stringify({
+        packages: [{ source: "npm:tool" }],
+      }),
+      [extensionPath]: "",
+    });
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.path),
+    ).toEqual([extensionPath]);
+  });
+
   it.each([
     "git:invalid",
     "git:example.org/",

@@ -116,7 +116,7 @@ The extension has no extension-specific configuration.
 
 ## Installation in this repository
 
-The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
+Run `bun install --frozen-lockfile` from the repository root to install the extension's runtime dependencies before loading it. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
 
 The `src/index.ts` factory delegates to `src/pi/registration.ts`. Discovery and settings
 snapshots live under `src/discovery/`; header, animation, and terminal rendering
