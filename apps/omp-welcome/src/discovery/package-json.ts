@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import Ajv from "ajv";
+import deepmerge from "deepmerge";
 
 const PACKAGE_RESOURCE_FIELDS = [
   "extensions",
@@ -66,7 +67,7 @@ export function readPackageJson(filePath: string): PackageJson {
 }
 
 /**
- * Merges validated metadata with extension-inventory defaults without changing the input.
+ * Deep-merges validated metadata with extension-inventory defaults without changing the input.
  * Only extensions is defaulted because packageFiles inventories extensions only;
  * skills, prompts, and themes remain declaration markers. This is not Pi's complete
  * default schema: Pi applies the manifest-vs-convention rule uniformly to all resources.
@@ -78,10 +79,8 @@ export function readPackageJson(filePath: string): PackageJson {
 export function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
 ): ResolvedPackageJson {
-  return {
-    pi: {
-      ...packageJson.pi,
-      extensions: packageJson.pi?.extensions ?? [],
-    },
-  };
+  return deepmerge<ResolvedPackageJson, PackageJson>(
+    { pi: { extensions: [] } },
+    packageJson,
+  );
 }
