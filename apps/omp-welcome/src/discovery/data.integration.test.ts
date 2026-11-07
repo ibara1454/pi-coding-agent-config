@@ -73,6 +73,40 @@ describe("collectWelcomeExtensions", () => {
     write(join(extensions, "index.ts"));
     expect(discovered()).toEqual(["index.ts"]);
   });
+
+  const packageCases: [
+    condition: string,
+    metadata: Record<string, unknown>,
+    extensions: string[],
+  ][] = [
+    ["no pi field", {}, ["extensions/visible.ts"]],
+    [
+      "only changelog metadata",
+      { pi: { changelogPath: "CHANGELOG.md" } },
+      ["extensions/visible.ts"],
+    ],
+    ["an explicit empty extensions list", { pi: { extensions: [] } }, []],
+  ];
+
+  it.each(packageCases)(
+    "should discover package extensions from real metadata when it contains %s",
+    (_condition, metadata, extensions) => {
+      const root = temporaryDirectory();
+      const agentDir = join(root, "agent");
+      const cwd = join(root, "project");
+      const packageRoot = join(agentDir, "pkg");
+      write(join(packageRoot, "package.json"), JSON.stringify(metadata));
+      write(join(packageRoot, "extensions", "visible.ts"));
+      write(join(agentDir, "settings.json"), '{"packages":["./pkg"]}');
+      expect(
+        collectWelcomeExtensions({
+          cwd,
+          agentDir,
+          projectTrusted: false,
+        }).map((row) => row.path),
+      ).toEqual(extensions.map((entry) => join(packageRoot, entry)));
+    },
+  );
 });
 
 describe("welcome extension snapshot", () => {

@@ -21,6 +21,7 @@ Repository **MUST** and **SHOULD** rules, including their negative forms, are re
 
 - Use 2-space indentation, as configured in `.editorconfig`.
 - Use ESM imports and Node built-ins with `node:` specifiers. Use `import type` for type-only host contracts.
+- **Named configuration:** MUST extract structured configuration/default objects from function-call arguments into descriptively named, explicitly typed `const` values when this clarifies their role or precedence. Keep obvious literals inline. Shared defaults MUST NOT be mutated by merges or by callers changing returned results.
 - Do not inject stable built-ins such as `Date.now` solely for testing when a scoped spy is sufficient. Pass domain inputs and caller-owned operations instead.
 
 ```ts

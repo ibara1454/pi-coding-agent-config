@@ -21,6 +21,11 @@ import {
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import {
+  mergeWithDefaultPackageJson,
+  readPackageJson,
+} from "./package-json.ts";
+
 const RELATIVE_PREFIX = /^\.\//;
 const LINE_BREAK = /\r?\n/;
 const ESCAPED_IGNORE_PREFIX = /^\\([#!])/;
@@ -62,6 +67,8 @@ interface PackageSource {
   autoload?: boolean;
   extensions?: string[];
 }
+
+type PackageCollectionMode = "package" | "default" | "filter";
 
 interface PiSettings {
   quietStartup?: boolean | "header";
@@ -835,22 +842,21 @@ function packageExtensionFiles(
   return files;
 }
 
-type PackageCollectionMode = "package" | "default" | "filter";
-
+/**
+ * Discovers package extensions using Pi 1.5 resource declarations and filters.
+ * Keeps original declaration presence separate from defaults when selecting discovery.
+ * @param root Package directory containing optional package.json and extensions/.
+ * @param mode String package, default package object, or explicit object filter.
+ * @returns Extension files and whether the package declares or contains resources.
+ * @example With only pi.changelogPath, packageFiles("/pkg", "package") discovers /pkg/extensions/tool.ts.
+ */
 function packageFiles(
   root: string,
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
-  const manifest = readJson(join(root, "package.json"));
-  const { pi } = manifest;
-  const hasPiManifest =
-    pi !== null && typeof pi === "object" && !Array.isArray(pi);
-  const extensions =
-    hasPiManifest && "extensions" in pi && Array.isArray(pi.extensions)
-      ? pi.extensions.filter(
-          (entry): entry is string => typeof entry === "string",
-        )
-      : undefined;
+  const packageJson = readPackageJson(join(root, "package.json"));
+  const declarations = packageJson.pi;
+  const { extensions } = mergeWithDefaultPackageJson(packageJson).pi;
   const convention = () => {
     const extensionsDir = join(root, "extensions");
     return existsSync(extensionsDir)
@@ -887,21 +893,19 @@ function packageFiles(
     };
   };
 
-  // Object filters use Pi's collectManifestFiles path: an absent or empty
-  // extension manifest falls back to the convention directory. Default package
-  // loading treats any pi manifest as authoritative, even when it lists no
-  // extensions.
   if (mode === "filter") {
-    return extensions && extensions.length > 0
-      ? fromManifest(extensions)
-      : convention();
+    return extensions.length === 0 ? convention() : fromManifest(extensions);
   }
-  if (extensions !== undefined) {
+  if (
+    declarations?.extensions !== undefined ||
+    (mode === "package" &&
+      (declarations?.skills !== undefined ||
+        declarations?.prompts !== undefined ||
+        declarations?.themes !== undefined))
+  ) {
     return fromManifest(extensions);
   }
-  return mode === "default" || !hasPiManifest
-    ? convention()
-    : { files: [], hasPackageResources: true };
+  return convention();
 }
 
 function compactPackageSourceLabel(source: string): string {
@@ -1160,7 +1164,7 @@ function* packageSnapshotResources(
 
 /**
  * Captures Pi's enabled startup extension set without loading or installing
- * anything again. It mirrors Pi 1.2.0's trust gate, scope precedence,
+ * anything again. It mirrors Pi 1.5.0's trust gate, scope precedence,
  * package-object filters, auto-discovery, symlink handling, and local overrides.
  * Reads local metadata only; it neither imports extensions nor installs packages.
  * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.
