@@ -26,8 +26,17 @@ export interface ResolvedPackageJson {
   pi: PiPackageResources & { extensions: string[] };
 }
 
-const DEFAULT_PACKAGE_JSON: ResolvedPackageJson = {
-  pi: { extensions: [] },
+const PACKAGE_JSON_MERGE_OPTIONS: deepmerge.Options = {
+  /**
+   * Replaces defaults, including explicit empty declarations, without sharing arrays.
+   * @param _defaultPaths Resource paths being overridden.
+   * @param configuredPaths Resource paths declared by the package.
+   * @returns An independent copy of the declared paths.
+   * @example PACKAGE_JSON_MERGE_OPTIONS.arrayMerge?.(["default.ts"], []) // []
+   */
+  arrayMerge(_defaultPaths: string[], configuredPaths: string[]) {
+    return configuredPaths.slice();
+  },
 };
 
 const ajv = new Ajv();
@@ -71,20 +80,21 @@ export function readPackageJson(filePath: string): PackageJson {
 }
 
 /**
- * Deep-merges validated metadata with extension-inventory defaults without changing the input.
- * Only extensions is defaulted because packageFiles inventories extensions only;
- * skills, prompts, and themes remain declaration markers. This is not Pi's complete
- * default schema: Pi applies the manifest-vs-convention rule uniformly to all resources.
- * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
+ * Deep-merges caller-provided defaults with validated metadata without changing either input.
+ * Declared resource arrays replace defaults, including explicit empty declarations.
+ * Filesystem discovery and source-mode policy remain the caller's responsibility.
  * @param packageJson Validated metadata, which may omit pi entirely.
- * @returns A new pi object with required extensions and otherwise unchanged declarations.
- * @example mergeWithDefaultPackageJson({}) // { pi: { extensions: [] } }
+ * @param defaultPackageJson Configuration built from conventional resource discovery.
+ * @returns Independent metadata with required extensions and preserved sibling declarations.
+ * @example mergeWithDefaultPackageJson({}, { pi: { extensions: ["extensions/tool.ts"] } }) // { pi: { extensions: ["extensions/tool.ts"] } }
  */
 export function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
+  defaultPackageJson: ResolvedPackageJson,
 ): ResolvedPackageJson {
   return deepmerge<ResolvedPackageJson, PackageJson>(
-    DEFAULT_PACKAGE_JSON,
+    defaultPackageJson,
     packageJson,
+    PACKAGE_JSON_MERGE_OPTIONS,
   );
 }

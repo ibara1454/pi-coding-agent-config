@@ -46,10 +46,8 @@ function mockDiscovery(
   spyOn(packageJson, "readPackageJson").mockReturnValue(
     options.packageInput ?? options.packageResult ?? {},
   );
-  spyOn(packageJson, "mergeWithDefaultPackageJson").mockReturnValue(
-    options.packageResult ?? {
-      pi: { extensions: [] },
-    },
+  spyOn(packageJson, "mergeWithDefaultPackageJson").mockImplementation(
+    (_metadata, defaults) => options.packageResult ?? defaults,
   );
   const links = options.links ?? {};
   const directories = new Set(options.directories ?? []);
@@ -409,7 +407,14 @@ describe("collectWelcomeExtensions", () => {
         },
         {
           packageInput: metadata,
-          packageResult: { pi: { ...metadata.pi, extensions: [] } },
+          packageResult: {
+            pi: {
+              ...metadata.pi,
+              extensions: metadata.pi?.extensions ?? [
+                join(root, "extensions", "visible.ts"),
+              ],
+            },
+          },
         },
       );
       expect(
@@ -421,6 +426,58 @@ describe("collectWelcomeExtensions", () => {
       ).toEqual(expected.map((file) => join(root, "extensions", file)));
     },
   );
+
+  const absentConventionCases: [
+    condition: string,
+    metadata: packageJson.PackageJson,
+    expected: string[],
+  ][] = [
+    ["resource declarations are absent", {}, ["."]],
+    ["extensions are explicitly disabled", { pi: { extensions: [] } }, []],
+    ["only skills are declared", { pi: { skills: [] } }, []],
+  ];
+
+  it.each(absentConventionCases)(
+    "should preserve local-directory fallback without a convention directory when %s",
+    (_condition, metadata, expected) => {
+      const root = join(AGENT_DIR, "tool");
+      mockDiscovery(
+        {
+          [join(AGENT_DIR, "settings.json")]: '{"packages":["./tool"]}',
+          [join(root, "package.json")]: "{}",
+        },
+        {
+          packageInput: metadata,
+          packageResult: { pi: { ...metadata.pi, extensions: [] } },
+        },
+      );
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir: AGENT_DIR,
+          projectTrusted: false,
+        }).map((row) => row.path),
+      ).toEqual(expected.map((entry) => join(root, entry)));
+    },
+  );
+
+  it("should retain literal convention paths when a filename contains a glob character", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    const literal = join(root, "extensions", "literal?.ts");
+    mockDiscovery({
+      [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
+      [literal]: "",
+      [join(root, "extensions", "literal1.ts")]: "",
+      [join(root, "extensions", ".gitignore")]: "literal1.ts\n",
+    });
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.path),
+    ).toEqual([literal]);
+  });
 
   it.each([
     "git:invalid",

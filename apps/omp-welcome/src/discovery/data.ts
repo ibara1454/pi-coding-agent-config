@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   mergeWithDefaultPackageJson,
+  type ResolvedPackageJson,
   readPackageJson,
 } from "./package-json.ts";
 
@@ -844,7 +845,10 @@ function packageExtensionFiles(
 
 /**
  * Discovers package extensions using Pi 1.5 resource declarations and filters.
- * Keeps original declaration presence separate from defaults when selecting discovery.
+ * Uses conventional files as defaults while retaining declaration presence for Pi policy.
+ * Only extensions receives filesystem defaults because this inventory loads extensions;
+ * skills, prompts, and themes remain declaration markers, not defaulted resource lists.
+ * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
  * @param root Package directory containing optional package.json and extensions/.
  * @param mode String package, default package object, or explicit object filter.
  * @returns Extension files and whether the package declares or contains resources.
@@ -855,17 +859,13 @@ function packageFiles(
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
   const packageJson = readPackageJson(join(root, "package.json"));
-  const declarations = packageJson.pi;
-  const { extensions } = mergeWithDefaultPackageJson(packageJson).pi;
-  const convention = () => {
-    const extensionsDir = join(root, "extensions");
-    return existsSync(extensionsDir)
-      ? {
-          files: discoverExtensionFiles(extensionsDir),
-          hasPackageResources: true,
-        }
-      : { files: [], hasPackageResources: false };
-  };
+  const extensionsDir = join(root, "extensions");
+  const convention = existsSync(extensionsDir)
+    ? {
+        files: discoverExtensionFiles(extensionsDir),
+        hasPackageResources: true,
+      }
+    : { files: [], hasPackageResources: false };
   const fromManifest = (entries: readonly string[]) => {
     const files = packageExtensionFiles(
       entries.filter(
@@ -893,19 +893,29 @@ function packageFiles(
     };
   };
 
-  if (mode === "filter") {
-    return extensions.length === 0 ? convention() : fromManifest(extensions);
+  const defaultPackageJson: ResolvedPackageJson = {
+    pi: { extensions: convention.files },
+  };
+  const { extensions, skills, prompts, themes } = mergeWithDefaultPackageJson(
+    packageJson,
+    defaultPackageJson,
+  ).pi;
+  if (mode === "filter" && extensions.length === 0) {
+    return convention;
   }
-  if (
-    declarations?.extensions !== undefined ||
-    (mode === "package" &&
-      (declarations?.skills !== undefined ||
-        declarations?.prompts !== undefined ||
-        declarations?.themes !== undefined))
-  ) {
-    return fromManifest(extensions);
+  if (packageJson.pi?.extensions === undefined) {
+    if (
+      mode === "package" &&
+      (skills !== undefined || prompts !== undefined || themes !== undefined)
+    ) {
+      return fromManifest([]);
+    }
+    return {
+      files: extensions,
+      hasPackageResources: convention.hasPackageResources,
+    };
   }
-  return convention();
+  return fromManifest(extensions);
 }
 
 function compactPackageSourceLabel(source: string): string {
