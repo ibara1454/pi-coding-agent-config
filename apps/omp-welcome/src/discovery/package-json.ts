@@ -26,6 +26,10 @@ export interface ResolvedPackageJson {
   pi: PiPackageResources & { extensions: string[] };
 }
 
+const DEFAULT_PACKAGE_JSON: ResolvedPackageJson = {
+  pi: { extensions: ["extensions/"] },
+};
+
 const PACKAGE_JSON_MERGE_OPTIONS: deepmerge.Options = {
   /**
    * Replaces defaults, including explicit empty declarations, without sharing arrays.
@@ -80,20 +84,21 @@ export function readPackageJson(filePath: string): PackageJson {
 }
 
 /**
- * Deep-merges caller-provided defaults with validated metadata without changing either input.
- * Declared resource arrays replace defaults, including explicit empty declarations.
+ * Deep-merges conventional directory defaults with validated metadata without changing the input.
+ * Only extensions is defaulted because this inventory loads extensions; the other
+ * resource fields remain declaration markers for Pi's manifest-selection policy.
+ * Declared arrays replace defaults, including explicit empty declarations.
  * Filesystem discovery and source-mode policy remain the caller's responsibility.
+ * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
  * @param packageJson Validated metadata, which may omit pi entirely.
- * @param defaultPackageJson Configuration built from conventional resource discovery.
- * @returns Independent metadata with required extensions and preserved sibling declarations.
- * @example mergeWithDefaultPackageJson({}, { pi: { extensions: ["extensions/tool.ts"] } }) // { pi: { extensions: ["extensions/tool.ts"] } }
+ * @returns Independent configuration with required extension entries and preserved sibling declarations.
+ * @example mergeWithDefaultPackageJson({}) // { pi: { extensions: ["extensions/"] } }
  */
 export function mergeWithDefaultPackageJson(
   packageJson: PackageJson,
-  defaultPackageJson: ResolvedPackageJson,
 ): ResolvedPackageJson {
   return deepmerge<ResolvedPackageJson, PackageJson>(
-    defaultPackageJson,
+    DEFAULT_PACKAGE_JSON,
     packageJson,
     PACKAGE_JSON_MERGE_OPTIONS,
   );

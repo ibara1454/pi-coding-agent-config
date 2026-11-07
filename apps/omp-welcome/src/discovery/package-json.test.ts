@@ -9,7 +9,7 @@ import {
 } from "./package-json.ts";
 
 const PACKAGE_JSON_PATH = "/unit/package/package.json";
-const DEFAULT_EXTENSION_PATH = "/unit/package/extensions/default.ts";
+const DEFAULT_EXTENSION_PATH = "extensions/";
 
 describe("readPackageJson", () => {
   it.each([
@@ -125,39 +125,25 @@ describe("mergeWithDefaultPackageJson", () => {
   it.each(cases)(
     "should merge package defaults when %s",
     (_condition, metadata, expected) => {
-      const defaultPackageJson: ResolvedPackageJson = {
-        pi: { extensions: [DEFAULT_EXTENSION_PATH] },
-      };
-      expect(mergeWithDefaultPackageJson(metadata, defaultPackageJson)).toEqual(
-        expected,
-      );
+      expect(mergeWithDefaultPackageJson(metadata)).toEqual(expected);
     },
   );
 
-  it("should preserve supplied declarations and defaults when returned arrays are changed", () => {
+  it("should preserve supplied declarations when returned arrays are changed", () => {
     const metadata: PackageJson = {
       pi: { extensions: ["custom.ts"], skills: ["skills"] },
     };
-    const defaultPackageJson: ResolvedPackageJson = {
-      pi: { extensions: [DEFAULT_EXTENSION_PATH] },
-    };
-    const merged = mergeWithDefaultPackageJson(metadata, defaultPackageJson);
+    const merged = mergeWithDefaultPackageJson(metadata);
     merged.pi.extensions.push("other.ts");
     expect(metadata).toEqual({
       pi: { extensions: ["custom.ts"], skills: ["skills"] },
     });
-    expect(defaultPackageJson).toEqual({
-      pi: { extensions: [DEFAULT_EXTENSION_PATH] },
-    });
   });
 
   it("should preserve later defaults when a previous result is modified", () => {
-    const defaultPackageJson: ResolvedPackageJson = {
-      pi: { extensions: [DEFAULT_EXTENSION_PATH] },
-    };
-    const earlier = mergeWithDefaultPackageJson({}, defaultPackageJson);
+    const earlier = mergeWithDefaultPackageJson({});
     earlier.pi.extensions.push("custom.ts");
-    expect(mergeWithDefaultPackageJson({}, defaultPackageJson)).toEqual({
+    expect(mergeWithDefaultPackageJson({})).toEqual({
       pi: { extensions: [DEFAULT_EXTENSION_PATH] },
     });
   });

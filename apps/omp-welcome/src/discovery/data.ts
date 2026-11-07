@@ -23,7 +23,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   mergeWithDefaultPackageJson,
-  type ResolvedPackageJson,
   readPackageJson,
 } from "./package-json.ts";
 
@@ -821,34 +820,45 @@ function packageEntryPaths(entry: string, root: string): string[] {
   return matches;
 }
 
+/**
+ * Resolves resource entries and retains resource ownership without importing code.
+ * Directory-only defaults retain their trailing-separator intent; declared paths use Pi normalization.
+ * @param entries Configured resource entries or merged defaults.
+ * @param root Package directory used to resolve relative entries.
+ * @param hasDeclaration Whether the package explicitly declares extension entries.
+ * @returns Discovered files and whether declared or existing resources block local fallback.
+ * @example With /pkg/extensions/tool.ts, packageExtensionFiles(["extensions/"], "/pkg", false) includes that file.
+ */
 function packageExtensionFiles(
   entries: readonly string[],
   root: string,
-): string[] {
+  hasDeclaration: boolean,
+): { files: string[]; hasPackageResources: boolean } {
   const files: string[] = [];
+  let hasPackageResources = hasDeclaration;
   for (const entry of entries) {
+    const directoryOnly = !hasDeclaration && toPosixPath(entry).endsWith("/");
     for (const candidate of packageEntryPaths(entry, root)) {
       try {
         const stats = statSync(candidate);
-        if (stats.isFile()) {
+        hasPackageResources = true;
+        if (stats.isFile() && !directoryOnly) {
           files.push(candidate);
         } else if (stats.isDirectory()) {
           files.push(...discoverExtensionFiles(candidate));
         }
       } catch {
-        // Pi ignores unavailable package manifest entries.
+        // Pi ignores unavailable package resource entries.
+        hasPackageResources ||= existsSync(candidate);
       }
     }
   }
-  return files;
+  return { files, hasPackageResources };
 }
 
 /**
  * Discovers package extensions using Pi 1.5 resource declarations and filters.
- * Uses conventional files as defaults while retaining declaration presence for Pi policy.
- * Only extensions receives filesystem defaults because this inventory loads extensions;
- * skills, prompts, and themes remain declaration markers, not defaulted resource lists.
- * @see https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/package-manager.ts#L2382-L2410
+ * Resolves merged resource entries and applies Pi's source-mode ownership rules.
  * @param root Package directory containing optional package.json and extensions/.
  * @param mode String package, default package object, or explicit object filter.
  * @returns Extension files and whether the package declares or contains resources.
@@ -858,64 +868,46 @@ function packageFiles(
   root: string,
   mode: PackageCollectionMode,
 ): { files: string[]; hasPackageResources: boolean } {
-  const packageJson = readPackageJson(join(root, "package.json"));
-  const extensionsDir = join(root, "extensions");
-  const convention = existsSync(extensionsDir)
-    ? {
-        files: discoverExtensionFiles(extensionsDir),
-        hasPackageResources: true,
-      }
-    : { files: [], hasPackageResources: false };
-  const fromManifest = (entries: readonly string[]) => {
-    const files = packageExtensionFiles(
-      entries.filter(
-        (entry) =>
-          !(
-            entry.startsWith("!") ||
-            entry.startsWith("+") ||
-            entry.startsWith("-")
-          ),
-      ),
-      root,
-    );
-    const overrides = entries.filter(
+  let packageJson = readPackageJson(join(root, "package.json"));
+  if (mode === "filter" && packageJson.pi?.extensions?.length === 0) {
+    const { extensions: _extensions, ...pi } = packageJson.pi;
+    packageJson = { pi };
+  }
+  const { extensions, skills, prompts, themes } =
+    mergeWithDefaultPackageJson(packageJson).pi;
+  const hasDeclaration = packageJson.pi?.extensions !== undefined;
+  if (
+    mode === "package" &&
+    !hasDeclaration &&
+    (skills !== undefined || prompts !== undefined || themes !== undefined)
+  ) {
+    return { files: [], hasPackageResources: true };
+  }
+  const { files, hasPackageResources } = packageExtensionFiles(
+    extensions.filter(
       (entry) =>
-        entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-"),
-    );
-    return {
-      files:
-        overrides.length === 0
-          ? files
-          : files.filter((file) =>
-              applyPatterns(files, overrides, root).has(file),
-            ),
-      hasPackageResources: true,
-    };
+        !(
+          entry.startsWith("!") ||
+          entry.startsWith("+") ||
+          entry.startsWith("-")
+        ),
+    ),
+    root,
+    hasDeclaration,
+  );
+  const overrides = extensions.filter(
+    (entry) =>
+      entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-"),
+  );
+  return {
+    files:
+      overrides.length === 0
+        ? files
+        : files.filter((file) =>
+            applyPatterns(files, overrides, root).has(file),
+          ),
+    hasPackageResources,
   };
-
-  const defaultPackageJson: ResolvedPackageJson = {
-    pi: { extensions: convention.files },
-  };
-  const { extensions, skills, prompts, themes } = mergeWithDefaultPackageJson(
-    packageJson,
-    defaultPackageJson,
-  ).pi;
-  if (mode === "filter" && extensions.length === 0) {
-    return convention;
-  }
-  if (packageJson.pi?.extensions === undefined) {
-    if (
-      mode === "package" &&
-      (skills !== undefined || prompts !== undefined || themes !== undefined)
-    ) {
-      return fromManifest([]);
-    }
-    return {
-      files: extensions,
-      hasPackageResources: convention.hasPackageResources,
-    };
-  }
-  return fromManifest(extensions);
 }
 
 function compactPackageSourceLabel(source: string): string {

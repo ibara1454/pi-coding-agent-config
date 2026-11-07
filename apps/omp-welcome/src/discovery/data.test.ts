@@ -43,11 +43,15 @@ function mockDiscovery(
     packageResult?: packageJson.ResolvedPackageJson;
   } = {},
 ): void {
+  const packageResult: packageJson.ResolvedPackageJson =
+    options.packageResult ?? {
+      pi: { extensions: ["extensions/"] },
+    };
   spyOn(packageJson, "readPackageJson").mockReturnValue(
     options.packageInput ?? options.packageResult ?? {},
   );
-  spyOn(packageJson, "mergeWithDefaultPackageJson").mockImplementation(
-    (_metadata, defaults) => options.packageResult ?? defaults,
+  spyOn(packageJson, "mergeWithDefaultPackageJson").mockReturnValue(
+    packageResult,
   );
   const links = options.links ?? {};
   const directories = new Set(options.directories ?? []);
@@ -386,12 +390,6 @@ describe("collectWelcomeExtensions", () => {
       { pi: { skills: ["skills"] } },
       ["visible.ts"],
     ],
-    [
-      "a filtered source object has an empty extension declaration",
-      { source: "npm:tool", extensions: ["extensions/**"] },
-      { pi: { extensions: [] } },
-      ["visible.ts"],
-    ],
   ];
 
   it.each(packagePolicyCases)(
@@ -410,9 +408,7 @@ describe("collectWelcomeExtensions", () => {
           packageResult: {
             pi: {
               ...metadata.pi,
-              extensions: metadata.pi?.extensions ?? [
-                join(root, "extensions", "visible.ts"),
-              ],
+              extensions: metadata.pi?.extensions ?? ["extensions/"],
             },
           },
         },
@@ -426,6 +422,30 @@ describe("collectWelcomeExtensions", () => {
       ).toEqual(expected.map((file) => join(root, "extensions", file)));
     },
   );
+
+  it("should retain loaded metadata when a filtered source ignores an empty extension declaration", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    const metadata: packageJson.PackageJson = { pi: { extensions: [] } };
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]:
+          '{"packages":[{"source":"npm:tool","extensions":["extensions/**"]}]}',
+        [join(root, "extensions", "visible.ts")]: "",
+      },
+      {
+        packageInput: metadata,
+        packageResult: { pi: { extensions: ["extensions/"] } },
+      },
+    );
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.path),
+    ).toEqual([join(root, "extensions", "visible.ts")]);
+    expect(metadata).toEqual({ pi: { extensions: [] } });
+  });
 
   const absentConventionCases: [
     condition: string,
@@ -448,7 +468,12 @@ describe("collectWelcomeExtensions", () => {
         },
         {
           packageInput: metadata,
-          packageResult: { pi: { ...metadata.pi, extensions: [] } },
+          packageResult: {
+            pi: {
+              ...metadata.pi,
+              extensions: metadata.pi?.extensions ?? ["extensions/"],
+            },
+          },
         },
       );
       expect(
@@ -478,6 +503,65 @@ describe("collectWelcomeExtensions", () => {
       }).map((row) => row.path),
     ).toEqual([literal]);
   });
+
+  it("should load explicitly declared files when their entries include a trailing separator", () => {
+    const root = join(AGENT_DIR, "npm", "node_modules", "tool");
+    mockDiscovery(
+      {
+        [join(AGENT_DIR, "settings.json")]: '{"packages":["npm:tool"]}',
+        [join(root, "custom.ts")]: "",
+      },
+      { packageResult: { pi: { extensions: ["custom.ts/"] } } },
+    );
+    expect(
+      collectWelcomeExtensions({
+        cwd: PROJECT_DIR,
+        agentDir: AGENT_DIR,
+        projectTrusted: false,
+      }).map((row) => row.path),
+    ).toEqual([join(root, "custom.ts")]);
+  });
+
+  const resourceOwnershipCases: [
+    condition: string,
+    resourceFiles: string[],
+    directories: string[],
+    statFailures: string[],
+  ][] = [
+    ["is occupied by a regular file", ["extensions"], [], []],
+    [
+      "exists but its metadata is unreadable",
+      [],
+      ["extensions"],
+      ["extensions"],
+    ],
+  ];
+
+  it.each(resourceOwnershipCases)(
+    "should block local-directory fallback when a default directory %s",
+    (_condition, resourceFiles, directories, statFailures) => {
+      const root = join(AGENT_DIR, "tool");
+      const files: Record<string, string> = {
+        [join(AGENT_DIR, "settings.json")]: '{"packages":["./tool"]}',
+        [join(root, "package.json")]: "{}",
+        [join(root, "index.ts")]: "",
+        ...Object.fromEntries(
+          resourceFiles.map((entry) => [join(root, entry), ""]),
+        ),
+      };
+      mockDiscovery(files, {
+        directories: directories.map((entry) => join(root, entry)),
+        statFailures: statFailures.map((entry) => join(root, entry)),
+      });
+      expect(
+        collectWelcomeExtensions({
+          cwd: PROJECT_DIR,
+          agentDir: AGENT_DIR,
+          projectTrusted: false,
+        }).map((row) => row.path),
+      ).toEqual([]);
+    },
+  );
 
   it.each([
     "git:invalid",
