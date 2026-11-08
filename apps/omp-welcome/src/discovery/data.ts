@@ -22,6 +22,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
+  hasPackageResourceDeclaration,
   mergeWithDefaultPackageJson,
   readPackageJson,
 } from "./package-json.ts";
@@ -873,9 +874,12 @@ function packageFiles(
     const { extensions: _extensions, ...pi } = packageJson.pi;
     packageJson = { pi };
   }
+  const hasDeclaration = hasPackageResourceDeclaration(
+    packageJson,
+    "extensions",
+  );
   const { extensions, skills, prompts, themes } =
     mergeWithDefaultPackageJson(packageJson).pi;
-  const hasDeclaration = packageJson.pi?.extensions !== undefined;
   if (
     mode === "package" &&
     !hasDeclaration &&

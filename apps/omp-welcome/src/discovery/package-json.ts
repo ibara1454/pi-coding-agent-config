@@ -84,6 +84,21 @@ export function readPackageJson(filePath: string): PackageJson {
 }
 
 /**
+ * Reports whether validated metadata explicitly declares a Pi resource field.
+ * Empty arrays are declarations; missing fields do not count.
+ * @param packageJson Validated package metadata before defaults are applied.
+ * @param resource Resource key in the package's pi object.
+ * @returns Whether the resource field is present, including an empty array.
+ * @example hasPackageResourceDeclaration({ pi: { extensions: [] } }, "extensions") // true
+ */
+export function hasPackageResourceDeclaration(
+  packageJson: PackageJson,
+  resource: keyof PiPackageResources,
+): boolean {
+  return packageJson.pi?.[resource] !== undefined;
+}
+
+/**
  * Deep-merges conventional directory defaults with validated metadata without changing the input.
  * Only extensions is defaulted because this inventory loads extensions; the other
  * resource fields remain declaration markers for Pi's manifest-selection policy.

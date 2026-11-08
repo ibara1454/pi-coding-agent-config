@@ -28,7 +28,7 @@ const STALE_SESSION_DAYS = 9;
  * Plans discovery I/O and package-resolution responses without touching host state.
  * Direct package metadata helpers are mocked; directories follow file parents and links.
  * @param files Planned file contents; unlisted reads fail.
- * @param options Filesystem edge cases and raw/merged package metadata responses.
+ * @param options Filesystem edge cases and planned metadata/declaration responses.
  * @returns Nothing; shared test setup restores all filesystem and package spies.
  * @example mockDiscovery({ "/unit/agent/settings.json": "{}" });
  */
@@ -41,14 +41,18 @@ function mockDiscovery(
     statFailures?: string[];
     packageInput?: packageJson.PackageJson;
     packageResult?: packageJson.ResolvedPackageJson;
+    packageHasDeclaration?: boolean;
   } = {},
 ): void {
   const packageResult: packageJson.ResolvedPackageJson =
     options.packageResult ?? {
       pi: { extensions: ["extensions/"] },
     };
-  spyOn(packageJson, "readPackageJson").mockReturnValue(
-    options.packageInput ?? options.packageResult ?? {},
+  const packageInput: packageJson.PackageJson =
+    options.packageInput ?? options.packageResult ?? {};
+  spyOn(packageJson, "readPackageJson").mockReturnValue(packageInput);
+  spyOn(packageJson, "hasPackageResourceDeclaration").mockReturnValue(
+    options.packageHasDeclaration ?? packageInput.pi?.extensions !== undefined,
   );
   spyOn(packageJson, "mergeWithDefaultPackageJson").mockReturnValue(
     packageResult,
@@ -435,6 +439,7 @@ describe("collectWelcomeExtensions", () => {
       {
         packageInput: metadata,
         packageResult: { pi: { extensions: ["extensions/"] } },
+        packageHasDeclaration: false,
       },
     );
     expect(

@@ -2,6 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named filesystem import used by the package reader.
 import * as fs from "node:fs";
 import {
+  hasPackageResourceDeclaration,
   mergeWithDefaultPackageJson,
   type PackageJson,
   type ResolvedPackageJson,
@@ -78,6 +79,38 @@ describe("readPackageJson", () => {
       pi: { skills: ["skills"] },
     });
   });
+});
+
+describe("hasPackageResourceDeclaration", () => {
+  const cases: [condition: string, metadata: PackageJson, expected: boolean][] =
+    [
+      ["pi is absent", {}, false],
+      ["pi is empty", { pi: {} }, false],
+      ["only another resource is declared", { pi: { skills: [] } }, false],
+      ["extensions is explicitly empty", { pi: { extensions: [] } }, true],
+      [
+        "extensions contains resource paths",
+        { pi: { extensions: ["tool.ts"] } },
+        true,
+      ],
+    ];
+
+  it.each(cases)(
+    "should report extension declaration presence when %s",
+    (_condition, metadata, expected) => {
+      expect(hasPackageResourceDeclaration(metadata, "extensions")).toBe(
+        expected,
+      );
+    },
+  );
+
+  it.each(["skills", "prompts", "themes"] as const)(
+    "should recognize explicitly empty %s declarations",
+    (resource) => {
+      const metadata: PackageJson = { pi: { [resource]: [] } };
+      expect(hasPackageResourceDeclaration(metadata, resource)).toBe(true);
+    },
+  );
 });
 
 describe("mergeWithDefaultPackageJson", () => {
