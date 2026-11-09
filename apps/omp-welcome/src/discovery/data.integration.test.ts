@@ -1,13 +1,17 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: The install guard intercepts Pi's live Node process-launch imports.
+import * as childProcess from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
+import process from "node:process";
 import {
   collectWelcomeExtensions,
   effectiveQuietStartup,
@@ -15,10 +19,18 @@ import {
 } from "./data.ts";
 
 const temporaryRoots: string[] = [];
+const originalHome = process.env["HOME"];
+const originalOffline = process.env["PI_OFFLINE"];
 
+/**
+ * Creates fixtures and isolates native Pi's home-directory discovery.
+ * @returns A test-owned root; afterEach restores HOME and removes the tree.
+ * @example temporaryDirectory(); // Native discovery cannot read the real ~/.agents/skills.
+ */
 function temporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "pi-welcome-"));
   temporaryRoots.push(directory);
+  process.env["HOME"] = join(directory, "home");
   return directory;
 }
 
@@ -27,8 +39,17 @@ function write(filePath: string, content = "export default () => {};\n"): void {
   writeFileSync(filePath, content);
 }
 
+/**
+ * Writes an installed-package fixture with version metadata accepted by native Pi.
+ * @param root Test-owned package cache directory.
+ * @param extensions Relative extension paths to create and declare.
+ * @example writePackage("/tmp/probe/pkg", ["extensions/one.ts"]);
+ */
 function writePackage(root: string, extensions: readonly string[]): void {
-  write(join(root, "package.json"), JSON.stringify({ pi: { extensions } }));
+  write(
+    join(root, "package.json"),
+    JSON.stringify({ version: "1.0.0", pi: { extensions } }),
+  );
   for (const extension of extensions) {
     write(join(root, extension));
   }
@@ -41,76 +62,23 @@ function rowsByScope(
   return rows.filter((row) => row.scope === scope).map((row) => row.name);
 }
 afterEach(() => {
+  if (originalHome === undefined) {
+    delete process.env["HOME"];
+  } else {
+    process.env["HOME"] = originalHome;
+  }
+  if (originalOffline === undefined) {
+    delete process.env["PI_OFFLINE"];
+  } else {
+    process.env["PI_OFFLINE"] = originalOffline;
+  }
   for (const directory of temporaryRoots.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe("collectWelcomeExtensions", () => {
-  it("should honor root entries, ignored files, and symlink targets exactly once", () => {
-    const root = temporaryDirectory();
-    const extensions = join(root, "extensions");
-    write(join(extensions, "first.ts"));
-    write(join(extensions, ".hidden.ts"));
-    write(join(extensions, "node_modules", "ignored.ts"));
-    write(join(extensions, "ignored-by-rule.ts"));
-    write(join(extensions, ".gitignore"), "ignored-by-rule.ts\n");
-    const linked = join(root, "linked");
-    write(join(linked, "index.js"));
-    symlinkSync(linked, join(extensions, "linked"), "dir");
-
-    const discovered = () =>
-      collectWelcomeExtensions({
-        cwd: join(root, "project"),
-        agentDir: root,
-        projectTrusted: false,
-      })
-        .flatMap((row) => (row.path ? [relative(extensions, row.path)] : []))
-        .sort();
-
-    expect(discovered()).toEqual(["first.ts", "linked/index.js"]);
-
-    write(join(extensions, "index.ts"));
-    expect(discovered()).toEqual(["index.ts"]);
-  });
-
-  const packageCases: [
-    condition: string,
-    metadata: Record<string, unknown>,
-    extensions: string[],
-  ][] = [
-    ["no pi field", {}, ["extensions/visible.ts"]],
-    [
-      "only changelog metadata",
-      { pi: { changelogPath: "CHANGELOG.md" } },
-      ["extensions/visible.ts"],
-    ],
-    ["an explicit empty extensions list", { pi: { extensions: [] } }, []],
-  ];
-
-  it.each(packageCases)(
-    "should discover package extensions from real metadata when it contains %s",
-    (_condition, metadata, extensions) => {
-      const root = temporaryDirectory();
-      const agentDir = join(root, "agent");
-      const cwd = join(root, "project");
-      const packageRoot = join(agentDir, "pkg");
-      write(join(packageRoot, "package.json"), JSON.stringify(metadata));
-      write(join(packageRoot, "extensions", "visible.ts"));
-      write(join(agentDir, "settings.json"), '{"packages":["./pkg"]}');
-      expect(
-        collectWelcomeExtensions({
-          cwd,
-          agentDir,
-          projectTrusted: false,
-        }).map((row) => row.path),
-      ).toEqual(extensions.map((entry) => join(packageRoot, entry)));
-    },
-  );
-});
-
-describe("welcome extension snapshot", () => {
-  it("should use Pi scope precedence, filters, package deltas, and base directories", () => {
+  it("should use Pi scope precedence, filters, package deltas, and base directories", async () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
@@ -164,7 +132,7 @@ describe("welcome extension snapshot", () => {
       }),
     );
 
-    const rows = collectWelcomeExtensions({
+    const rows = await collectWelcomeExtensions({
       cwd,
       agentDir,
       projectTrusted: true,
@@ -201,37 +169,7 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
-  it("should use convention files for a filtered empty manifest and normalize glob entries", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    const packageRoot = join(agentDir, "pkg");
-
-    write(
-      join(packageRoot, "package.json"),
-      JSON.stringify({ pi: { extensions: [] } }),
-    );
-    write(join(packageRoot, "extensions", "enabled.ts"));
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({
-        packages: [{ source: " ./pkg ", extensions: ["./extensions/*.ts"] }],
-      }),
-    );
-
-    expect(
-      collectWelcomeExtensions({ cwd, agentDir, projectTrusted: true }),
-    ).toEqual([
-      {
-        name: "enabled",
-        scope: "user",
-        path: join(packageRoot, "extensions", "enabled.ts"),
-        packageSource: " ./pkg ",
-      },
-    ]);
-  });
-
-  it("should omit all project-local settings, packages, and files when untrusted", () => {
+  it("should omit all project-local settings, packages, and files when untrusted", async () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
@@ -246,7 +184,7 @@ describe("welcome extension snapshot", () => {
       }),
     );
 
-    const rows = collectWelcomeExtensions({
+    const rows = await collectWelcomeExtensions({
       cwd,
       agentDir,
       projectTrusted: false,
@@ -256,6 +194,91 @@ describe("welcome extension snapshot", () => {
     ]);
   });
 
+  it("should retain valid resource entries when settings contain malformed sources and paths", async () => {
+    const root = temporaryDirectory();
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const configured = join(agentDir, "configured.ts");
+    const packaged = join(agentDir, "pkg", "extensions", "packaged.ts");
+    write(configured);
+    writePackage(join(agentDir, "pkg"), ["extensions/packaged.ts"]);
+    write(
+      join(agentDir, "settings.json"),
+      '{"packages":[null,[],false,{},{"source":42},"./pkg"],"extensions":[false,null,{},"configured.ts"]}',
+    );
+    expect(
+      await collectWelcomeExtensions({
+        cwd,
+        agentDir,
+        projectTrusted: false,
+      }),
+    ).toEqual([
+      { name: "configured", scope: "user", path: configured },
+      {
+        name: "packaged",
+        scope: "user",
+        path: packaged,
+        packageSource: "./pkg",
+      },
+    ]);
+  });
+
+  it("should skip missing packages without installing resources or executing extension modules", async () => {
+    const root = temporaryDirectory();
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const projectDir = join(cwd, ".pi");
+    const marker = join(root, "extension-executed");
+    const extension = join(agentDir, "extensions", "visible.ts");
+    write(
+      extension,
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "executed"); export default () => {};`,
+    );
+    write(
+      join(agentDir, "settings.json"),
+      '{"packages":["git:github.com/pi-welcome-probe/missing"]}',
+    );
+    write(
+      join(projectDir, "settings.json"),
+      '{"packages":["npm:@pi-welcome-probe/missing@1.0.0"]}',
+    );
+    const originalUser = readFileSync(join(agentDir, "settings.json"), "utf8");
+    const originalProject = readFileSync(
+      join(projectDir, "settings.json"),
+      "utf8",
+    );
+    delete process.env["PI_OFFLINE"];
+    const spawn = spyOn(childProcess, "spawn").mockImplementation(() => {
+      throw new Error("Inventory must not launch installers");
+    });
+    const spawnSync = spyOn(childProcess, "spawnSync").mockImplementation(
+      () => {
+        throw new Error("Inventory must not launch installers");
+      },
+    );
+
+    expect(
+      await collectWelcomeExtensions({
+        cwd,
+        agentDir,
+        projectTrusted: true,
+      }),
+    ).toEqual([{ name: "visible", scope: "user", path: extension }]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(existsSync(marker)).toBe(false);
+    expect(existsSync(join(agentDir, "git"))).toBe(false);
+    expect(existsSync(join(projectDir, "npm"))).toBe(false);
+    expect(readFileSync(join(agentDir, "settings.json"), "utf8")).toBe(
+      originalUser,
+    );
+    expect(readFileSync(join(projectDir, "settings.json"), "utf8")).toBe(
+      originalProject,
+    );
+  });
+});
+
+describe("effectiveQuietStartup", () => {
   it("should honor effective quiet startup and its verbose command-line override", () => {
     const root = temporaryDirectory();
     const agentDir = join(root, "agent");

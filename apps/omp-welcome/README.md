@@ -51,7 +51,7 @@ The original code was adapted to the extension APIs exposed by `@earendil-works/
 
 ## Extension discovery
 
-The Extensions section mirrors Pi 1.2.0 startup discovery without loading or installing resources a second time. It includes:
+The Extensions section uses Pi's public `DefaultPackageManager.resolve()` API without importing extension code or installing missing packages. It includes:
 
 - Enabled extensions from `PI_CODING_AGENT_DIR`.
 - Enabled extensions from a trusted project's `.pi` directory.
@@ -59,7 +59,7 @@ The Extensions section mirrors Pi 1.2.0 startup discovery without loading or ins
 - Package-provided extensions, including package-object filters and `autoload: false` selections.
 - Auto-discovered `.ts` and `.js` extension files.
 
-The snapshot applies Pi's trust gate, project-before-user precedence, local overrides, disabled patterns, symlink canonicalization, and deduplication. Project resources are omitted when the project is not trusted.
+Pi's native resolver owns project-before-user precedence, package filters, local overrides, disabled patterns, symlink canonicalization, and deduplication. Welcome passes validated settings and the host's trust decision; project resources are omitted when the project is not trusted.
 
 Rows are sorted by scope and name, with project extensions before user extensions. When the welcome extension is not visible through normal discovery, it adds itself to the displayed user list.
 

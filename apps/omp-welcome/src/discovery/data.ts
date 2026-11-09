@@ -1,17 +1,8 @@
-import {
-  type Dirent,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  type Stats,
-  statSync,
-} from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   basename,
   dirname,
-  isAbsolute,
   join,
   posix,
   relative,
@@ -22,27 +13,18 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
-  hasPackageResourceDeclaration,
-  mergeWithDefaultPackageJson,
-  readPackageJson,
-} from "./package-json.ts";
+  DefaultPackageManager,
+  type ResolvedResource,
+  SettingsManager,
+  type SettingsManagerCreateOptions,
+} from "@earendil-works/pi-coding-agent";
 
-const RELATIVE_PREFIX = /^\.\//;
 const LINE_BREAK = /\r?\n/;
-const ESCAPED_IGNORE_PREFIX = /^\\([#!])/;
-const LEADING_SLASH = /^\//;
-const TRAILING_SLASH = /\/$/;
-const GIT_URL_PREFIX = /^(https?|ssh|git):\/\//;
-const HOSTED_GIT_SOURCE: RegExp = /^(github|gitlab|bitbucket):(.+)$/;
 const LEADING_SLASHES = /^\/+/;
 const GIT_SUFFIX = /\.git$/;
-const SCP_GIT_SOURCE: RegExp = /^git@([^:]+):(.+)$/;
-const NPM_PACKAGE_SPEC: RegExp = /^(@?[^@]+(?:\/[^@]+)?)(?:@.+)?$/;
-const WILDCARD = /[*?]/;
 const SCP_GIT_PATH: RegExp = /^git@[^:]+:(.+)$/;
 const GIT_REF_SUFFIX = /@[^/]+$/;
 const EXTENSION_SUFFIX = /\.(?:ts|js)$/;
-const USER_AUTO_DISCOVERY_RANK = 3;
 const MILLISECONDS_PER_MINUTE = 60_000;
 const MILLISECONDS_PER_HOUR = 3_600_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
@@ -69,29 +51,11 @@ interface PackageSource {
   extensions?: string[];
 }
 
-type PackageCollectionMode = "package" | "default" | "filter";
-
 interface PiSettings {
   quietStartup?: boolean | "header";
   packages?: Array<string | PackageSource>;
   extensions?: string[];
-}
-
-interface SnapshotResource {
-  path: string;
-  scope: ExtensionScope;
-  enabled: boolean;
-  rank: number;
-  source: string;
-  origin: "package" | "top-level";
-  baseDir?: string;
-  insertion: number;
-}
-
-interface PackageEntry {
-  source: string;
-  filter?: PackageSource;
-  scope: ExtensionScope;
+  npmCommand?: string[];
 }
 
 interface WelcomeSnapshotOptions {
@@ -143,13 +107,6 @@ function normalizePiPath(input: string): string {
   return input;
 }
 
-function resolvePiPath(input: string, baseDir: string, trim = false): string {
-  const normalized = normalizePiPath(trim ? input.trim() : input);
-  return isAbsolute(normalized)
-    ? resolve(normalized)
-    : resolve(normalizePiPath(baseDir), normalized);
-}
-
 /** Pi's public agent-directory resolution, including PI_CODING_AGENT_DIR expansion. */
 export function getAgentDir(env: NodeJS.ProcessEnv = process.env): string {
   const { PI_CODING_AGENT_DIR: configured } = env;
@@ -161,7 +118,7 @@ export function getAgentDir(env: NodeJS.ProcessEnv = process.env): string {
 /**
  * Filters untrusted settings metadata to the fields used by the welcome snapshot.
  * @param settings Parsed metadata; invalid fields and entries are ignored.
- * @returns Validated quiet mode, package sources, and extension paths.
+ * @returns Validated quiet mode, package sources, extension paths, and package-manager command.
  * @example cleanSettings({ quietStartup: "header" }) // { quietStartup: "header" }
  */
 function cleanSettings(settings: Record<string, unknown>): PiSettings {
@@ -212,6 +169,13 @@ function cleanSettings(settings: Record<string, unknown>): PiSettings {
       (entry: unknown): entry is string => typeof entry === "string",
     );
   }
+  const { npmCommand } = settings;
+  if (
+    Array.isArray(npmCommand) &&
+    npmCommand.every((entry: unknown) => typeof entry === "string")
+  ) {
+    cleaned.npmCommand = npmCommand;
+  }
   return cleaned;
 }
 
@@ -250,10 +214,6 @@ export function effectiveQuietStartup(
   return settings.project.quietStartup ?? settings.user.quietStartup ?? false;
 }
 
-function isExtensionFile(filePath: string): boolean {
-  return filePath.endsWith(".ts") || filePath.endsWith(".js");
-}
-
 function toPosixPath(filePath: string): string {
   return filePath.replaceAll(sep, "/");
 }
@@ -272,646 +232,6 @@ function extensionNameFromPath(extensionPath: string): string {
     return basename(dirname(extensionPath));
   }
   return base;
-}
-
-function globPattern(pattern: string): RegExp {
-  let source = "";
-  for (let index = 0; index < pattern.length; index++) {
-    const character = pattern[index] ?? "";
-    const next = pattern[index + 1];
-    if (character === "*" && next === "*") {
-      while (pattern[index + 1] === "*") {
-        index++;
-      }
-      if (pattern[index + 1] === "/") {
-        source += "(?:.*/)?";
-        index++;
-      } else {
-        source += ".*";
-      }
-    } else if (character === "*") {
-      source += "[^/]*";
-    } else if (character === "?") {
-      source += "[^/]";
-    } else {
-      source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-    }
-  }
-  return new RegExp(`^${source}$`);
-}
-
-/**
- * Matches Pi resource globs after expanding home-relative paths.
- * @example matchesPattern("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
- */
-function matchesPattern(
-  filePath: string,
-  patterns: readonly string[],
-  baseDir: string,
-): boolean {
-  const relativePath = toPosixPath(relative(baseDir, filePath));
-  const fileBasename = basename(filePath);
-  const absolute = toPosixPath(resolve(filePath));
-  return patterns.some((pattern) => {
-    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
-      RELATIVE_PREFIX,
-      "",
-    );
-    const matcher = globPattern(normalized);
-    return (
-      matcher.test(relativePath) ||
-      matcher.test(fileBasename) ||
-      matcher.test(absolute)
-    );
-  });
-}
-
-/**
- * Matches exact resource paths after Pi path and relative-prefix normalization.
- * @example matchesExactPath("/home/me/ext.ts", ["~/ext.ts"], baseDir) // true for that home
- */
-function matchesExactPath(
-  filePath: string,
-  patterns: readonly string[],
-  baseDir: string,
-): boolean {
-  const relativePath = toPosixPath(relative(baseDir, filePath));
-  const absolute = toPosixPath(resolve(filePath));
-  return patterns.some((pattern) => {
-    const normalized = toPosixPath(normalizePiPath(pattern)).replace(
-      RELATIVE_PREFIX,
-      "",
-    );
-    return normalized === relativePath || normalized === absolute;
-  });
-}
-
-function discoveryIgnored(
-  directory: string,
-): (relativePath: string) => boolean {
-  const rules: Array<{ pattern: string; negated: boolean }> = [];
-  for (const filename of [".gitignore", ".ignore", ".fdignore"]) {
-    try {
-      for (const line of readFileSync(join(directory, filename), "utf8").split(
-        LINE_BREAK,
-      )) {
-        const trimmed = line.trim();
-        if (
-          !trimmed ||
-          (trimmed.startsWith("#") && !trimmed.startsWith("\\#"))
-        ) {
-          continue;
-        }
-        const negated = trimmed.startsWith("!") && !trimmed.startsWith("\\!");
-        const pattern = (
-          negated
-            ? trimmed.slice(1)
-            : trimmed.replace(ESCAPED_IGNORE_PREFIX, "$1")
-        ).replace(LEADING_SLASH, "");
-        if (pattern) {
-          rules.push({ pattern, negated });
-        }
-      }
-    } catch {
-      // Pi ignores unreadable ignore files during discovery.
-    }
-  }
-  return (relativePath) => {
-    let ignored = false;
-    for (const rule of rules) {
-      if (
-        globPattern(rule.pattern).test(relativePath) ||
-        globPattern(rule.pattern).test(relativePath.replace(TRAILING_SLASH, ""))
-      ) {
-        ignored = !rule.negated;
-      }
-    }
-    return ignored;
-  };
-}
-
-function manifestExtensionEntries(directory: string): string[] | undefined {
-  const manifest = readJson(join(directory, "package.json"));
-  const { pi } = manifest;
-  if (
-    pi === null ||
-    typeof pi !== "object" ||
-    Array.isArray(pi) ||
-    !("extensions" in pi) ||
-    !Array.isArray(pi.extensions)
-  ) {
-    return undefined;
-  }
-  const entries = pi.extensions
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => resolvePiPath(entry, directory))
-    .filter((entry) => existsSync(entry));
-  return entries.length > 0 ? entries : undefined;
-}
-
-function resolveExtensionEntries(directory: string): string[] | undefined {
-  const manifestEntries = manifestExtensionEntries(directory);
-  if (manifestEntries) {
-    return manifestEntries;
-  }
-  for (const name of ["index.ts", "index.js"]) {
-    const entry = join(directory, name);
-    if (existsSync(entry)) {
-      return [entry];
-    }
-  }
-  return undefined;
-}
-
-/** Pi's one-level auto-discovery, including root entry handling and symlink targets. */
-function discoverExtensionFiles(directory: string): string[] {
-  if (!existsSync(directory)) {
-    return [];
-  }
-  const rootEntries = resolveExtensionEntries(directory);
-  if (rootEntries) {
-    return rootEntries;
-  }
-
-  const ignored = discoveryIgnored(directory);
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(directory, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const discovered: string[] = [];
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "node_modules") {
-      continue;
-    }
-    const entryPath = join(directory, entry.name);
-    let isFile = entry.isFile();
-    let isDirectory = entry.isDirectory();
-    if (entry.isSymbolicLink()) {
-      try {
-        const stats = statSync(entryPath);
-        isFile = stats.isFile();
-        isDirectory = stats.isDirectory();
-      } catch {
-        continue;
-      }
-    }
-    const relativePath = toPosixPath(relative(directory, entryPath));
-    if (ignored(isDirectory ? `${relativePath}/` : relativePath)) {
-      continue;
-    }
-    if (isFile && isExtensionFile(entry.name)) {
-      discovered.push(entryPath);
-    } else if (isDirectory) {
-      const nestedEntries = resolveExtensionEntries(entryPath);
-      if (nestedEntries) {
-        discovered.push(...nestedEntries);
-      }
-    }
-  }
-  return discovered;
-}
-
-function isPattern(value: string): boolean {
-  return (
-    value.startsWith("!") ||
-    value.startsWith("+") ||
-    value.startsWith("-") ||
-    value.includes("*") ||
-    value.includes("?")
-  );
-}
-
-function applyPatterns(
-  files: readonly string[],
-  patterns: readonly string[],
-  baseDir: string,
-): Set<string> {
-  const includes: string[] = [];
-  const excludes: string[] = [];
-  const forceIncludes: string[] = [];
-  const forceExcludes: string[] = [];
-  for (const pattern of patterns) {
-    if (pattern.startsWith("+")) {
-      forceIncludes.push(pattern.slice(1));
-    } else if (pattern.startsWith("-")) {
-      forceExcludes.push(pattern.slice(1));
-    } else if (pattern.startsWith("!")) {
-      excludes.push(pattern.slice(1));
-    } else {
-      includes.push(pattern);
-    }
-  }
-  let enabled =
-    includes.length === 0
-      ? [...files]
-      : files.filter((file) => matchesPattern(file, includes, baseDir));
-  if (excludes.length > 0) {
-    enabled = enabled.filter(
-      (file) => !matchesPattern(file, excludes, baseDir),
-    );
-  }
-  for (const file of files) {
-    if (
-      !enabled.includes(file) &&
-      matchesExactPath(file, forceIncludes, baseDir)
-    ) {
-      enabled.push(file);
-    }
-  }
-  return new Set(
-    enabled.filter((file) => !matchesExactPath(file, forceExcludes, baseDir)),
-  );
-}
-
-function applyAutoloadDisabledPatterns(
-  files: readonly string[],
-  patterns: readonly string[],
-  baseDir: string,
-): Map<string, boolean> {
-  const enabled = new Map<string, boolean>();
-  for (const pattern of patterns) {
-    const target = pattern.slice(
-      pattern.startsWith("+") ||
-        pattern.startsWith("-") ||
-        pattern.startsWith("!")
-        ? 1
-        : 0,
-    );
-    const exact = pattern.startsWith("+") || pattern.startsWith("-");
-    for (const file of files) {
-      if (
-        exact
-          ? matchesExactPath(file, [target], baseDir)
-          : matchesPattern(file, [target], baseDir)
-      ) {
-        enabled.set(
-          file,
-          !(pattern.startsWith("-") || pattern.startsWith("!")),
-        );
-      }
-    }
-  }
-  return enabled;
-}
-
-function autoExtensionEnabled(
-  filePath: string,
-  overrides: readonly string[] | undefined,
-  baseDir: string,
-): boolean {
-  const patterns = (overrides ?? []).filter(
-    (pattern) =>
-      pattern.startsWith("!") ||
-      pattern.startsWith("+") ||
-      pattern.startsWith("-"),
-  );
-  const excludes = patterns
-    .filter((pattern) => pattern.startsWith("!"))
-    .map((pattern) => pattern.slice(1));
-  const forceIncludes = patterns
-    .filter((pattern) => pattern.startsWith("+"))
-    .map((pattern) => pattern.slice(1));
-  const forceExcludes = patterns
-    .filter((pattern) => pattern.startsWith("-"))
-    .map((pattern) => pattern.slice(1));
-  if (matchesPattern(filePath, excludes, baseDir)) {
-    return (
-      matchesExactPath(filePath, forceIncludes, baseDir) &&
-      !matchesExactPath(filePath, forceExcludes, baseDir)
-    );
-  }
-  return !matchesExactPath(filePath, forceExcludes, baseDir);
-}
-
-function configuredExtensions(
-  entries: readonly string[] | undefined,
-  baseDir: string,
-): Array<{ path: string; enabled: boolean }> {
-  if (!entries) {
-    return [];
-  }
-  const plain = entries.filter((entry) => !isPattern(entry));
-  const patterns = entries.filter(isPattern);
-  const files = plain.flatMap((entry) => {
-    const resolved = resolvePiPath(entry, baseDir, true);
-    try {
-      const stats = statSync(resolved);
-      if (stats.isFile()) {
-        return [resolved];
-      }
-      return stats.isDirectory() ? discoverExtensionFiles(resolved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const enabled = applyPatterns(files, patterns, baseDir);
-  return files.map((file) => ({ path: file, enabled: enabled.has(file) }));
-}
-
-function packageSourceString(value: string | PackageSource): string {
-  return typeof value === "string" ? value : value.source;
-}
-
-function isGitPackageSource(source: string): boolean {
-  const trimmed = source.trim();
-  return trimmed.startsWith("git:") || GIT_URL_PREFIX.test(trimmed);
-}
-
-function gitPackagePath(source: string): string | undefined {
-  let raw = source.trim();
-  if (raw.startsWith("git:")) {
-    raw = raw.slice("git:".length).trim();
-  }
-
-  const hosted = raw.match(HOSTED_GIT_SOURCE);
-  if (hosted) {
-    let domain = "bitbucket.org";
-    if (hosted[1] === "github") {
-      domain = "github.com";
-    } else if (hosted[1] === "gitlab") {
-      domain = "gitlab.com";
-    }
-    raw = `${domain}/${hosted[2]}`;
-  }
-
-  const cleanPath = (value: string) => {
-    const ref = value.indexOf("@");
-    return (ref < 0 ? value : value.slice(0, ref))
-      .replace(LEADING_SLASHES, "")
-      .replace(GIT_SUFFIX, "");
-  };
-  const scp = raw.match(SCP_GIT_SOURCE);
-  if (scp) {
-    const packagePath = cleanPath(scp[2] ?? "");
-    return packagePath ? `${scp[1]}/${packagePath}` : undefined;
-  }
-  try {
-    const url = new URL(raw);
-    const packagePath = cleanPath(url.pathname);
-    return packagePath ? `${url.hostname}/${packagePath}` : undefined;
-  } catch {
-    const slash = raw.indexOf("/");
-    if (slash < 0) {
-      return undefined;
-    }
-    const host = raw.slice(0, slash);
-    const packagePath = cleanPath(raw.slice(slash + 1));
-    if (!packagePath) {
-      return undefined;
-    }
-    return host.includes(".") || host === "localhost"
-      ? `${host}/${packagePath}`
-      : `github.com/${cleanPath(raw)}`;
-  }
-}
-
-function packageIdentity(
-  source: string,
-  scope: ExtensionScope,
-  agentDir: string,
-  projectDir: string,
-): string {
-  if (source.startsWith("npm:")) {
-    const spec = source.slice("npm:".length).trim();
-    const name = spec.match(NPM_PACKAGE_SPEC)?.[1] ?? spec;
-    return `npm:${name}`;
-  }
-  if (isGitPackageSource(source)) {
-    return `git:${gitPackagePath(source) ?? source.trim()}`;
-  }
-  const baseDir = scope === "project" ? projectDir : agentDir;
-  return `local:${resolvePiPath(source, baseDir, true)}`;
-}
-
-function dedupePackages(
-  user: readonly (string | PackageSource)[] | undefined,
-  project: readonly (string | PackageSource)[] | undefined,
-  agentDir: string,
-  projectDir: string,
-): PackageEntry[] {
-  const entries: PackageEntry[] = [
-    ...(project ?? []).map((value) =>
-      typeof value === "string"
-        ? { source: packageSourceString(value), scope: "project" as const }
-        : {
-            source: packageSourceString(value),
-            filter: value,
-            scope: "project" as const,
-          },
-    ),
-    ...(user ?? []).map((value) =>
-      typeof value === "string"
-        ? { source: packageSourceString(value), scope: "user" as const }
-        : {
-            source: packageSourceString(value),
-            filter: value,
-            scope: "user" as const,
-          },
-    ),
-  ];
-  const result: PackageEntry[] = [];
-  const seen = new Map<string, number>();
-  for (const entry of entries) {
-    const identity = packageIdentity(
-      entry.source,
-      entry.scope,
-      agentDir,
-      projectDir,
-    );
-    const index = seen.get(identity);
-    if (index === undefined) {
-      seen.set(identity, result.length);
-      result.push(entry);
-      continue;
-    }
-    const existing = result[index];
-    if (existing?.scope === "project" && entry.scope === "user") {
-      if (existing.filter?.autoload === false) {
-        result.push(entry);
-      }
-    } else if (entry.scope === "project") {
-      result[index] = entry;
-    }
-  }
-  return result;
-}
-
-function packageRoot(
-  source: string,
-  scope: ExtensionScope,
-  agentDir: string,
-  projectDir: string,
-): string | undefined {
-  const baseDir = scope === "project" ? projectDir : agentDir;
-  if (source.startsWith("npm:")) {
-    const spec = source.slice("npm:".length).trim();
-    const name = spec.match(NPM_PACKAGE_SPEC)?.[1];
-    return name ? join(baseDir, "npm", "node_modules", name) : undefined;
-  }
-  if (isGitPackageSource(source)) {
-    const identity = packageIdentity(source, scope, agentDir, projectDir).slice(
-      "git:".length,
-    );
-    const slash = identity.indexOf("/");
-    return slash >= 0
-      ? join(
-          baseDir,
-          "git",
-          identity.slice(0, slash),
-          identity.slice(slash + 1),
-        )
-      : undefined;
-  }
-  return resolvePiPath(source, baseDir, true);
-}
-
-function packageEntryPaths(entry: string, root: string): string[] {
-  const pattern = toPosixPath(entry).replace(RELATIVE_PREFIX, "");
-  if (!(pattern.includes("*") || pattern.includes("?"))) {
-    return [resolvePiPath(pattern, root)];
-  }
-
-  const wildcard = pattern.search(WILDCARD);
-  const prefix = pattern.slice(0, wildcard);
-  const start = resolve(root, prefix.slice(0, prefix.lastIndexOf("/") + 1));
-  const matcher = globPattern(pattern);
-  const absolute = isAbsolute(pattern);
-  const matches: string[] = [];
-  const visitedDirectories = new Set<string>();
-  const visit = (directory: string) => {
-    const canonical = canonicalPath(directory);
-    if (visitedDirectories.has(canonical)) {
-      return;
-    }
-    visitedDirectories.add(canonical);
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const child of entries) {
-      if (child.name.startsWith(".")) {
-        continue;
-      }
-      const childPath = join(directory, child.name);
-      const candidate = absolute
-        ? toPosixPath(childPath)
-        : toPosixPath(relative(root, childPath));
-      if (matcher.test(candidate)) {
-        matches.push(childPath);
-      }
-      let isDirectory = child.isDirectory();
-      if (child.isSymbolicLink()) {
-        try {
-          isDirectory = statSync(childPath).isDirectory();
-        } catch {
-          continue;
-        }
-      }
-      if (isDirectory) {
-        visit(childPath);
-      }
-    }
-  };
-  visit(start);
-  return matches;
-}
-
-/**
- * Resolves resource entries and retains resource ownership without importing code.
- * Directory-only defaults retain their trailing-separator intent; declared paths use Pi normalization.
- * @param entries Configured resource entries or merged defaults.
- * @param root Package directory used to resolve relative entries.
- * @param hasDeclaration Whether the package explicitly declares extension entries.
- * @returns Discovered files and whether declared or existing resources block local fallback.
- * @example With /pkg/extensions/tool.ts, packageExtensionFiles(["extensions/"], "/pkg", false) includes that file.
- */
-function packageExtensionFiles(
-  entries: readonly string[],
-  root: string,
-  hasDeclaration: boolean,
-): { files: string[]; hasPackageResources: boolean } {
-  const files: string[] = [];
-  let hasPackageResources = hasDeclaration;
-  for (const entry of entries) {
-    const directoryOnly = !hasDeclaration && toPosixPath(entry).endsWith("/");
-    for (const candidate of packageEntryPaths(entry, root)) {
-      try {
-        const stats = statSync(candidate);
-        hasPackageResources = true;
-        if (stats.isFile() && !directoryOnly) {
-          files.push(candidate);
-        } else if (stats.isDirectory()) {
-          files.push(...discoverExtensionFiles(candidate));
-        }
-      } catch {
-        // Pi ignores unavailable package resource entries.
-        hasPackageResources ||= existsSync(candidate);
-      }
-    }
-  }
-  return { files, hasPackageResources };
-}
-
-/**
- * Discovers package extensions using Pi 1.5 resource declarations and filters.
- * Resolves merged resource entries and applies Pi's source-mode ownership rules.
- * @param root Package directory containing optional package.json and extensions/.
- * @param mode String package, default package object, or explicit object filter.
- * @returns Extension files and whether the package declares or contains resources.
- * @example With only pi.changelogPath, packageFiles("/pkg", "package") discovers /pkg/extensions/tool.ts.
- */
-function packageFiles(
-  root: string,
-  mode: PackageCollectionMode,
-): { files: string[]; hasPackageResources: boolean } {
-  let packageJson = readPackageJson(join(root, "package.json"));
-  if (mode === "filter" && packageJson.pi?.extensions?.length === 0) {
-    const { extensions: _extensions, ...pi } = packageJson.pi;
-    packageJson = { pi };
-  }
-  const hasDeclaration = hasPackageResourceDeclaration(
-    packageJson,
-    "extensions",
-  );
-  const { extensions, skills, prompts, themes } =
-    mergeWithDefaultPackageJson(packageJson).pi;
-  if (
-    mode === "package" &&
-    !hasDeclaration &&
-    (skills !== undefined || prompts !== undefined || themes !== undefined)
-  ) {
-    return { files: [], hasPackageResources: true };
-  }
-  const { files, hasPackageResources } = packageExtensionFiles(
-    extensions.filter(
-      (entry) =>
-        !(
-          entry.startsWith("!") ||
-          entry.startsWith("+") ||
-          entry.startsWith("-")
-        ),
-    ),
-    root,
-    hasDeclaration,
-  );
-  const overrides = extensions.filter(
-    (entry) =>
-      entry.startsWith("!") || entry.startsWith("+") || entry.startsWith("-"),
-  );
-  return {
-    files:
-      overrides.length === 0
-        ? files
-        : files.filter((file) =>
-            applyPatterns(files, overrides, root).has(file),
-          ),
-    hasPackageResources,
-  };
 }
 
 function compactPackageSourceLabel(source: string): string {
@@ -941,10 +261,16 @@ function compactPackageSourceLabel(source: string): string {
   }
 }
 
-function packageExtensionName(resource: SnapshotResource): string {
-  const sourceLabel = compactPackageSourceLabel(resource.source);
-  const shortPath = resource.baseDir
-    ? toPosixPath(relative(resource.baseDir, resource.path))
+/**
+ * Formats a package-qualified label relative to Pi's resolved package base directory.
+ * @param resource Native extension candidate carrying package provenance.
+ * @returns A compact source label with the extension's relative name.
+ * @example npm:tools plus /pkg/extensions/nested/index.ts becomes "npm:tools:nested".
+ */
+function packageExtensionName(resource: ResolvedResource): string {
+  const sourceLabel = compactPackageSourceLabel(resource.metadata.source);
+  const shortPath = resource.metadata.baseDir
+    ? toPosixPath(relative(resource.metadata.baseDir, resource.path))
     : toPosixPath(resource.path);
   const packagePath = shortPath.startsWith("extensions/")
     ? shortPath.slice("extensions/".length)
@@ -971,18 +297,24 @@ function localNameSuffix(parts: readonly string[], count: number): string {
   return suffix.join("/");
 }
 
+/**
+ * Assigns display names without changing Pi's resolved paths or provenance.
+ * @param resources Enabled native extension candidates.
+ * @returns Package-qualified labels or the shortest distinct local path suffix per scope.
+ * @example /first/same.ts and /second/same.ts become "first/same" and "second/same".
+ */
 function extensionNames(
-  resources: readonly SnapshotResource[],
-): Map<SnapshotResource, string> {
+  resources: readonly ResolvedResource[],
+): Map<ResolvedResource, string> {
   const local = resources.filter(
     (resource) =>
       !(
-        resource.origin === "package" &&
-        (resource.source.startsWith("npm:") ||
-          resource.source.startsWith("git:"))
+        resource.metadata.origin === "package" &&
+        (resource.metadata.source.startsWith("npm:") ||
+          resource.metadata.source.startsWith("git:"))
       ),
   );
-  const segments = new Map<SnapshotResource, string[]>();
+  const segments = new Map<ResolvedResource, string[]>();
   for (const resource of local) {
     const displayPath = toPosixPath(resource.path);
     const home = toPosixPath(homedir());
@@ -998,11 +330,12 @@ function extensionNames(
     }
     segments.set(resource, parts);
   }
-  const names = new Map<SnapshotResource, string>();
+  const names = new Map<ResolvedResource, string>();
   for (const resource of resources) {
     if (
-      resource.origin === "package" &&
-      (resource.source.startsWith("npm:") || resource.source.startsWith("git:"))
+      resource.metadata.origin === "package" &&
+      (resource.metadata.source.startsWith("npm:") ||
+        resource.metadata.source.startsWith("git:"))
     ) {
       names.set(resource, packageExtensionName(resource));
       continue;
@@ -1013,7 +346,10 @@ function extensionNames(
       const candidate = localNameSuffix(parts, count);
       if (
         local.every((other) => {
-          if (other === resource || other.scope !== resource.scope) {
+          if (
+            other === resource ||
+            other.metadata.scope !== resource.metadata.scope
+          ) {
             return true;
           }
           return (
@@ -1031,271 +367,83 @@ function extensionNames(
 }
 
 /**
- * Discovers directory-package entries and applies the package object's filters.
- * Reads metadata without importing code; unavailable metadata follows packageFiles defaults.
- * @param root Existing directory selected by package root resolution.
- * @param entry Package source and optional autoload/extension filter.
- * @returns Ranked resources in discovery or autoload-pattern insertion order.
- * @example With /pkg/extensions/tool.ts and no metadata/filter, yields that path enabled.
- */
-function* packageDirectoryExtensions(
-  root: string,
-  entry: PackageEntry,
-): Generator<Omit<SnapshotResource, "insertion">> {
-  let collectionMode: PackageCollectionMode;
-  if (entry.filter === undefined) {
-    collectionMode = "package";
-  } else if (
-    entry.filter.autoload === false ||
-    entry.filter.extensions !== undefined
-  ) {
-    collectionMode = "filter";
-  } else {
-    collectionMode = "default";
-  }
-  const collected = packageFiles(root, collectionMode);
-  if (
-    collected.files.length === 0 &&
-    !collected.hasPackageResources &&
-    !entry.source.startsWith("npm:") &&
-    !entry.source.startsWith("git:")
-  ) {
-    yield {
-      path: root,
-      scope: entry.scope,
-      enabled: true,
-      rank: 4,
-      source: entry.source,
-      origin: "package",
-      baseDir: root,
-    };
-    return;
-  }
-  if (entry.filter?.autoload === false) {
-    for (const [path, enabled] of applyAutoloadDisabledPatterns(
-      collected.files,
-      entry.filter.extensions ?? [],
-      root,
-    )) {
-      yield {
-        path,
-        scope: entry.scope,
-        enabled,
-        rank: 4,
-        source: entry.source,
-        origin: "package",
-        baseDir: root,
-      };
-    }
-    return;
-  }
-  let enabled: Set<string>;
-  if (entry.filter?.extensions === undefined) {
-    enabled = new Set(collected.files);
-  } else if (entry.filter.extensions.length === 0) {
-    enabled = new Set<string>();
-  } else {
-    enabled = applyPatterns(collected.files, entry.filter.extensions, root);
-  }
-  for (const path of collected.files) {
-    yield {
-      path,
-      scope: entry.scope,
-      enabled: enabled.has(path),
-      rank: 4,
-      source: entry.source,
-      origin: "package",
-      baseDir: root,
-    };
-  }
-}
-
-/**
- * Resolves and inspects one installed package without importing or installing it.
- * Project autoload deltas use the matching user package root but retain project attribution.
- * @param entry Package selected by scope/identity precedence.
- * @param packages Deduplicated packages, including retained user delta bases.
- * @param agentDir User package cache and relative-path base.
- * @param projectDir Trusted project package cache and relative-path base.
- * @returns Ranked resources in discovery order; missing/unstatable roots yield nothing.
- * @example An existing user ./tool.ts yields a user package resource at rank 4.
- */
-function* packageSnapshotResources(
-  entry: PackageEntry,
-  packages: readonly PackageEntry[],
-  agentDir: string,
-  projectDir: string,
-): Generator<Omit<SnapshotResource, "insertion">> {
-  const deltaBase =
-    entry.scope === "project" && entry.filter?.autoload === false
-      ? packages.find(
-          (candidate) =>
-            candidate.scope === "user" &&
-            packageIdentity(candidate.source, "user", agentDir, projectDir) ===
-              packageIdentity(entry.source, "project", agentDir, projectDir),
-        )
-      : undefined;
-  const root = packageRoot(
-    deltaBase?.source ?? entry.source,
-    deltaBase?.scope ?? entry.scope,
-    agentDir,
-    projectDir,
-  );
-  if (!(root && existsSync(root))) {
-    return;
-  }
-  let stats: Stats;
-  try {
-    stats = statSync(root);
-  } catch {
-    return;
-  }
-  if (stats.isFile()) {
-    yield {
-      path: root,
-      scope: entry.scope,
-      enabled: true,
-      rank: 4,
-      source: entry.source,
-      origin: "package",
-      baseDir: dirname(root),
-    };
-    return;
-  }
-  if (!stats.isDirectory()) {
-    return;
-  }
-  yield* packageDirectoryExtensions(root, entry);
-}
-
-/**
- * Captures Pi's enabled startup extension set without loading or installing
- * anything again. It mirrors Pi 1.5.0's trust gate, scope precedence,
- * package-object filters, auto-discovery, symlink handling, and local overrides.
- * Reads local metadata only; it neither imports extensions nor installs packages.
- * Unreadable/invalid JSON becomes empty metadata; missing or unstatable package roots are skipped.
+ * Resolves enabled user/project extensions through Pi without loading code or installing packages.
+ * The validated settings snapshot preserves welcome's tolerance for malformed settings.
+ * Native Pi owns discovery, package filters, trust gating, precedence, and deduplication.
+ * Resolution may query a local package manager for legacy global npm locations.
  * @param options Startup cwd, trust decision, and optional agent/welcome entrypoint paths.
- * @returns Canonically deduplicated entries, project scope first, then by name;
- * an undiscovered welcome entrypoint is included as "omp-welcome" in user scope.
- * @example collectWelcomeExtensions({ cwd: "/work", projectTrusted: false });
- * // Ignores project settings and project auto-discovery, retaining user extensions.
+ * @returns Display entries, project scope first, then by name; an undiscovered welcome
+ * entrypoint is included as "omp-welcome" in user scope.
+ * @throws Propagates native resolution errors; missing or mismatched packages are skipped.
+ * @example await collectWelcomeExtensions({ cwd: "/work", projectTrusted: false });
+ * // Returns user extension rows without reading untrusted project settings.
  */
-export function collectWelcomeExtensions(
+export async function collectWelcomeExtensions(
   options: WelcomeSnapshotOptions,
-): WelcomeExtension[] {
+): Promise<WelcomeExtension[]> {
   const agentDir = options.agentDir ?? getAgentDir();
   const cwd = resolve(options.cwd);
-  const projectDir = join(cwd, ".pi");
   const settings = scopedSettings(cwd, agentDir, options.projectTrusted);
-  const byPath = new Map<string, SnapshotResource>();
-  let insertion = 0;
-
-  const add = (resource: Omit<SnapshotResource, "insertion">) => {
-    if (!byPath.has(resource.path)) {
-      byPath.set(resource.path, { ...resource, insertion: insertion++ });
-    }
+  const serializedSettings: Record<"global" | "project", string> = {
+    global: JSON.stringify(settings.user),
+    project: JSON.stringify(settings.project),
   };
-
-  const packages = dedupePackages(
-    settings.user.packages,
-    settings.project.packages,
-    agentDir,
-    projectDir,
+  const trustOptions: SettingsManagerCreateOptions = {
+    projectTrusted: options.projectTrusted,
+  };
+  const settingsManager = SettingsManager.fromStorage(
+    {
+      /**
+       * Keeps native settings transactions in the validated snapshot, never on disk.
+       * @param scope Native global or trusted-project settings layer.
+       * @param update A reader returns undefined; a writer replaces only the memory value.
+       * @example withLock("global", (current) => current); // Leaves disk settings unchanged.
+       */
+      withLock(scope, update) {
+        const next = update(serializedSettings[scope]);
+        if (next !== undefined) {
+          serializedSettings[scope] = next;
+        }
+      },
+    },
+    trustOptions,
   );
-  for (const entry of packages) {
-    for (const resource of packageSnapshotResources(
-      entry,
-      packages,
-      agentDir,
-      projectDir,
-    )) {
-      add(resource);
-    }
-  }
-
-  const addConfigured = (
-    scope: ExtensionScope,
-    entries: readonly string[] | undefined,
-    baseDir: string,
-    rank: number,
-  ) => {
-    for (const resource of configuredExtensions(entries, baseDir)) {
-      add({
-        path: resource.path,
-        scope,
-        enabled: resource.enabled,
-        rank,
-        source: "local",
-        origin: "top-level",
-        baseDir,
-      });
-    }
-  };
-  const addAutoDiscovered = (
-    scope: ExtensionScope,
-    entries: readonly string[] | undefined,
-    baseDir: string,
-    rank: number,
-  ) => {
-    for (const file of discoverExtensionFiles(join(baseDir, "extensions"))) {
-      add({
-        path: file,
-        scope,
-        enabled: autoExtensionEnabled(file, entries, baseDir),
-        rank,
-        source: "auto",
-        origin: "top-level",
-        baseDir,
-      });
-    }
-  };
-
-  if (options.projectTrusted) {
-    addConfigured("project", settings.project.extensions, projectDir, 0);
-    addAutoDiscovered("project", settings.project.extensions, projectDir, 1);
-  }
-  addConfigured("user", settings.user.extensions, agentDir, 2);
-  addAutoDiscovered(
-    "user",
-    settings.user.extensions,
-    agentDir,
-    USER_AUTO_DISCOVERY_RANK,
-  );
-
-  const seen = new Set<string>();
-  const resolved = [...byPath.values()]
-    .sort(
-      (left, right) =>
-        left.rank - right.rank || left.insertion - right.insertion,
-    )
-    .filter((resource) => {
-      const canonical = canonicalPath(resource.path);
-      if (seen.has(canonical)) {
-        return false;
-      }
-      seen.add(canonical);
-      return true;
-    })
-    .filter((resource) => resource.enabled);
+  const packageManagerOptions = { cwd, agentDir, settingsManager };
+  const { extensions } = await new DefaultPackageManager(
+    packageManagerOptions,
+  ).resolve(async () => "skip");
+  const resolved = extensions.filter((resource) => resource.enabled);
   const names = extensionNames(resolved);
-  const items: WelcomeExtension[] = resolved.map((resource) => {
+  const items: WelcomeExtension[] = [];
+  for (const resource of resolved) {
+    const { scope, origin, source } = resource.metadata;
+    if (scope === "temporary") {
+      continue;
+    }
     const item: WelcomeExtension = {
       name: names.get(resource) ?? extensionNameFromPath(resource.path),
-      scope: resource.scope,
+      scope,
       path: resource.path,
     };
-    if (resource.origin === "package") {
-      item.packageSource = resource.source;
+    if (origin === "package") {
+      item.packageSource = source;
     }
-    return item;
-  });
+    items.push(item);
+  }
 
-  if (options.welcomePath && !seen.has(canonicalPath(options.welcomePath))) {
-    items.push({
-      name: "omp-welcome",
-      scope: "user",
-      path: options.welcomePath,
-    });
+  if (options.welcomePath) {
+    const welcomePath = canonicalPath(options.welcomePath);
+    if (
+      !extensions.some(
+        (resource) => canonicalPath(resource.path) === welcomePath,
+      )
+    ) {
+      items.push({
+        name: "omp-welcome",
+        scope: "user",
+        path: options.welcomePath,
+      });
+    }
   }
 
   return items.sort((left, right) => {
