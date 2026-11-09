@@ -144,9 +144,10 @@ interface PanelState extends PanelOptions {
   readonly rowHits: RowHit[];
   readonly tabHits: TabHit[];
   dialog: DialogState;
-  busy: boolean;
+  /** A commit returns to editing if nothing was saved; commit/close can finish. */
+  phase: "editing" | "committing" | "finished";
+  // Terminal disposal is independent: shutdown can release it during a commit.
   disposed: boolean;
-  finished: boolean;
   listOffset: number;
   message: string | undefined;
   mouseOwned: boolean;
@@ -174,9 +175,8 @@ export class ExtensionManagerPanel implements Component {
       rowHits: [],
       tabHits: [],
       dialog: undefined,
-      busy: false,
+      phase: "editing",
       disposed: false,
-      finished: false,
       listOffset: 0,
       message: undefined,
       mouseOwned: false,
@@ -251,7 +251,7 @@ export class ExtensionManagerPanel implements Component {
    */
   handleInput(data: string): void {
     const state = this.#state;
-    if (state.busy || state.finished) {
+    if (state.phase !== "editing") {
       return;
     }
 
@@ -476,7 +476,7 @@ function handleMouse(
 
 /**
  * Commits staged settings, closing after any saved scope and keeping failed attempts editable.
- * @param state - Catalog and busy/message state; self-disable is measured against saved settings.
+ * @param state - Catalog and interaction phase; self-disable is measured against saved settings.
  * @param panel - Lifecycle owner used for redraws and commit completion.
  * @returns Completion after commit feedback or closure; commit errors become panel messages.
  * @example
@@ -491,7 +491,7 @@ async function apply(
     panel.invalidate();
     return;
   }
-  state.busy = true;
+  state.phase = "committing";
   state.message = undefined;
   panel.invalidate();
   const selfWasResolved = state.catalog.selfResolved(state.selfPath, false);
@@ -512,8 +512,8 @@ async function apply(
   } catch (error) {
     state.message = error instanceof Error ? error.message : String(error);
   } finally {
-    state.busy = false;
-    if (!state.finished) {
+    if (state.phase === "committing") {
+      state.phase = "editing";
       panel.invalidate();
     }
   }
@@ -521,7 +521,7 @@ async function apply(
 
 /**
  * Completes the panel once, disposing terminal ownership before notifying its caller.
- * @param state - Completion guard and result callback owned by the panel.
+ * @param state - Interaction phase and result callback owned by the panel.
  * @param panel - Lifecycle owner whose disposal hook runs before the callback.
  * @param result - Closure reason and, for a commit, saved-scope and self-disable details.
  * @throws If disposal or the completion callback throws; completion stays marked finished.
@@ -533,10 +533,10 @@ function finish(
   panel: ExtensionManagerPanel,
   result: PanelResult,
 ): void {
-  if (state.finished) {
+  if (state.phase === "finished") {
     return;
   }
-  state.finished = true;
+  state.phase = "finished";
   panel.dispose();
   state.done(result);
 }

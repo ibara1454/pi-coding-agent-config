@@ -106,6 +106,9 @@ Using an unresolved symlink as the configuration directory can break relative
 extension paths and dependency lookup. This setup needs neither an `extensions`
 symlink nor a `node_modules` symlink inside `config/pi/`.
 
+This configuration also loads [the `/state-machines` prompt](config/pi/prompts/state-machines.md).
+Run `/reload` in an existing Pi session before invoking the new template.
+
 ### Copy extensions into your own Pi configuration
 
 Use this option to keep an existing Pi configuration independent of this
