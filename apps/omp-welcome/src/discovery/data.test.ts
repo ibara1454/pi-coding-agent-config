@@ -43,9 +43,8 @@ function mockSettings(files: Record<string, string>): void {
     }
     return content;
   }) as typeof fs.readFileSync);
-  spyOn(fs.realpathSync, "native").mockImplementation(
-    ((path: PathLike) => resolve(String(path))) as typeof fs.realpathSync.native,
-  );
+  spyOn(fs.realpathSync, "native").mockImplementation(((path: PathLike) =>
+    resolve(String(path))) as typeof fs.realpathSync.native);
 }
 
 /**
