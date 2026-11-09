@@ -118,8 +118,8 @@ is incomplete; name the missing evidence rather than approving.
 
 ## Submit the review
 
-Use the Bash `safeoutputs <tool_name> '<json>'` CLI for every safe-output call;
-`safeoutputs` is CLI-mounted, not exposed as native `mcp__safeoutputs.*` tools.
+Use the Bash `safeoutputs <tool_name> '<json>'` CLI for every safe-output call.
+This avoids the native tool-dispatch failure observed in this workflow.
 Read `safeoutputs submit_pull_request_review --help`, then submit exactly one
 review with `safeoutputs submit_pull_request_review` and one complete JSON
 object argument. Use APPROVE when the review is complete, all necessary checks
