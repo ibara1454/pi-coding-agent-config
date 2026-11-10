@@ -118,13 +118,11 @@ is incomplete; name the missing evidence rather than approving.
 
 ## Submit the review
 
-Submit exactly one review using the `submit_pull_request_review` tool from the
-`safeoutputs` MCP server.
-Use APPROVE when the review is complete, all necessary checks
-succeeded, and there are no critical findings, even if non-critical findings
-remain. Use REQUEST_CHANGES for critical findings or an incomplete review,
-naming the failed check or missing evidence. Include check results or explain
-why no execution was needed.
+Submit exactly one review using `submit_pull_request_review`. Use APPROVE when
+the review is complete, all necessary checks succeeded, and there are no
+critical findings, even if non-critical findings remain. Use REQUEST_CHANGES
+for critical findings or an incomplete review, naming the failed check or
+missing evidence. Include check results or explain why no execution was needed.
 Do not merge the PR.
 
 If cancellation or publication failure prevents a review, report that no review
