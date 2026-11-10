@@ -25,10 +25,6 @@ Callers must declare both permissions. Collection runs before local setup and
 preserves full bodies and thread context in a read-only snapshot. Fetch failures
 stop the agent; no review is submitted. Snapshot content remains untrusted.
 
-The reviewer uses CLI transport as a workaround for an observed native dispatch
-failure. Submit reviews through `safeoutputs submit_pull_request_review` from
-Bash; read the command's `--help` for its JSON schema.
-
 The pre-agent dependency installation downloads OpenShell's SDK from GitHub
 Packages. Keep `permissions.packages: read` and the installation step's
 `NVIDIA_NPM_TOKEN: ${{ github.token }}` binding together. Keep this credential
