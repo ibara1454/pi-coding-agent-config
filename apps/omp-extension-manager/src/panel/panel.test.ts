@@ -555,6 +555,40 @@ describe("ExtensionManagerPanel.handleInput", () => {
       "No staged changes",
     );
   });
+
+  it("should block input during a commit and after completion", async () => {
+    const pending = Promise.withResolvers<CommitResult>();
+    const commit = mock(() => pending.promise);
+    const { catalog, finished, panel, results, writes } = makePanel({ commit });
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+    panel.handleInput("\u001b");
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(catalog.hasChanges()).toBe(true);
+    expect(results).toEqual([]);
+
+    const result: CommitResult = {
+      scopes: [{ scope: "global", status: "committed" }],
+      committedScopes: ["global"],
+    };
+    pending.resolve(result);
+    expect(await finished).toEqual({
+      type: "commit",
+      result,
+      selfDisableCommitted: false,
+    });
+
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+    panel.handleInput("\u001b");
+    expect(catalog.hasChanges()).toBe(false);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(1);
+    expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(1);
+  });
   const layouts: [string, number][] = [
     ["narrow", NARROW_PANEL_WIDTH],
     ["wide", WIDE_PANEL_WIDTH],

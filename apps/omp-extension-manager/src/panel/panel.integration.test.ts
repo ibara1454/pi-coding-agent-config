@@ -417,6 +417,8 @@ describe("ExtensionManagerPanel.handleInput", () => {
         expectedMessage,
       );
       expect(writes.some((write) => write.includes("?1000l"))).toBe(false);
+      panel.handleInput(SPACE);
+      expect(catalog.hasChanges()).toBe(false);
 
       panel.dispose();
       expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(
