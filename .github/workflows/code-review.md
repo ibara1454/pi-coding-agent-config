@@ -118,7 +118,8 @@ is incomplete; name the missing evidence rather than approving.
 
 ## Submit the review
 
-Submit exactly one review using the `submit_pull_request_review` MCP tool.
+Submit exactly one review using the `submit_pull_request_review` tool from the
+`safeoutputs` MCP server.
 Use APPROVE when the review is complete, all necessary checks
 succeeded, and there are no critical findings, even if non-critical findings
 remain. Use REQUEST_CHANGES for critical findings or an incomplete review,
