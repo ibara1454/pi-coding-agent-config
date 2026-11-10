@@ -118,11 +118,8 @@ is incomplete; name the missing evidence rather than approving.
 
 ## Submit the review
 
-Use the Bash `safeoutputs <tool_name> '<json>'` CLI for every safe-output call.
-This avoids the native tool-dispatch failure observed in this workflow.
-Read `safeoutputs submit_pull_request_review --help`, then submit exactly one
-review with `safeoutputs submit_pull_request_review` and one complete JSON
-object argument. Use APPROVE when the review is complete, all necessary checks
+Submit exactly one review using the `submit_pull_request_review` MCP tool.
+Use APPROVE when the review is complete, all necessary checks
 succeeded, and there are no critical findings, even if non-critical findings
 remain. Use REQUEST_CHANGES for critical findings or an incomplete review,
 naming the failed check or missing evidence. Include check results or explain
