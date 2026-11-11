@@ -474,6 +474,12 @@ describe("ExtensionManagerPanel.handleInput", () => {
           expectedMessage,
         );
         expect(writes.some((write) => write.includes("?1000l"))).toBe(false);
+        for (const character of "rev") {
+          panel.handleInput(character);
+        }
+        const filtered = panel.render(NARROW_PANEL_WIDTH).join("\n");
+        expect(filtered).toContain("project-review");
+        expect(filtered).not.toContain("alpha");
 
         const committed: CommitResult = {
           scopes: [{ scope: "global", status: "committed" }],
@@ -680,6 +686,40 @@ describe("ExtensionManagerPanel.handleInput", () => {
     expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
       "No staged changes",
     );
+  });
+
+  it("should block input during a commit and after completion", async () => {
+    const pending = Promise.withResolvers<CommitResult>();
+    const commit = mock(() => pending.promise);
+    const { catalog, finished, panel, results, writes } = makePanel({ commit });
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+    panel.handleInput("\u001b");
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(catalog.hasChanges()).toBe(true);
+    expect(results).toEqual([]);
+
+    const result: CommitResult = {
+      scopes: [{ scope: "global", status: "committed" }],
+      committedScopes: ["global"],
+    };
+    pending.resolve(result);
+    expect(await finished).toEqual({
+      type: "commit",
+      result,
+      selfDisableCommitted: false,
+    });
+
+    panel.handleInput(" ");
+    panel.handleInput("\u0013");
+    panel.handleInput("\u001b");
+    expect(catalog.hasChanges()).toBe(false);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(1);
+    expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(1);
   });
   const layouts: [string, number][] = [
     ["narrow", NARROW_PANEL_WIDTH],
