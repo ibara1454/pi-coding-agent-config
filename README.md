@@ -62,7 +62,7 @@ see [Pi's getting-started guide](https://github.com/earendil-works/pi/blob/v1.5.
 
 Before installing dependencies, follow the OpenShell
 [prerequisites and private-registry authentication](apps/openshell-sandbox/README.md#installation-and-prerequisites);
-complete its [project-policy setup](apps/openshell-sandbox/README.md#configure-trusted-inputs)
+complete its [project-policy setup](apps/openshell-sandbox/README.md#configuration)
 before normal model use.
 
 1. Copy or clone the entire repository to local storage and open its root
@@ -154,7 +154,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
 | [`omp-extension-manager`](apps/omp-extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/omp-extension-manager` |
-| [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Tests and native limits](apps/openshell-sandbox/README.md#automatic-tests) |
+| [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Native verification limits](apps/openshell-sandbox/README.md#caveats) |
 | [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
 ## Validation

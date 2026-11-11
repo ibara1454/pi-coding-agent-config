@@ -44,4 +44,4 @@ Unconfirmed cleanup reports sanitized failure and available exact recovery coord
 
 Independent Pi instances own separate native stacks but can mount the same live project. They can overwrite edits, race package outputs, or contend on Git locks. Linked worktrees also share common Git metadata. Each stack needs explicit canonical filesystem grants and actual host/guest access; the extension does not grant ancestors or serialize cross-session file operations.
 
-The [architecture diagram](openshell-architecture.svg) shows the accepted credential trust boundary, not a toolchain/identity guarantee. [Automatic tests](../README.md#automatic-tests) use controlled native effects; they do not establish Docker/default-image or macOS acceptance.
+The [architecture diagram](openshell-architecture.svg) shows the accepted credential trust boundary, not a toolchain/identity guarantee. [Automatic tests](../../../README.md#testing) use controlled native effects; see [platform verification status](../README.md#caveats) for remaining limitations.

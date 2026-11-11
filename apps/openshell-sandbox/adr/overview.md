@@ -37,5 +37,6 @@ next activation → independent resources, not recovery
 - [ADR-0002: actual settlement, native identity and cleanup ownership](0002-openshell-runtime-and-lifecycle.md)
 - [Operator recovery steps](../README.md#after-failed-shutdown)
 - [Module/helper conventions](../README.md#package-structure)
-- [Automatic tests and unverified native Docker/default-image/macOS limits](../README.md#automatic-tests)
+- [Test commands](../../../README.md#testing)
+- [Platform verification status](../README.md#caveats)
 - [Credential trust-boundary diagram](openshell-architecture.svg)

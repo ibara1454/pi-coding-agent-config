@@ -2,31 +2,57 @@
 
 This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`). Pi, file tools, model traffic, and other extensions' host processes remain outside this boundary. Model Bash is registered fail-closed before SDK or configuration loading: setup, execution, or uncertain cleanup failures never reroute it to the host. User Bash remains host-side even when OpenShell is preparing or failed. This is not whole-agent isolation.
 
-**Native Docker/default-image and macOS behavior remain unverified.** [Automatic tests](#automatic-tests) use controlled effects and do not establish native acceptance.
-
 ## Installation and prerequisites
 
-1. Install [Pi](https://github.com/earendil-works/pi), [Bun](https://bun.com/) for the Pi host and workspace tooling, [Docker](https://docs.docker.com/engine/install/) with a working local Unix socket, and the [native OpenShell 0.0.116 release](https://docs.nvidia.com/openshell/about/installation) with `openshell-gateway` on `PATH`. Start Docker and arrange access/file sharing for the selected project yourself; the extension does not install or restart services. Platform branches target Linux/WSL2 and Apple Silicon macOS, but macOS compatibility is unverified. Host Python is not required.
-2. Configure [GitHub Packages install authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages) privately before installing dependencies. The root and package-local `bunfig.toml` map `@nvidia` to GitHub Packages and read authentication from `NVIDIA_NPM_TOKEN`; the manifest pins `@nvidia/openshell-sdk@0.0.116`. The mapping selects the registry; it does **not** authenticate. Supply a personal access token (classic) with only `read:packages` and access to the package through your credential tooling for the install command's environment, then remove it before starting Pi. Do not put token values in commands, tracked files, logs, or persistent project environment files. Package-install credentials are separate from sandbox workload providers.
-3. From the repository root:
+1. Install **Docker Desktop or Docker Engine 28.0+** using the official guide for your platform:
+   - **Linux:** [Docker Engine installation](https://docs.docker.com/engine/install/).
+   - **WSL2:** [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) and [WSL2 backend/integration setup](https://docs.docker.com/desktop/features/wsl/).
+   - **Apple Silicon macOS:** [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/).
 
+     Start Docker and ensure its local Unix socket is accessible to the Pi user. Arrange access/file sharing for the selected project yourself; the extension does not install or restart services. For WSL2, enable the WSL2 backend and distribution integration so the socket is available inside the distribution.
+2. Install the **native OpenShell 0.0.116 CLI and gateway** using the commands below, based on the [versioned upstream instructions](https://docs.nvidia.com/openshell/v0.0.116/about/installation):
+   - **Linux/WSL2:** Debian/Ubuntu or an RPM-based distribution, x86\_64 or ARM64, glibc 2.28+, package-install privileges (`sudo`), and a working systemd user session. Enable systemd in WSL2 before using this installer.
+   - **Apple Silicon macOS:** install [Homebrew](https://brew.sh/) first. Intel macOS is not supported by this release.
+   - Both platforms need `curl` and a SHA-256 utility (`sha256sum` or `shasum`).
+
+     Run as your normal user; the installer requests package-manager privileges when needed. Both the installer script and the selected release are pinned:
+
+     ```sh
+     installer="$(curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.0.116/install.sh)" &&
+       OPENSHELL_VERSION=v0.0.116 sh -c "$installer"
+     ```
+
+     The installer installs `openshell` and `openshell-gateway` through the native package manager, verifies downloaded Linux packages against release checksums, and starts/registers a default local gateway through systemd or Homebrew. That default gateway is separate from the private gateway this extension owns.
+
+     Verify in the same shell environment that will launch Pi:
+
+     ```sh
+     command -v openshell openshell-gateway
+     openshell --version
+     openshell-gateway --version
+     openshell status
+     ```
+
+     Both version commands must report `0.0.116`, both binaries must be on `PATH`, and `openshell status` should reach the installer's default gateway. This does not prove the extension's sandbox permissions or project access. Installing `openshell` from PyPI installs only the Python SDK, not these native binaries.
+3. Create a **GitHub personal access token (classic)** for [GitHub Packages authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages). Fine-grained tokens are not supported:
+   - Open GitHub **Settings &gt; Developer settings &gt; Personal access tokens &gt; Tokens (classic)**, then choose **Generate new token &gt; Generate new token (classic)**. See [GitHub's token creation guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
+   - Enter a descriptive name and expiration, select only **`read:packages`**, and click **Generate token**.
+   - Copy the generated PAT privately. Your account must have access to `@nvidia/openshell-sdk`; authorize the token for SSO if the package's organization requires it.
+4. Configure `NVIDIA_NPM_TOKEN` in your `~/.bashrc` (Bash) or `~/.zshrc` (Zsh), replacing the placeholder with your PAT:
    ```sh
-   bun install --frozen-lockfile
-   export PI_CODING_AGENT_DIR="$(realpath config/pi)"
+     # For Bash
+     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.bashrc && source ~/.bashrc
+     # For Zsh
+     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.zshrc && source ~/.zshrc
    ```
 
-   `PI_CODING_AGENT_DIR` must name the canonical directory containing `settings.json`, not the file or an unresolved symlink. The repository settings discover `../../apps`. For an independent Pi configuration, copy this **entire package**, including `bunfig.toml` and assets, supply the same install-only credential, run `bun install --production` from the copied directory, and load only one model-Bash override. The package-local mapping works without this repository's root configuration.
-4. Follow [Configure trusted inputs](#configure-trusted-inputs), including the first-inspection/edit/reload sequence for linked worktrees, **before normal model use**. To start Pi from the repository root:
+## About OpenShell
 
-   ```sh
-   bun node_modules/@earendil-works/pi-coding-agent/dist/bun/cli.js
-   ```
+[OpenShell](https://github.com/NVIDIA/OpenShell) is NVIDIA's runtime for running AI-agent commands in isolated environments called sandboxes. This extension uses it with Docker and a policy file to control which files and network destinations model-requested Bash can access.
 
-The SDK 0.0.116 default image is `ghcr.io/nvidia/openshell-community/sandboxes/base:latest`; its mutable tag is accepted, not an immutable toolchain. Guest Node/Bun/Python are not startup requirements, and tool versions, host UID/GID matching, and project writes are not guaranteed. Docker selects the platform normally. A trusted `image` override's compatibility is the operator's responsibility; the extension does not build images or manage their cache.
+OpenShell automatically prepares its supervisor, the program that runs commands and enforces access rules inside the sandbox. You do not need to configure it separately. If removing a temporary Docker container used during preparation fails, startup may continue with a warning. Normal cleanup of the extension's own gateway and sandbox is unchanged.
 
-OpenShell resolves and prepares its supervisor automatically; the extension sets neither `supervisor_bin` nor `supervisor_image`. Its native extractor uses best-effort temporary-container cleanup: a removal failure can warn without blocking startup. This does not change the extension's private gateway/sandbox ownership or normal session cleanup.
-
-## Configure trusted inputs
+## Configuration
 
 Add `openShellSandbox` to global `settings.json` under `PI_CODING_AGENT_DIR` or a **trusted** project's `.pi/settings.json`. For example, a complete project settings file selecting a manually maintained local policy and no inherited providers is:
 
@@ -89,36 +115,36 @@ Normal cleanup retains Docker's image cache and completed project writes; contai
 
 ## Package structure
 
-`src/index.ts` is Pi's factory. Implementation and colocated tests live under `src/`; `assets/` contains only the native policy.
-
-| Owner | Responsibility |
-| --- | --- |
-| `pi/session`, `pi/commands`, `pi/bash` | Activation/current-pointer ownership, trust, UI, cached `/sandbox`, and model-Bash adaptation. |
-| `runtime/generation`, `runtime/execution`, `runtime/work` | Provisioning/cleanup, command streams, raw-work settlement and bounded waits; `runtime` owns whole-runtime disposal. |
-| `configuration/native`, `configuration/validation` | Trusted settings selection, native policy/profile schema mapping, and input validation. |
-| `gateway`, `providers`, `workspace` | Private native gateway/network, profile import and native provider provisioning, and guarded project/Git mounts. |
-| `image` | Default sandbox image reference, not an image builder. |
-| `host`, `diagnostics` | Host capabilities, retained direct-child/resource handles, and sanitized failures. |
+```text
+openshell-sandbox/
+|-- adr/                       # Architecture decisions
+|-- assets/
+|   `-- policy.yaml            # Native policy
+`-- src/                       # Implementation and colocated tests
+    |-- index.ts               # Pi extension factory
+    |-- configuration/         # Trusted settings and policy/profile mapping
+    |   |-- native/
+    |   `-- validation/
+    |-- diagnostics/           # Sanitized failures
+    |-- gateway/               # Private gateway and network
+    |-- host/                  # Host capabilities and owned resource handles
+    |-- image/                 # Default image reference, not an image builder
+    |-- pi/
+    |   |-- bash.ts            # Model-Bash adapter
+    |   |-- commands/          # Cached /sandbox status
+    |   `-- session/           # Activation lifecycle, trust, and UI
+    |-- providers/             # Credential profiles and native providers
+    |-- runtime/               # Whole-runtime disposal
+    |   |-- execution/         # Command streams
+    |   |-- generation/        # Provisioning and cleanup
+    |   `-- work/              # Raw-work settlement and bounded waits
+    `-- workspace/             # Guarded project and Git mounts
+```
 
 Use explicit named `index.ts` exports across modules, including imports prefixed with `openshell-sandbox/`; import siblings directly within an owner. Nested modules are visible through their enclosing interface. Keep test helpers in the owning module's `test/*.helper.ts`; cross-module fixture imports use its fixture-only `test/index.helper.ts`. Production cannot import helpers or suites.
 
-## Automatic tests
-
-From the repository root:
-
-```sh
-bun run --filter openshell-sandbox test:unit
-bun run --filter openshell-sandbox test
-```
-
-The unit command excludes `*.integration.test.ts`. The full package command writes `coverage/lcov.info` and enforces the 95% per-file coverage floor. Codecov separately requires 95% changed-line coverage in CI. Behavior-bearing TypeScript has colocated tests; barrels, type declarations, fixtures and thin wiring do not get artificial suites. Docker/native effects are controlled in automatic tests; filesystem/process integrations use owned fixtures. These checks do not establish native default-image or macOS acceptance.
-
-Name tests after their implementation owner: `foo.test.ts` for direct behavior and `foo.integration.test.ts` for cross-module or real-I/O behavior. Keep suites beside implementation, not inside helper-only `test/` directories, and keep themed cases in those owner suites. Helpers are excluded from coverage; production files are not.
-
-Registration/session unit tests mock activation preparation and disposal. Test host reads and native preparation at the activation/runtime boundaries rather than passing effect overrides through session ownership.
-
-Deadlines and readiness use the monotonic `performance.now()` clock directly. Deterministic tests scope clock spies and restore them after disposing asynchronous work; timer effects remain controlled by their owning module.
-
 ## Caveats
+
+**macOS behavior remains unverified.**
 
 **Empty HTTP response bodies (OpenShell 0.0.116).** Historical native verification found that the [HTTP relay](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-supervisor-network/src/l7/rest.rs#L3135-L3259) can drop non-SSE HTTP/1.0 or HTTP/1.1 bodies when the server uses implicit EOF framing without `Content-Length`, `Transfer-Encoding`, or an explicit `Connection: close` response header. Have the server send a correct length or explicit response-close header. No extension proxy workaround or native patch is supplied.

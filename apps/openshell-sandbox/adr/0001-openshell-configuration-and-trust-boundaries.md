@@ -6,17 +6,17 @@ status: accepted
 
 Global and trusted-project settings select one complete native permission policy and declare credential profiles/providers. Project trust includes authority over named host credential sources, destination bindings, and image. We retain OpenShell's trusted gateway and in-container supervisor/proxy instead of introducing another credential broker. This isolates **model Bash**, not user Bash (`!`/`!!`), Pi, file tools, or the whole agent.
 
-The [package README](../README.md#configure-trusted-inputs) owns setup and migration instructions; [ADR-0002](0002-openshell-runtime-and-lifecycle.md) owns resource lifetimes.
+The [package README](../README.md#configuration) owns setup and migration instructions; [ADR-0002](0002-openshell-runtime-and-lifecycle.md) owns resource lifetimes.
 
 ## Configuration and policy authority
 
-Global and trusted-project fields select `policyPath`, `profilePaths`, `providers`, and optional `image`; arrays and the selected policy replace rather than merge. This keeps the operator's selected permission boundary explicit. [Settings precedence and examples](../README.md#configure-trusted-inputs) describe the concrete configuration.
+Global and trusted-project fields select `policyPath`, `profilePaths`, `providers`, and optional `image`; arrays and the selected policy replace rather than merge. This keeps the operator's selected permission boundary explicit. [Settings precedence and examples](../README.md#configuration) describe the concrete configuration.
 
 Native YAML maps to the pinned SDK 0.0.116 schema with explicit types/defaults. Unknown or unrepresentable fields fail rather than disappearing; native validation and enforcement remain authoritative. This is not another permission language.
 
 ### Explicit filesystem and network grants
 
-The [baseline](../assets/policy.yaml) grants tool paths and selected public GitHub/npm/PyPI operations, not the current project. Native filesystem grants are separate from bind mounts and execution working directories. Exact canonical project and external Git metadata paths avoid granting unrelated worktrees; follow the README's [inspect/edit/reload sequence](../README.md#configure-trusted-inputs).
+The [baseline](../assets/policy.yaml) grants tool paths and selected public GitHub/npm/PyPI operations, not the current project. Native filesystem grants are separate from bind mounts and execution working directories. Exact canonical project and external Git metadata paths avoid granting unrelated worktrees; follow the README's [inspect/edit/reload sequence](../README.md#configuration).
 
 Do not mount the host home, SSH credentials, Docker socket, or arbitrary external symlink targets. The supplied policy uses `landlock.compatibility: hard_requirement`; unavailable required isolation is an error, not an automatic downgrade. An explicitly selected custom native policy remains the user's security choice and is not silently rewritten.
 
@@ -73,7 +73,7 @@ binaries:
 
 This is illustrative configuration, not fresh native default-image acceptance. The host variable `WORK_NPM_TOKEN` supplies the value; `NPM_TOKEN` must match the profile's environment key. Keep any other needed providers/profiles when replacing arrays. The `/usr/bin/node` profile entry scopes native enforcement; it neither installs Node nor makes it a startup requirement.
 
-Providers supply credential environment placeholders, not client configuration. Workloads must configure Git/npm/pip manually while preserving TLS/proxy settings. The README owns the rejected [`providers[].client` migration and path-specific Git trust caveats](../README.md#configure-trusted-inputs).
+Providers supply credential environment placeholders, not client configuration. Workloads must configure Git/npm/pip manually while preserving TLS/proxy settings. The README owns the rejected [`providers[].client` migration and path-specific Git trust caveats](../README.md#configuration).
 
 ## Trade-off and sources
 
