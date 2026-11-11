@@ -72,7 +72,6 @@ function makePanel(
   readonly catalog: ExtensionCatalog;
   readonly finished: Promise<PanelResult>;
   readonly panel: ExtensionManagerPanel;
-  readonly results: PanelResult[];
   readonly writes: string[];
 } {
   const rows = options.rows ?? defaultPanelRows();
@@ -85,13 +84,11 @@ function makePanel(
       })),
   );
   const terminal = fakeTui();
-  const results: PanelResult[] = [];
   const { promise: finished, resolve: resolveFinished } =
     Promise.withResolvers<PanelResult>();
   const panel = new ExtensionManagerPanel({
     catalog,
     done: (result) => {
-      results.push(result);
       resolveFinished(result);
     },
     selfPath: options.selfPath ?? "/missing/index.ts",
@@ -99,7 +96,7 @@ function makePanel(
     tui: terminal.tui,
   });
   openPanels.push(panel);
-  return { catalog, finished, panel, results, writes: terminal.writes };
+  return { catalog, finished, panel, writes: terminal.writes };
 }
 
 describe("ExtensionManagerPanel.handleInput", () => {
@@ -286,144 +283,4 @@ describe("ExtensionManagerPanel.handleInput", () => {
       catalog.view().rows.find((row) => row.id === "global-self")?.configured,
     ).toBe(false);
   });
-
-  it("should emit the exact partial commit result consumed by command notifications", async () => {
-    const commitResult: CommitResult = {
-      scopes: [
-        { scope: "global", status: "committed" },
-        { scope: "project", status: "failed", message: "disk full" },
-      ],
-      committedScopes: ["global"],
-    };
-    const { finished, panel, results, writes } = makePanel({
-      commit: async () => commitResult,
-    });
-    panel.render(NARROW_PANEL_WIDTH);
-    panel.handleInput(SPACE);
-
-    panel.handleInput(CTRL_S);
-
-    expect(await finished).toEqual({
-      type: "commit",
-      result: commitResult,
-      selfDisableCommitted: false,
-    });
-    expect(results).toHaveLength(1);
-    expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(1);
-  });
-
-  interface NoCommitOutcome {
-    readonly label: string;
-    readonly commit: () => Promise<CommitResult>;
-    readonly expectedMessage: string;
-  }
-
-  interface NoCommitEntryPoint {
-    readonly label: string;
-    readonly trigger: (panel: ExtensionManagerPanel) => void;
-  }
-
-  type NoCommitCase = [
-    entryPoint: string,
-    outcome: string,
-    scenario: {
-      readonly trigger: NoCommitEntryPoint["trigger"];
-      readonly commit: NoCommitOutcome["commit"];
-      readonly expectedMessage: string;
-    },
-  ];
-
-  const noCommitOutcomes: NoCommitOutcome[] = [
-    {
-      label: "all-failed",
-      commit: async () => ({
-        scopes: [{ scope: "global", status: "failed", message: "denied" }],
-        committedScopes: [],
-      }),
-      expectedMessage: "global: denied",
-    },
-    {
-      label: "conflict",
-      commit: async () => ({
-        scopes: [{ scope: "global", status: "conflict", message: "changed" }],
-        committedScopes: [],
-      }),
-      expectedMessage: "global: changed",
-    },
-    {
-      label: "unchanged",
-      commit: async () => ({
-        scopes: [{ scope: "global", status: "unchanged" }],
-        committedScopes: [],
-      }),
-      expectedMessage: "global: unchanged",
-    },
-    {
-      label: "thrown",
-      commit: () => Promise.reject(new Error("commit exploded")),
-      expectedMessage: "commit exploded",
-    },
-  ];
-
-  const noCommitEntryPoints: NoCommitEntryPoint[] = [
-    {
-      label: "Ctrl-S",
-      trigger: (panel) => {
-        panel.handleInput(CTRL_S);
-      },
-    },
-    {
-      label: "close-dialog Apply",
-      trigger: (panel) => {
-        panel.handleInput(ESCAPE);
-        panel.handleInput(LEFT);
-        panel.handleInput(LEFT);
-        panel.handleInput(ENTER);
-      },
-    },
-  ];
-
-  const noCommitCases: NoCommitCase[] = noCommitEntryPoints.flatMap(
-    (entryPoint) =>
-      noCommitOutcomes.map(
-        (outcome): NoCommitCase => [
-          entryPoint.label,
-          outcome.label,
-          {
-            trigger: entryPoint.trigger,
-            commit: outcome.commit,
-            expectedMessage: outcome.expectedMessage,
-          },
-        ],
-      ),
-  );
-
-  it.each(noCommitCases)(
-    "should keep the panel open and staged when using %s with %s",
-    async (_entryPoint: string, _outcome: string, {
-      trigger,
-      commit,
-      expectedMessage,
-    }: NoCommitCase[2]) => {
-      const { catalog, panel, results, writes } = makePanel({ commit });
-      panel.render(NARROW_PANEL_WIDTH);
-      panel.handleInput(SPACE);
-      trigger(panel);
-      await Bun.sleep(0);
-
-      expect(results).toEqual([]);
-      expect(catalog.hasChanges()).toBe(true);
-      expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
-        expectedMessage,
-      );
-      expect(writes.some((write) => write.includes("?1000l"))).toBe(false);
-      panel.handleInput(SPACE);
-      expect(catalog.hasChanges()).toBe(false);
-
-      panel.dispose();
-      expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(
-        1,
-      );
-    },
-  );
 });

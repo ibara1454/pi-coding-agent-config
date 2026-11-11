@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import type {
@@ -369,6 +369,138 @@ describe("ExtensionManagerPanel.dispose", () => {
 });
 
 describe("ExtensionManagerPanel.handleInput", () => {
+  it("should close with the saved scopes when a commit is partial", async () => {
+    const commitResult: CommitResult = {
+      scopes: [
+        { scope: "global", status: "committed" },
+        { scope: "project", status: "failed", message: "disk full" },
+      ],
+      committedScopes: ["global"],
+    };
+    const { catalog, finished, panel, results, writes } = makePanel();
+    const effects = [
+      spyOn(catalog, "hasChanges").mockReturnValue(true),
+      spyOn(catalog, "selfResolved").mockReturnValue(false),
+      spyOn(catalog, "commit").mockResolvedValue(commitResult),
+    ];
+    try {
+      panel.handleInput("\u0013");
+
+      expect(await finished).toEqual({
+        type: "commit",
+        result: commitResult,
+        selfDisableCommitted: false,
+      });
+      expect(results).toHaveLength(1);
+      expect(writes.filter((write) => write.includes("?1000l"))).toHaveLength(
+        1,
+      );
+    } finally {
+      for (const effect of effects) {
+        effect.mockRestore();
+      }
+    }
+  });
+
+  interface FailedCommitCase {
+    readonly label: string;
+    readonly keys: readonly string[];
+    readonly commit: () => Promise<CommitResult>;
+    readonly expectedMessage: string;
+  }
+
+  const failedCommitCases: readonly FailedCommitCase[] = [
+    {
+      label: "Ctrl-S reports a failed scope",
+      keys: ["\u0013"],
+      commit: async () => ({
+        scopes: [{ scope: "global", status: "failed", message: "denied" }],
+        committedScopes: [],
+      }),
+      expectedMessage: "global: denied",
+    },
+    {
+      label: "Ctrl-S reports a conflict",
+      keys: ["\u0013"],
+      commit: async () => ({
+        scopes: [{ scope: "global", status: "conflict", message: "changed" }],
+        committedScopes: [],
+      }),
+      expectedMessage: "global: changed",
+    },
+    {
+      label: "Ctrl-S reports unchanged settings",
+      keys: ["\u0013"],
+      commit: async () => ({
+        scopes: [{ scope: "global", status: "unchanged" }],
+        committedScopes: [],
+      }),
+      expectedMessage: "global: unchanged",
+    },
+    {
+      label: "Ctrl-S rejects the commit",
+      keys: ["\u0013"],
+      commit: () => Promise.reject(new Error("commit exploded")),
+      expectedMessage: "commit exploded",
+    },
+    {
+      label: "the close dialog reports a conflict",
+      keys: ["\u001b", "\u001b[D", "\u001b[D", "\r"],
+      commit: async () => ({
+        scopes: [{ scope: "global", status: "conflict", message: "changed" }],
+        committedScopes: [],
+      }),
+      expectedMessage: "global: changed",
+    },
+  ];
+
+  it.each(failedCommitCases.map((entry) => [entry.label, entry] as const))(
+    "should keep the panel editable when %s",
+    async (_label, { keys, commit, expectedMessage }) => {
+      const { catalog, finished, panel, results, writes } = makePanel();
+      const hasChanges = spyOn(catalog, "hasChanges").mockReturnValue(true);
+      const selfResolved = spyOn(catalog, "selfResolved").mockReturnValue(
+        false,
+      );
+      const save = spyOn(catalog, "commit").mockImplementation(commit);
+      try {
+        for (const key of keys) {
+          panel.handleInput(key);
+        }
+        await Promise.resolve();
+
+        expect(results).toEqual([]);
+        expect(panel.render(NARROW_PANEL_WIDTH).join("\n")).toContain(
+          expectedMessage,
+        );
+        expect(writes.some((write) => write.includes("?1000l"))).toBe(false);
+        for (const character of "rev") {
+          panel.handleInput(character);
+        }
+        const filtered = panel.render(NARROW_PANEL_WIDTH).join("\n");
+        expect(filtered).toContain("project-review");
+        expect(filtered).not.toContain("alpha");
+
+        const committed: CommitResult = {
+          scopes: [{ scope: "global", status: "committed" }],
+          committedScopes: ["global"],
+        };
+        save.mockResolvedValue(committed);
+        panel.handleInput("\u0013");
+
+        expect(await finished).toEqual({
+          type: "commit",
+          result: committed,
+          selfDisableCommitted: false,
+        });
+      } finally {
+        save.mockRestore();
+        selfResolved.mockRestore();
+        hasChanges.mockRestore();
+      }
+    },
+  );
+
   it.each([
     ["a malformed mouse report", "\u001b[<0;3;9X"],
     [

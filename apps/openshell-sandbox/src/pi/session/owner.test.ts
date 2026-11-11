@@ -48,6 +48,16 @@ describe("AdapterSession.shutdown", () => {
     expect(f.session.activation).toBeUndefined();
     expect(f.setStatus).not.toHaveBeenCalled();
   });
+
+  it("should clear the current pointer when footer publication throws after teardown", async () => {
+    const f = closingSession(() => Promise.resolve());
+    f.setStatus.mockImplementation(() => {
+      throw new Error("closed footer");
+    });
+    await f.session.shutdown();
+    expect(f.session.activation).toBeUndefined();
+    expect(f.activation.dispose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("AdapterSession.start", () => {

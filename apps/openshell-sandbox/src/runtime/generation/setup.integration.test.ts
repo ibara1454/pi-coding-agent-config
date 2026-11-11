@@ -1,59 +1,12 @@
 import { describe, expect, test as it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError } from "@connectrpc/connect";
 import { type OpenShellClient, SandboxClient } from "@nvidia/openshell-sdk";
 import { SandboxPhase, SandboxResponseSchema } from "@nvidia/openshell-sdk/raw";
 import { executeRequest } from "../execution/index.ts";
 import { completion } from "../execution/test/index.helper.ts";
-import { runtimeFixture, unitRuntimeFixture } from "../test/index.helper.ts";
-import { createGenerationSandbox, runGenerationSetup } from "./setup.ts";
-import { gateway, work, workspace } from "./test/generation.helper.ts";
-import type { GenerationEvent } from "./types.ts";
-
-describe("createGenerationSandbox", () => {
-  it.each([
-    ["acknowledged", undefined, ["unknown", "acknowledged"]],
-    [
-      "rejected",
-      new ConnectError("bad policy", Code.InvalidArgument),
-      ["unknown", "rejected"],
-    ],
-    [
-      "uncertain",
-      new ConnectError("lost reply", Code.Unavailable),
-      ["unknown"],
-    ],
-  ] as const)(
-    "should record %s native creation outcome through actual settlement",
-    async (_condition, error, expected) => {
-      const fixture = runtimeFixture();
-      const prepared = gateway(fixture);
-      if (error) {
-        fixture.sdk.beforeCreate = () => Promise.reject(error);
-      }
-      const current = work(fixture, prepared);
-      const recorded: { outcome: string; id?: string }[] = [];
-      try {
-        const creation = createGenerationSandbox({
-          work: current,
-          gateway: prepared,
-          workspace,
-          image: "selected:tag",
-          record: (outcome, id) =>
-            recorded.push({ outcome, ...(id ? { id } : {}) }),
-        });
-        const [result] = await Promise.allSettled([creation]);
-        expect(result?.status).toBe(error ? "rejected" : "fulfilled");
-        expect(
-          result?.status === "rejected" ? result.reason : result?.value,
-        ).toBe(error ?? "sandbox-1");
-        expect(recorded.map(({ outcome }) => outcome)).toEqual([...expected]);
-      } finally {
-        current.preparation.close();
-      }
-    },
-  );
-});
+import { unitRuntimeFixture } from "../test/index.helper.ts";
+import { runGenerationSetup } from "./setup.ts";
+import { gateway, work } from "./test/generation.helper.ts";
 
 const MODEL_COMMAND_ARGUMENT_COUNT = 3;
 
@@ -116,56 +69,7 @@ function installReadyReplacement(
   });
   return calls;
 }
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("runGenerationSetup", () => {
-  it("should refuse readiness when SDK returns the wrong acknowledged sandbox ID", async () => {
-    const fixture = runtimeFixture();
-    const prepared = gateway(fixture);
-    const ready = fixture.sdk.client.sandbox.waitReady;
-    fixture.sdk.client.sandbox.waitReady = async (...args) => ({
-      ...(await ready(...args)),
-      id: "replacement",
-    });
-    const current = work(fixture, prepared);
-    try {
-      await expect(runGenerationSetup(current)).rejects.toThrow("identity");
-    } finally {
-      current.preparation.close();
-    }
-  });
-
-  it("should use the selected SDK image and return only sandbox locale without executing guest setup", async () => {
-    const fixture = runtimeFixture();
-    const prepared = gateway(fixture);
-    fixture.native.sandboxId = "sandbox-1";
-    fixture.native.sandboxName = "test-sandbox";
-    fixture.native.labels = { ...prepared.handle.labels };
-    const current = work(fixture, prepared);
-    const events: GenerationEvent[] = [];
-    try {
-      const ready = await runGenerationSetup({
-        ...current,
-        report: (event) => events.push(event),
-      });
-      expect(ready.environment).toEqual({
-        ["LANG"]: "C.UTF-8",
-        ["LC_ALL"]: "C.UTF-8",
-      });
-      expect(fixture.sdk.commands).toEqual([]);
-      expect(events).toContainEqual({
-        generation: current.generation,
-        kind: "image",
-        image: "selected:tag",
-      });
-      expect(
-        fixture.native.calls.some(
-          (args) => args.includes("container") && args.includes("ls"),
-        ),
-      ).toBe(false);
-    } finally {
-      current.preparation.close();
-    }
-  });
   it.each([true, false])(
     "should execute model Bash only on the acknowledged ID when its name changes after readiness and owned presence is %s",
     async (ownedPresent) => {

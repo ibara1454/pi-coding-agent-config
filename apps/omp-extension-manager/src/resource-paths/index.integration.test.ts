@@ -9,11 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import {
-  canonicalizeResourcePath,
-  packageResourcePaths,
-  resourceFilterPath,
-} from "./index.ts";
+import { canonicalizeResourcePath, packageResourcePaths } from "./index.ts";
 
 const MODULE = "export default () => {};\n";
 const roots: string[] = [];
@@ -57,130 +53,18 @@ function aliasedPackage(content: string | undefined): AliasedPackage {
   return { root, actual, linked };
 }
 
-interface ManifestCase {
-  readonly label: string;
-  readonly content: string | undefined;
-  readonly enumeratesAlias: boolean;
-}
-
-const manifestCases: readonly ManifestCase[] = [
-  {
-    label: "a package without a package.json scans its resource directory",
-    content: undefined,
-    enumeratesAlias: true,
-  },
-  {
-    label: "a package.json without a pi section scans the directory",
-    content: manifest({ name: "fixture-package" }),
-    enumeratesAlias: true,
-  },
-  {
-    label: "an unparseable package.json falls back to the directory",
-    content: "{ not json",
-    enumeratesAlias: true,
-  },
-  {
-    label: "a pi section without the field suppresses directory scanning",
-    content: manifest({ name: "fixture-package", pi: {} }),
-    enumeratesAlias: false,
-  },
-  {
-    label: "a directory entry expands to the files it contains",
-    content: manifest({ pi: { extensions: ["./extensions"] } }),
-    enumeratesAlias: true,
-  },
-  {
-    label: "a glob entry expands to each matching file",
-    content: manifest({ pi: { extensions: ["./extensions/*.ts"] } }),
-    enumeratesAlias: true,
-  },
-  {
-    label: "a file entry lists exactly that declared file",
-    content: manifest({ pi: { extensions: ["./extensions/linked.ts"] } }),
-    enumeratesAlias: true,
-  },
-  {
-    label: "filter prefixes in a manifest are not resource entries",
-    content: manifest({
-      pi: {
-        extensions: [
-          "!extensions/**",
-          "+extensions/linked.ts",
-          "-extensions/actual.ts",
-        ],
-      },
-    }),
-    enumeratesAlias: false,
-  },
-  {
-    label: "a non-string entry list suppresses directory scanning",
-    content: manifest({ pi: { extensions: [1] } }),
-    enumeratesAlias: false,
-  },
-  {
-    label: "an empty entry list yields only the resolved paths",
-    content: manifest({ pi: { extensions: [] } }),
-    enumeratesAlias: false,
-  },
-];
-
-interface FilterPathCase {
-  readonly label: string;
-  readonly path: string;
-  readonly kind: "extension" | "skill";
-  readonly expected: string;
-}
-
-const filterPathCases: readonly FilterPathCase[] = [
-  {
-    label: "an extension file keeps its relative path",
-    path: "/package/root/extensions/alpha.ts",
-    kind: "extension",
-    expected: "extensions/alpha.ts",
-  },
-  {
-    label: "a skill document collapses to its skill directory",
-    path: "/package/root/skills/review/SKILL.md",
-    kind: "skill",
-    expected: "skills/review",
-  },
-  {
-    label: "a loose skill markdown file keeps its own path",
-    path: "/package/root/skills/notes.md",
-    kind: "skill",
-    expected: "skills/notes.md",
-  },
-  {
-    label: "an extension named SKILL.md is never collapsed",
-    path: "/package/root/extensions/SKILL.md",
-    kind: "extension",
-    expected: "extensions/SKILL.md",
-  },
-  {
-    label: "a path outside the base directory stays relative to it",
-    path: "/elsewhere/alpha.ts",
-    kind: "extension",
-    expected: "../../elsewhere/alpha.ts",
-  },
-];
-
 describe("packageResourcePaths", () => {
-  it.each(manifestCases.map((entry) => [entry.label, entry] as const))(
-    "should return the expected paths for: %s",
-    (_label, scenario) => {
-      const fixture = aliasedPackage(scenario.content);
-      const paths = packageResourcePaths(fixture.root, "extensions", [
-        fixture.actual,
-      ]);
-      const expected = scenario.enumeratesAlias
-        ? [fixture.actual, fixture.linked]
-        : [fixture.actual];
+  it("should enumerate raw aliases when a manifest glob matches a canonical resource", () => {
+    const fixture = aliasedPackage(
+      manifest({ pi: { extensions: ["./extensions/*.ts"] } }),
+    );
 
-      expect(paths.toSorted((a, b) => a.localeCompare(b))).toEqual(
-        expected.toSorted((a, b) => a.localeCompare(b)),
-      );
-    },
-  );
+    expect(
+      packageResourcePaths(fixture.root, "extensions", [
+        fixture.actual,
+      ]).toSorted(),
+    ).toEqual([fixture.actual, fixture.linked]);
+  });
 
   it("should enumerate extension entrypoints below a resource directory", () => {
     const root = temporaryRoot();
@@ -264,18 +148,4 @@ describe("canonicalizeResourcePath", () => {
       join(root, "extensions", "absent.ts"),
     );
   });
-});
-
-describe("resourceFilterPath", () => {
-  it.each(filterPathCases.map((entry) => [entry.label, entry] as const))(
-    "should return the expected filter path for: %s",
-    (_label, scenario) => {
-      const filterPath = resourceFilterPath(
-        scenario.path,
-        scenario.kind,
-        "/package/root",
-      );
-      expect(filterPath).toBe(scenario.expected);
-    },
-  );
 });

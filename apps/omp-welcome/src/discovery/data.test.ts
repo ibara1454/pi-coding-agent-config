@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { PathLike, PathOrFileDescriptor } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Bun spies must intercept the live named ESM filesystem imports used by discovery.
 import * as fs from "node:fs";
@@ -70,6 +70,10 @@ const USER_METADATA: PathMetadata = {
   scope: "user",
   origin: "top-level",
 };
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("getAgentDir", () => {
   it.each([
@@ -173,6 +177,28 @@ describe("effectiveQuietStartup", () => {
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith(join(AGENT_DIR, "settings.json"), "utf8");
   });
+
+  it.each([
+    ["the project is untrusted", false, ["pi"], true],
+    ["the trusted project disables quiet startup", true, ["pi"], false],
+    [
+      "verbose startup overrides user settings",
+      false,
+      ["pi", "--verbose"],
+      false,
+    ],
+  ] as const)(
+    "should honor quiet startup when %s",
+    (_condition, trusted, argv, expected) => {
+      mockSettings({
+        [join(AGENT_DIR, "settings.json")]: '{"quietStartup":true}',
+        [join(PROJECT_DIR, ".pi", "settings.json")]: '{"quietStartup":false}',
+      });
+      expect(
+        effectiveQuietStartup(PROJECT_DIR, AGENT_DIR, trusted, [...argv]),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("collectWelcomeExtensions", () => {
@@ -228,7 +254,6 @@ describe("collectWelcomeExtensions", () => {
       { name: "a", scope: "user" },
     ]);
   });
-
   it.each([
     ["git:github:team/tool@main", "git:team/tool:feature"],
     ["git:gitlab:team/tool.git", "git:team/tool:feature"],

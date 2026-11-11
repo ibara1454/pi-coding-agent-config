@@ -5,10 +5,18 @@ import {
   type ProviderProfileResponse,
   ProviderProfileResponseSchema,
 } from "@nvidia/openshell-sdk/raw";
+// biome-ignore lint/performance/noNamespaceImport: Scoped spies must replace the live provider acquisition binding.
+import * as nativeProvider from "./native-provider.ts";
 import { provisionProviders } from "./provisioning.ts";
-import { environment, gateway, profile } from "./test/provisioning.helper.ts";
+import {
+  environment,
+  gateway,
+  OTHER_PROVIDER,
+  profile,
+} from "./test/provisioning.helper.ts";
 
 const NATIVE_PROVIDER_NAME = /^po-[a-zA-Z0-9-]+-0$/;
+const MAX_NATIVE_PROVIDER_NAME_LENGTH = 253;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("provisionProviders", () => {
@@ -346,5 +354,92 @@ describe("provisionProviders", () => {
       ),
     ).rejects.toThrow("environment keys must be unique");
     expect(calls).toEqual([]);
+  });
+  it("should use distinct native provider names across activations sharing a gateway", async () => {
+    const { handle, capture } = gateway();
+    const creating = spyOn(
+      nativeProvider,
+      "createNativeProvider",
+    ).mockImplementation(async () => undefined);
+    try {
+      const first = await provisionProviders(
+        handle,
+        environment(),
+        () => "secret",
+        capture,
+      );
+      const second = await provisionProviders(
+        handle,
+        environment(),
+        () => "secret",
+        capture,
+      );
+      expect(Object.keys(first)).toEqual(["registry"]);
+      const firstName = first["registry"];
+      if (!firstName) {
+        throw new Error("Missing first native provider mapping.");
+      }
+      expect(firstName.length).toBeLessThanOrEqual(
+        MAX_NATIVE_PROVIDER_NAME_LENGTH,
+      );
+      expect(Object.keys(second)).toEqual(["registry"]);
+      expect(second["registry"]).not.toBe(firstName);
+      expect(firstName).not.toBe("registry");
+    } finally {
+      creating.mockRestore();
+    }
+  });
+  it("should await every provider creation before reporting a sibling failure", async () => {
+    const pending = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const { handle, capture } = gateway({
+      lookup: (id) =>
+        Promise.resolve(
+          create(ProviderProfileResponseSchema, {
+            profile: profile(id, id === "other" ? "OTHER" : "TOKEN"),
+          }),
+        ),
+    });
+    const creating = spyOn(
+      nativeProvider,
+      "createNativeProvider",
+    ).mockImplementation(async (_gateway, { provider }) => {
+      if (provider.name === "registry") {
+        throw new Error("RAW-NATIVE-SECRET");
+      }
+      secondStarted.resolve();
+      await pending.promise;
+    });
+    const base = environment();
+    const setup = provisionProviders(
+      handle,
+      {
+        ...base,
+        profiles: [],
+        providers: [...base.providers, OTHER_PROVIDER],
+      },
+      () => "PRIVATE_VALUE",
+      capture,
+    );
+    let finished = false;
+    const observed = setup.finally(() => {
+      finished = true;
+    });
+    try {
+      await secondStarted.promise;
+      const turn = Promise.withResolvers<void>();
+      setImmediate(turn.resolve);
+      await turn.promise;
+      expect(finished).toBe(false);
+      pending.resolve();
+      await expect(observed).rejects.toThrow(
+        "Explicit provider creation failed",
+      );
+      await expect(observed).rejects.not.toThrow("RAW-NATIVE-SECRET");
+    } finally {
+      pending.resolve();
+      await observed.catch(() => undefined);
+      creating.mockRestore();
+    }
   });
 });

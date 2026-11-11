@@ -6,17 +6,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
-import {
-  collectWelcomeExtensions,
-  effectiveQuietStartup,
-  type WelcomeExtension,
-} from "./data.ts";
+import { collectWelcomeExtensions, type WelcomeExtension } from "./data.ts";
 
 const temporaryRoots: string[] = [];
 const originalHome = process.env["HOME"];
@@ -28,7 +25,7 @@ const originalOffline = process.env["PI_OFFLINE"];
  * @example temporaryDirectory(); // Native discovery cannot read the real ~/.agents/skills.
  */
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "pi-welcome-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "pi-welcome-")));
   temporaryRoots.push(directory);
   process.env["HOME"] = join(directory, "home");
   return directory;
@@ -275,27 +272,5 @@ describe("collectWelcomeExtensions", () => {
     expect(readFileSync(join(projectDir, "settings.json"), "utf8")).toBe(
       originalProject,
     );
-  });
-});
-
-describe("effectiveQuietStartup", () => {
-  it("should honor effective quiet startup and its verbose command-line override", () => {
-    const root = temporaryDirectory();
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    write(
-      join(agentDir, "settings.json"),
-      JSON.stringify({ quietStartup: true }),
-    );
-    write(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ quietStartup: false }),
-    );
-
-    expect(effectiveQuietStartup(cwd, agentDir, false, ["pi"])).toBe(true);
-    expect(effectiveQuietStartup(cwd, agentDir, true, ["pi"])).toBe(false);
-    expect(
-      effectiveQuietStartup(cwd, agentDir, false, ["pi", "--verbose"]),
-    ).toBe(false);
   });
 });

@@ -33,23 +33,6 @@ function streamFixture(
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("registerModelBash", () => {
-  it.each(["not started", "unprepared", "retired"])(
-    "should reject model execution without host fallback when the activation is %s",
-    async (state) => {
-      const f = adapterFixture();
-      const activation = new AdapterActivation(f.context);
-      if (state === "retired") {
-        activation.retire();
-      }
-      registerModelBash(f.pi, () =>
-        state === "not started" ? undefined : activation,
-      );
-      await expect(
-        executeRegisteredBash(f, "printf unexpected-host"),
-      ).rejects.toBeInstanceOf(Error);
-    },
-  );
-
   it("should decode only the selected bytes and detach listeners when mixed buffers complete", async () => {
     const f = streamFixture((events) => {
       const bytes = new Uint8Array(

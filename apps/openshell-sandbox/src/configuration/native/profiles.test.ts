@@ -16,6 +16,18 @@ const INVALID_PROFILES = [
     "id: work\ndisplay_name: Work\ncategory: unrestricted",
   ],
   [
+    "refresh metadata is outside a credential",
+    "id: work\ndisplay_name: Work\nrefresh: {strategy: static}",
+  ],
+  [
+    "a profile include is unsupported",
+    "id: work\ndisplay_name: Work\ninclude: ./untrusted.yaml",
+  ],
+  [
+    "a profile endpoint contains a policy-only credential binding",
+    "id: work\ndisplay_name: Work\nendpoints: [{host: example.com, credential_binding: {provider: work}}]",
+  ],
+  [
     "a resource version is negative",
     "id: work\ndisplay_name: Work\nresource_version: -1",
   ],

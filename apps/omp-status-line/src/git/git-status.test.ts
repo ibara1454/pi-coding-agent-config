@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import process from "node:process";
 import { createGitStatus } from "./git-status.ts";
 
@@ -31,7 +31,11 @@ interface CommandCall {
 
 const owners: ReturnType<typeof createGitStatus>[] = [];
 afterEach(async () => {
-  await Promise.all(owners.splice(0).map((owner) => owner.stop()));
+  try {
+    await Promise.all(owners.splice(0).map((owner) => owner.stop()));
+  } finally {
+    mock.restore();
+  }
 });
 
 /**
@@ -179,6 +183,55 @@ async function startAndFetch(fixture: Fixture): Promise<void> {
   await finishGit(fixture);
   await finishPr(fixture);
 }
+
+describe("createGitStatus.snapshot", () => {
+  it.each([
+    [
+      "empty or one-character lines",
+      "\nX\n",
+      { staged: 0, unstaged: 0, untracked: 0 },
+    ],
+    [
+      "index-only changes",
+      "M  modified\nA  added\nD  deleted\nR  old -> new\nC  copied\n",
+      { staged: 5, unstaged: 0, untracked: 0 },
+    ],
+    [
+      "working-tree-only changes",
+      " M modified\n D deleted\n",
+      { staged: 0, unstaged: 2, untracked: 0 },
+    ],
+    [
+      "untracked files",
+      "?? first\n?? second\n",
+      { staged: 0, unstaged: 0, untracked: 2 },
+    ],
+    [
+      "changes in both columns and conflicts",
+      "MM modified\nUU conflict\nAA added\nDD deleted\n",
+      { staged: 4, unstaged: 4, untracked: 0 },
+    ],
+    [
+      "spaces and question marks outside untracked pairs",
+      " ? one\n?  two\n   clean\n",
+      { staged: 0, unstaged: 0, untracked: 0 },
+    ],
+    [
+      "mixed status entries",
+      "M  staged\n M unstaged\nMM both\nUU conflict\n?? first\n?? second\nX\n\n",
+      { staged: 3, unstaged: 3, untracked: 2 },
+    ],
+  ] as const)(
+    "should publish independent change counts when porcelain contains %s",
+    async (_condition, stdout, counts) => {
+      const fixture = createStatus();
+      await fixture.status.start();
+      fixture.status.requestRefresh();
+      await finishGit(fixture, 1, stdout);
+      expect(fixture.status.snapshot).toMatchObject(counts);
+    },
+  );
+});
 
 describe("createGitStatus.start", () => {
   it("should clear values without starting commands when a lifetime starts", async () => {
