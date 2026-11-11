@@ -38,12 +38,12 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
    - Open GitHub **Settings &gt; Developer settings &gt; Personal access tokens &gt; Tokens (classic)**, then choose **Generate new token &gt; Generate new token (classic)**. See [GitHub's token creation guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
    - Enter a descriptive name and expiration, select only **`read:packages`**, and click **Generate token**.
    - Copy the generated PAT privately. Your account must have access to `@nvidia/openshell-sdk`; authorize the token for SSO if the package's organization requires it.
-4. Configure `NVIDIA_NPM_TOKEN` in your `~/.bashrc` (Bash) or `~/.zshrc` (Zsh), replacing the placeholder with your PAT:
+4. Configure `NVIDIA_NPM_TOKEN` in your `~/.bashrc` (Bash) or `~/.zshrc` (Zsh), replacing the placeholder with your PAT:
    ```sh
      # For Bash
-     echo 'export NVIDIA_NPM_TOKEN='YOUR_GITHUB_PAT'' >> ~/.bashrc && source ~/.bashrc
+     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.bashrc && source ~/.bashrc
      # For Zsh
-     echo 'export NVIDIA_NPM_TOKEN='YOUR_GITHUB_PAT'' >> ~/.zshrc && source ~/.zshrc
+     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.zshrc && source ~/.zshrc
    ```
 
 ## About OpenShell
