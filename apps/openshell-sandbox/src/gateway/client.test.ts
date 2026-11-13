@@ -85,7 +85,7 @@ describe("connectGateway", () => {
         const original = client.raw.health;
         client.raw.health = async (...args) => ({
           ...(await original(...args)),
-          version: "0.0.116",
+          version: "0.1.0",
         });
       },
     ],

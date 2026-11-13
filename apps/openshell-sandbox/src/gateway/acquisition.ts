@@ -16,7 +16,7 @@ import type {
 } from "./types.ts";
 
 const MIN_NODE_MAJOR = 22;
-const NATIVE_VERSION = /^openshell-gateway v?0\.1\.0\s*$/;
+const NATIVE_VERSION = /^openshell-gateway v?0\.1\.8\s*$/;
 
 /** Capture an uncertain child before bounded cleanup and redact native errors at the gateway boundary.
  * @param state - Owned gateway state if allocation succeeded.
@@ -96,7 +96,7 @@ export async function startPrivateGateway(
       host.processEffects,
     );
     if (version.exitCode !== 0 || !NATIVE_VERSION.test(version.stdout)) {
-      throw new Error("OpenShell native release must be 0.1.0.");
+      throw new Error("OpenShell native release must be 0.1.8.");
     }
     state = await createGatewayState(host, capture, reportCoordinates);
     return await prepareGateway(host, state, signal, reportCoordinates);

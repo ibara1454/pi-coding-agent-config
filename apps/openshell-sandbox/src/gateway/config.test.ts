@@ -259,8 +259,6 @@ describe("writeGatewayConfig", () => {
               ["compute_driver"]: "docker",
               ["enable_loopback_service_http"]: false,
               ["guest_tls_ca"]: join(state.tlsDirectory, "ca.crt"),
-              ["guest_tls_cert"]: join(state.tlsDirectory, "client/tls.crt"),
-              ["guest_tls_key"]: join(state.tlsDirectory, "client/tls.key"),
               tls: {
                 ["cert_path"]: join(state.tlsDirectory, "server/tls.crt"),
                 ["key_path"]: join(state.tlsDirectory, "server/tls.key"),
@@ -280,6 +278,14 @@ describe("writeGatewayConfig", () => {
             },
           },
         });
+        expect(native).not.toHaveProperty("openshell.gateway.guest_tls_cert");
+        expect(native).not.toHaveProperty("openshell.gateway.guest_tls_key");
+        expect(contents).not.toContain(
+          join(state.tlsDirectory, "client/tls.crt"),
+        );
+        expect(contents).not.toContain(
+          join(state.tlsDirectory, "client/tls.key"),
+        );
         expect(native).not.toHaveProperty(
           "openshell.drivers.docker.supervisor_bin",
         );

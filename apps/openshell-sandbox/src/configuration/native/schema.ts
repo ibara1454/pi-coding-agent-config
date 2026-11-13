@@ -1,4 +1,4 @@
-// Explicit schema mapping targets NVIDIA/OpenShell v0.1.0:
+// Explicit schema mapping targets NVIDIA/OpenShell v0.1.8:
 // crates/openshell-policy-schema/src/lib.rs and crates/openshell-providers/src/profiles.rs.
 // Protobuf decoding supplies only defaults already established by those native serde definitions.
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
