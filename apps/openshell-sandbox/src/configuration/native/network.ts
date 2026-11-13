@@ -20,9 +20,9 @@ const COMMON: Fields = {
   port: ["port", port],
   ports: ["ports", list(port)],
   protocol: ["protocol", string],
-  tls: ["tls", string],
-  enforcement: ["enforcement", string],
-  access: ["access", string],
+  tls: ["tls", mode({ "": 0, skip: 1 })],
+  enforcement: ["enforcement", mode({ "": 0, enforce: 1, audit: 2 })],
+  access: ["access", mode({ "": 0, "read-only": 1, "read-write": 2, full: 3 })],
   ["allowed_ips"]: ["allowedIps", list(string)],
   ["allow_encoded_slash"]: ["allowEncodedSlash", boolean],
   ["websocket_credential_rewrite"]: ["websocketCredentialRewrite", boolean],
@@ -42,21 +42,59 @@ const COMMON: Fields = {
   ["signing_region"]: ["signingRegion", string],
 };
 
+const DEFAULT_MCP_VERSION = "2025-11-25";
+const MCP_VERSIONS = ["2025-03-26", "2025-06-18", DEFAULT_MCP_VERSION];
+
+/** Map exact native endpoint modes to protobuf enums without accepting normalized aliases.
+ * @throws A field-only diagnostic for unknown or removed modes.
+ * @example mode({enforce:1})("enforce", "enforcement") returns 1.
+ */
+function mode(values: Readonly<Record<string, number>>): Decoder {
+  return (value, field) => {
+    const selected = string(value, field);
+    return Object.hasOwn(values, selected)
+      ? (values[selected] ?? invalid(field))
+      : invalid(field);
+  };
+}
+
+/** Validate exact MCP revisions before canonical ordering can hide duplicates.
+ * @throws A field-only diagnostic for empty, duplicate, padded, or unsupported revisions.
+ * @example versions(["2025-11-25", "2025-03-26"], "mcp.versions") returns ascending revisions.
+ */
+function versions(value: unknown, field: string): JsonValue {
+  const selected = list(string)(value, field) as string[];
+  if (
+    selected.length === 0 ||
+    new Set(selected).size !== selected.length ||
+    selected.some((revision) => !MCP_VERSIONS.includes(revision))
+  ) {
+    invalid(field);
+  }
+  return selected.sort((left, right) => left.localeCompare(right));
+}
+
 /** Decode MCP options with distinct native policy/profile syntax.
  * @example mcp(false)({strict_tool_names:false}, "mcp") preserves explicit false.
  */
 function mcp(profile: boolean): Decoder {
-  return (value, field) =>
-    fields(value, field, {
-      ["strict_tool_names"]: ["strictToolNames", optional(boolean)],
+  return (value, field) => ({
+    versions: [DEFAULT_MCP_VERSION],
+    ...fields(value, field, {
+      versions: ["versions", versions],
+      ["strict_tool_names"]: [
+        "strictToolNames",
+        profile ? optional(boolean) : boolean,
+      ],
       ["allow_all_known_mcp_methods"]: [
         "allowAllKnownMcpMethods",
-        optional(boolean),
+        profile ? optional(boolean) : boolean,
       ],
       ...(profile
         ? {}
         : { ["max_body_bytes"]: ["maxBodyBytes", uint32] as const }),
-    });
+    }),
+  });
 }
 
 /** Reject profile list emptiness that native pre-lowering validation rejects before protobuf erases presence.
@@ -94,7 +132,7 @@ export function endpoint(profile: boolean): Decoder {
           "denyRules",
           profile ? profileRules(selectors(true)) : list(selectors(false)),
         ],
-        mcp: ["mcp", optional(mcp(profile))],
+        mcp: ["mcp", mcp(profile)],
         ...(profile
           ? {
               ["json_rpc_max_body_bytes"]: [
@@ -105,25 +143,30 @@ export function endpoint(profile: boolean): Decoder {
           : {
               ["json_rpc"]: [
                 "jsonRpc",
-                optional((input, path) =>
+                (input, path) =>
                   fields(input, path, {
                     ["max_body_bytes"]: ["maxBodyBytes", uint32],
                   }),
-                ),
               ] as const,
               ["credential_binding"]: [
                 "credentialBinding",
-                optional((input, path) =>
+                (input, path) =>
                   fields(input, path, { provider: ["provider", string] }, [
                     "provider",
                   ]),
-                ),
               ] as const,
             }),
       },
       profile ? ["host"] : [],
     );
-    return profile ? result : lowerPolicyEndpoint(result, field);
+    if (profile) {
+      return typeof result["protocol"] === "string" &&
+        result["protocol"].toLowerCase() === "mcp" &&
+        result["mcp"] === undefined
+        ? { ...result, mcp: { versions: [DEFAULT_MCP_VERSION] } }
+        : result;
+    }
+    return lowerPolicyEndpoint(result, field);
   };
 }
 
@@ -141,7 +184,8 @@ function policyPorts(result: JsonObject, field: string): JsonValue[] {
   return result["port"] ? [result["port"]] : [];
 }
 
-/** Lower native policy aliases, treating null MCP flags as absent while preserving false and body limits.
+/** Lower policy aliases and materialize the pinned MCP contract only for MCP endpoints.
+ * @throws A field-only diagnostic when MCP options occur on non-MCP traffic.
  * @example lowerPolicyEndpoint({port:443}, "endpoint") returns ports:[443].
  */
 function lowerPolicyEndpoint(result: JsonObject, field: string): JsonObject {
@@ -161,15 +205,21 @@ function lowerPolicyEndpoint(result: JsonObject, field: string): JsonObject {
   }
   mapped["ports"] = selectedPorts;
   mapped["port"] = selectedPorts[0] ?? 0;
-  if (mcpOptions) {
-    const { maxBodyBytes, ...mcpConfiguration } = mcpOptions;
-    mapped["jsonRpcMaxBodyBytes"] = (maxBodyBytes ?? 0) as JsonValue;
-    mapped["mcp"] = Object.values(mcpConfiguration).some(
-      (value) => typeof value === "boolean",
-    )
-      ? (mcpConfiguration as JsonObject)
-      : // biome-ignore lint/plugin/biome-rules/use-undefined: Protobuf JSON null leaves MCP unset when native lowering retains no non-null flags.
-        null;
+  const isMcp =
+    typeof result["protocol"] === "string" &&
+    result["protocol"].toLowerCase() === "mcp";
+  if (mcpOptions && !isMcp) {
+    invalid(`${field}.mcp`);
+  }
+  if (isMcp) {
+    const { maxBodyBytes, ...mcpConfiguration } = mcpOptions ?? {};
+    mapped["jsonRpcMaxBodyBytes"] = (maxBodyBytes ??
+      rpcOptions?.["maxBodyBytes"] ??
+      0) as JsonValue;
+    mapped["mcp"] = {
+      versions: [DEFAULT_MCP_VERSION],
+      ...mcpConfiguration,
+    } as JsonObject;
   } else {
     mapped["jsonRpcMaxBodyBytes"] = (rpcOptions?.["maxBodyBytes"] ??
       0) as JsonValue;
@@ -177,7 +227,7 @@ function lowerPolicyEndpoint(result: JsonObject, field: string): JsonObject {
   return mapped;
 }
 
-/** Convert policy binary objects and profile string/object forms; harness is deprecated native metadata.
+/** Convert policy binary objects and profile string/object forms; removed metadata is rejected.
  * @example binary(true)("/usr/bin/git", "binaries") creates the native binary path.
  */
 export function binary(profile: boolean): Decoder {
@@ -185,12 +235,7 @@ export function binary(profile: boolean): Decoder {
     if (profile && typeof value === "string") {
       return { path: value };
     }
-    const result = fields(
-      value,
-      field,
-      { path: ["path", string], harness: ["harness", boolean] },
-      ["path"],
-    );
+    const result = fields(value, field, { path: ["path", string] }, ["path"]);
     const path = result["path"];
     if (typeof path !== "string") {
       invalid(`${field}.path`);

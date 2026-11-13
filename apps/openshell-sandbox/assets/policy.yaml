@@ -19,8 +19,8 @@ filesystem_policy:
 landlock:
   compatibility: hard_requirement
 process:
-  run_as_user: sandbox
-  run_as_group: sandbox
+  run_as_user: "1000"
+  run_as_group: "1000"
 network_policies:
   github_git:
     name: github-git

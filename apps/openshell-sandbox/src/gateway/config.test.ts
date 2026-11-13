@@ -7,14 +7,11 @@ import {
 import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { TOML } from "bun";
 import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { prepareGatewayTls, writeGatewayConfig } from "./config.ts";
 import { createGatewayState } from "./state.ts";
-import {
-  network,
-  withRead,
-  withStats,
-} from "./test/acquisition-effects.helper.ts";
+import { withRead, withStats } from "./test/acquisition-effects.helper.ts";
 import {
   GATEWAY_TEST_CERTIFICATES,
   MISSING_SAN_TEST_CERTIFICATES,
@@ -23,6 +20,7 @@ import type { GatewayHostContext as HostContext } from "./types.ts";
 
 const FOREIGN_UID = 1001;
 const FAILED_EXIT_CODE = 1;
+const PRIVATE_GATEWAY_PORT = 43_123;
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
 describe("prepareGatewayTls", () => {
   it("should reject signed matching TLS material when private callback SANs are missing", async () => {
@@ -49,7 +47,7 @@ describe("prepareGatewayTls", () => {
       fixture.clock.restore();
     }
   });
-  it("should return verified synthetic mTLS credentials without reading JWT secrets", async () => {
+  it("should return verified synthetic mTLS credentials without reading CA or JWT secrets", async () => {
     const fixture = runtimeFixture();
     try {
       const state = await createGatewayState(
@@ -70,6 +68,7 @@ describe("prepareGatewayTls", () => {
       expect(tls.clientCert.toString()).toContain("BEGIN CERTIFICATE");
       expect(tls.clientKey.toString()).toContain("BEGIN PRIVATE KEY");
       expect(read.every((path) => !path.includes("/jwt/"))).toBe(true);
+      expect(read.some((path) => path.endsWith("/ca.key"))).toBe(false);
       await state.close();
     } finally {
       fixture.clock.restore();
@@ -83,6 +82,7 @@ describe("prepareGatewayTls", () => {
       { isFile: () => false, isSymbolicLink: () => true },
     ],
     ["empty file", "ca.crt", { size: 0 }],
+    ["empty CA key", "ca.key", { size: 0 }],
     ["empty JWT key", "jwt/signing.pem", { size: 0 }],
   ] as [string, string, Partial<Stats>][])(
     "should reject TLS material when it contains a %s",
@@ -225,32 +225,74 @@ describe("prepareGatewayTls", () => {
   });
 });
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite keeps one configuration artifact's trust-boundary assertions together.
 describe("writeGatewayConfig", () => {
-  it("should write private-only loopback mTLS configuration without provider credentials", async () => {
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: One native configuration artifact carries the linked gateway trust boundaries.
+  it("should write private schema-v2 Docker configuration without host credentials", async () => {
     const fixture = runtimeFixture();
+    const providerSecret = "provider-secret-must-not-reach-config";
+    const host: HostContext = {
+      ...fixture.effects.host,
+      environment: {
+        ...fixture.effects.host.environment,
+        ["PROVIDER_API_KEY"]: providerSecret,
+      },
+    };
     try {
       const state = await createGatewayState(
-        fixture.effects.host,
+        host,
         () => undefined,
         () => undefined,
       );
-      const configPath = await writeGatewayConfig(fixture.effects.host, state, {
-        namespace: network.name,
-        port: 43_123,
-      });
-      const contents = await fixture.effects.host.filesystem.readFile(
-        configPath,
-        "utf8",
-      );
-      expect(contents).toContain('bind_address = "127.0.0.1:43123"');
-      expect(contents).toContain(
-        'grpc_endpoint = "https://host.openshell.internal:43123"',
-      );
-      expect(contents).toContain("allow_unauthenticated_users = false");
-      expect(contents).not.toContain("supervisor_bin");
-      expect(contents).not.toContain("supervisor_image");
-      expect(contents).not.toContain("provider_api_key");
-      await state.close();
+      try {
+        const configPath = await writeGatewayConfig(host, state, {
+          namespace: "pi-test",
+          port: PRIVATE_GATEWAY_PORT,
+        });
+        const contents = await host.filesystem.readFile(configPath, "utf8");
+        const native = TOML.parse(contents);
+        expect(native).toMatchObject({
+          openshell: {
+            version: 2,
+            gateway: {
+              ["bind_address"]: "127.0.0.1:43123",
+              ["compute_driver"]: "docker",
+              ["enable_loopback_service_http"]: false,
+              ["guest_tls_ca"]: join(state.tlsDirectory, "ca.crt"),
+              ["guest_tls_cert"]: join(state.tlsDirectory, "client/tls.crt"),
+              ["guest_tls_key"]: join(state.tlsDirectory, "client/tls.key"),
+              tls: {
+                ["cert_path"]: join(state.tlsDirectory, "server/tls.crt"),
+                ["key_path"]: join(state.tlsDirectory, "server/tls.key"),
+                ["client_ca_path"]: join(state.tlsDirectory, "ca.crt"),
+              },
+              ["mtls_auth"]: { enabled: true },
+              auth: { ["allow_unauthenticated_users"]: false },
+            },
+            drivers: {
+              docker: {
+                ["socket_path"]: host.dockerEndpoint.slice("unix://".length),
+                ["grpc_endpoint"]: "https://127.0.0.1:43123",
+                ["enable_bind_mounts"]: true,
+                ["allow_driver_config"]: true,
+                ["resource_admission"]: { enabled: false },
+              },
+            },
+          },
+        });
+        expect(native).not.toHaveProperty(
+          "openshell.drivers.docker.supervisor_bin",
+        );
+        expect(native).not.toHaveProperty(
+          "openshell.drivers.docker.supervisor_image",
+        );
+        expect(native).not.toHaveProperty(
+          "openshell.drivers.docker.sandbox_runtime_image",
+        );
+        expect(contents).not.toContain(providerSecret);
+      } finally {
+        await state.close();
+      }
     } finally {
       fixture.clock.restore();
     }

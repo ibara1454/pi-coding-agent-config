@@ -1,4 +1,5 @@
 import { describe, expect, test as it } from "bun:test";
+import { NetworkAccessPreset } from "@nvidia/openshell-sdk/raw";
 import { binary, endpoint } from "./network.ts";
 
 const HTTP_PORT = 80n;
@@ -14,7 +15,7 @@ const INVALID_ENDPOINTS = [
   [
     "policy MCP and legacy JSON RPC options conflict",
     false,
-    { mcp: {}, ["json_rpc"]: {} },
+    { protocol: "mcp", mcp: {}, ["json_rpc"]: {} },
   ],
   [
     "a policy credential binding is missing its provider",
@@ -48,6 +49,37 @@ const INVALID_ENDPOINTS = [
     false,
     { ["provider_credentialed"]: true },
   ],
+  ["policy MCP options occur without MCP protocol", false, { mcp: {} }],
+  [
+    "policy MCP options occur on REST traffic",
+    false,
+    { protocol: "rest", mcp: {} },
+  ],
+  [
+    "policy MCP options are null",
+    false,
+    JSON.parse('{"protocol":"mcp","mcp":null}'),
+  ],
+  ["profile MCP options are null", true, JSON.parse('{"host":"x","mcp":null}')],
+  ["legacy JSON RPC options are null", false, JSON.parse('{"json_rpc":null}')],
+  [
+    "credential binding is null",
+    false,
+    JSON.parse('{"credential_binding":null}'),
+  ],
+  [
+    "a policy MCP flag is null",
+    false,
+    JSON.parse('{"protocol":"mcp","mcp":{"strict_tool_names":null}}'),
+  ],
+  ["a TLS mode was removed", false, { tls: "terminate" }],
+  [
+    "a TLS mode was removed in a profile",
+    true,
+    { host: "x", tls: "passthrough" },
+  ],
+  ["an enforcement mode is not exact", false, { enforcement: "ENFORCE" }],
+  ["an access mode is not exact", true, { host: "x", access: "read_only" }],
   ["an endpoint port is out of range", false, { port: 65536n }],
 ] as const;
 
@@ -70,7 +102,7 @@ describe("endpoint", () => {
       port: 443,
       ports: [Number(TLS_PORT)],
       jsonRpcMaxBodyBytes: 8192,
-      mcp: { strictToolNames: false },
+      mcp: { versions: ["2025-11-25"], strictToolNames: false },
       rules: [{ allow: { params: { name: { glob: "search" } } } }],
     });
   });
@@ -111,7 +143,7 @@ describe("endpoint", () => {
       port: 443,
       jsonRpcMaxBodyBytes: 2048,
       rules: [{ allow: { path: "/v1" } }],
-      mcp: { strictToolNames: false },
+      mcp: { versions: ["2025-11-25"], strictToolNames: false },
     });
     expect(
       // biome-ignore lint/plugin/biome-rules/use-undefined: Native profile YAML permits null rules, distinct from the invalid explicit empty list.
@@ -122,21 +154,13 @@ describe("endpoint", () => {
       rules: null,
     });
   });
-  it("should retain policy credential binding and nullable MCP restrictions", () => {
+  it("should retain policy credential binding without inventing MCP options", () => {
     expect(
       endpoint(false)(
-        // biome-ignore lint/plugin/biome-rules/use-undefined: Native policy YAML permits a null MCP option alongside credential binding.
-        { ["credential_binding"]: { provider: "work" }, mcp: null },
+        { ["credential_binding"]: { provider: "work" } },
         "endpoint",
       ),
     ).toMatchObject({ credentialBinding: { provider: "work" }, ports: [] });
-    expect(
-      endpoint(false)({ mcp: { ["max_body_bytes"]: 123n } }, "endpoint"),
-    ).toMatchObject({
-      // biome-ignore lint/plugin/biome-rules/use-undefined: Protobuf JSON must leave MCP unset when only its lowered body-size limit remains.
-      mcp: null,
-      jsonRpcMaxBodyBytes: 123,
-    });
   });
   it.each(INVALID_ENDPOINTS)(
     "should reject when %s",
@@ -165,13 +189,14 @@ describe("endpoint", () => {
     ],
     [
       "empty MCP options",
-      { mcp: {} },
-      JSON.parse('{"mcp":null,"ports":[],"port":0,"jsonRpcMaxBodyBytes":0}'),
-    ],
-    [
-      "null legacy RPC options",
-      JSON.parse('{"json_rpc":null}'),
-      { ports: [], port: 0, jsonRpcMaxBodyBytes: 0 },
+      { protocol: "mcp", mcp: {} },
+      {
+        protocol: "mcp",
+        mcp: { versions: ["2025-11-25"] },
+        ports: [],
+        port: 0,
+        jsonRpcMaxBodyBytes: 0,
+      },
     ],
   ])(
     "should retain native alias defaults when a policy endpoint has %s",
@@ -179,26 +204,98 @@ describe("endpoint", () => {
       expect(endpoint(false)(input, "endpoint")).toEqual(expected);
     },
   );
+  it.each([false, true])(
+    "should materialize and sort exact MCP revisions when profile mode is %s",
+    (profile) => {
+      expect(
+        endpoint(profile)(
+          { host: "tools.example", protocol: "McP" },
+          "endpoint",
+        ),
+      ).toMatchObject({ mcp: { versions: ["2025-11-25"] } });
+      expect(
+        endpoint(profile)(
+          {
+            host: "tools.example",
+            protocol: "mcp",
+            mcp: { versions: ["2025-11-25", "2025-03-26", "2025-06-18"] },
+          },
+          "endpoint",
+        ),
+      ).toMatchObject({
+        mcp: { versions: ["2025-03-26", "2025-06-18", "2025-11-25"] },
+      });
+    },
+  );
+  it.each([
+    ["empty", []],
+    ["duplicate", ["2025-11-25", "2025-11-25"]],
+    ["unsupported", ["latest"]],
+    ["padded", [" 2025-11-25"]],
+    ["null", JSON.parse("null")],
+  ])(
+    "should reject policy and profile MCP revisions when the allowlist is %s",
+    (_condition, versions) => {
+      for (const profile of [false, true]) {
+        expect(() =>
+          endpoint(profile)(
+            { host: "tools.example", protocol: "mcp", mcp: { versions } },
+            "endpoint",
+          ),
+        ).toThrow("Invalid OpenShell");
+      }
+    },
+  );
+  it.each([
+    ["tls", "", 0],
+    ["tls", "skip", 1],
+    ["enforcement", "", 0],
+    ["enforcement", "enforce", 1],
+    ["enforcement", "audit", 2],
+    ["access", "", 0],
+    ["access", "read-only", 1],
+    ["access", "read-write", 2],
+    ["access", "full", NetworkAccessPreset.FULL],
+  ] as const)(
+    "should map policy and profile %s mode %s to SDK enum %s",
+    (field, value, expected) => {
+      for (const profile of [false, true]) {
+        expect(
+          endpoint(profile)(
+            { host: "api.example", [field]: value },
+            "endpoint",
+          ),
+        ).toMatchObject({ [field]: expected });
+      }
+    },
+  );
 });
 describe("binary", () => {
-  it("should retain profile string paths and harness metadata when supplied", () => {
+  it("should retain profile string paths and policy or profile path objects", () => {
     expect(binary(true)("/usr/bin/git", "binary")).toEqual({
       path: "/usr/bin/git",
     });
-    expect(
-      binary(true)({ path: "/usr/bin/git", harness: true }, "binary"),
-    ).toEqual({ path: "/usr/bin/git", harness: true });
-  });
-  it("should drop harness metadata when converting policy binaries", () => {
-    expect(
-      binary(false)({ path: "/usr/bin/git", harness: true }, "binary"),
-    ).toEqual({ path: "/usr/bin/git" });
+    for (const profile of [false, true]) {
+      expect(binary(profile)({ path: "/usr/bin/git" }, "binary")).toEqual({
+        path: "/usr/bin/git",
+      });
+    }
   });
   it.each([
     ["policy binary is a string", false, "/usr/bin/git"],
     ["binary path is missing", true, { harness: true }],
     ["binary path is not a string", false, { path: 42 }],
     ["binary contains unknown metadata", true, { path: "git", secret: true }],
+    [
+      "removed policy harness metadata is supplied",
+      false,
+      { path: "git", harness: true },
+    ],
+    [
+      "removed profile harness metadata is supplied",
+      true,
+      { path: "git", harness: false },
+    ],
   ] as const)("should reject when %s", (_case, profile, input) => {
     expect(() => binary(profile)(input, "binary")).toThrow("Invalid OpenShell");
   });

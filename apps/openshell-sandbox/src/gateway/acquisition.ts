@@ -7,7 +7,6 @@ import {
 } from "../host/index.ts";
 import { connectGateway, reserveGatewayPort } from "./client.ts";
 import { prepareGatewayTls, writeGatewayConfig } from "./config.ts";
-import { createGatewayNetwork } from "./network.ts";
 import { launchGateway } from "./process.ts";
 import { createGatewayState, type GatewayState } from "./state.ts";
 import type {
@@ -17,7 +16,7 @@ import type {
 } from "./types.ts";
 
 const MIN_NODE_MAJOR = 22;
-const NATIVE_VERSION = /\b0\.0\.116\b/;
+const NATIVE_VERSION = /^openshell-gateway v?0\.1\.0\s*$/;
 
 /** Capture an uncertain child before bounded cleanup and redact native errors at the gateway boundary.
  * @param state - Owned gateway state if allocation succeeded.
@@ -97,41 +96,13 @@ export async function startPrivateGateway(
       host.processEffects,
     );
     if (version.exitCode !== 0 || !NATIVE_VERSION.test(version.stdout)) {
-      throw new Error("OpenShell native release must be 0.0.116.");
+      throw new Error("OpenShell native release must be 0.1.0.");
     }
     state = await createGatewayState(host, capture, reportCoordinates);
     return await prepareGateway(host, state, signal, reportCoordinates);
   } catch (error) {
     return recoverGatewayPreparation(state, capture, error);
   }
-}
-
-/** Allocate the exact private labelled network; native OpenShell owns supervisor resolution.
- * @param host - Private host identity and local Docker effects.
- * @param state - Captures network ownership before creation for retryable cleanup.
- * @param signal - Cancels native network acquisition.
- * @returns Private namespace, immutable labels, and exact network identity.
- * @throws On failed or unprovable network acquisition, retaining captured resources.
- * @example await prepareGatewayInfrastructure(host, state, signal) returns isolated IDs.
- */
-async function prepareGatewayInfrastructure(
-  host: HostContext,
-  state: GatewayState,
-  signal: AbortSignal,
-) {
-  const namespace = `pi-openshell-${host.instanceId}`;
-  const labels = Object.freeze({
-    "io.pi.openshell-sandbox.managed-by": "pi-openshell-sandbox",
-    "io.pi.openshell-sandbox.owner-uid": String(host.uid),
-    "io.pi.openshell-sandbox.instance-id": host.instanceId,
-  });
-  const networkId = await createGatewayNetwork(
-    host,
-    { name: namespace, labels },
-    signal,
-    state.capture,
-  );
-  return { namespace, labels, networkId };
 }
 
 /** Configure, launch and authenticate one owned gateway after its state is captured.
@@ -150,16 +121,13 @@ async function prepareGateway(
   reportCoordinates: (coordinates: GatewayRecoveryCoordinates) => void,
 ): Promise<ManagedGateway> {
   const scopedHost: HostContext = { ...host, environment: state.environment };
-  const { namespace, labels, networkId } = await prepareGatewayInfrastructure(
-    scopedHost,
-    state,
-    signal,
-  );
-  const coordinates = Object.freeze({
-    tlsDirectory: state.tlsDirectory,
-    networkId,
+  const namespace = `pi-openshell-${host.instanceId}`;
+  const labels = Object.freeze({
+    "io.pi.openshell-sandbox.managed-by": "pi-openshell-sandbox",
+    "io.pi.openshell-sandbox.owner-uid": String(host.uid),
+    "io.pi.openshell-sandbox.instance-id": host.instanceId,
   });
-  reportCoordinates(coordinates);
+  const coordinates = Object.freeze({ tlsDirectory: state.tlsDirectory });
   signal.throwIfAborted();
   const tls = await prepareGatewayTls(scopedHost, state, signal);
   const port = await (host.gatewayEffects?.reservePort ?? reserveGatewayPort)();
@@ -188,7 +156,6 @@ async function prepareGateway(
     client,
     endpoint,
     instanceId: host.instanceId,
-    networkId,
     tlsDirectory: state.tlsDirectory,
     labels,
     signal,

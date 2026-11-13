@@ -16,7 +16,6 @@ export interface GatewayHostContext extends HostContext {
 export type GatewayRecoveryCoordinates = Readonly<{
   gatewayEndpoint?: string;
   tlsDirectory?: string;
-  networkId?: string;
 }>;
 
 /** Gateway ownership transfers only as a complete group; close requires prior workload termination. */
@@ -24,7 +23,6 @@ export interface ManagedGateway {
   readonly client: OpenShellClient;
   readonly endpoint: string;
   readonly instanceId: string;
-  readonly networkId: string;
   readonly tlsDirectory: string;
   readonly labels: Readonly<Record<string, string>>;
   readonly signal: AbortSignal;

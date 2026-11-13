@@ -11,7 +11,6 @@ const OWNER_DIR_MODE = 0o700;
 const PUBLIC_MODE_BITS = 0o077;
 const RELEASE_PRIORITY: Readonly<Record<string, number>> = {
   process: 4,
-  network: 1,
   state: 0,
 };
 
@@ -182,10 +181,10 @@ async function ownGatewayState(
   return { tlsDirectory, capture: own, close: () => releasePending(pending) };
 }
 
-/** Release processes before the network, then state, including late captured cleanup children.
+/** Release processes before other resources, then state, including late captured cleanup children.
  * @param pending - State-owned release capabilities awaiting confirmed cleanup.
  * @throws When cleanup cannot be confirmed, retaining remaining resources for retry.
- * @example await releasePending(pending) removes state only after processes and network.
+ * @example await releasePending(pending) removes state only after every process is released.
  */
 async function releasePending(pending: Set<OwnedResource>): Promise<void> {
   let next: OwnedResource | undefined;

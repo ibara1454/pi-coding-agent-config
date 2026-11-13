@@ -1,7 +1,10 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { type OpenShellClient, SandboxClient } from "@nvidia/openshell-sdk";
-import { SandboxResponseSchema } from "@nvidia/openshell-sdk/raw";
+import {
+  ExecSandboxRequestSchema,
+  SandboxResponseSchema,
+} from "@nvidia/openshell-sdk/raw";
 import { RuntimeFailure } from "../../diagnostics/index.ts";
 import { plannedRealpath } from "../test/index.helper.ts";
 import { executeRequest } from "./request.ts";
@@ -13,18 +16,13 @@ const TIMEOUT_BUDGET_MS = 1000;
 const STARTUP_DELAY_MS = 250;
 const NONZERO_EXIT_CODE = 7;
 
-/** Installs a same-name replacement; only the acknowledged ID remains executable.
+/** Installs a same-name replacement that must never receive a model command.
  * @param client - SDK fixture whose raw lookup and sandbox view are replaced.
  * @param name - The original sandbox name now occupied by another ID.
- * @param ownedPresent - Whether the acknowledged ID can execute.
  * @returns Native execution targets and requests recorded by the SDK fixture.
- * @example installReplacement(client, "owned", true).targets; // [] before execution
+ * @example installReplacement(client, "owned").targets; // [] before execution
  */
-function installReplacement(
-  client: OpenShellClient,
-  name: string,
-  ownedPresent: boolean,
-) {
+function installReplacement(client: OpenShellClient, name: string) {
   const targets: string[] = [];
   const requests: unknown[] = [];
   Object.assign(client.raw, {
@@ -34,13 +32,10 @@ function installReplacement(
           sandbox: { metadata: { id: "replacement-b", name } },
         }),
       ),
-    async *execSandbox(request: { sandboxId: string }) {
+    async *execSandbox(request: { sandbox: string }) {
       await Promise.resolve();
-      targets.push(request.sandboxId);
+      targets.push(request.sandbox);
       requests.push(request);
-      if (request.sandboxId === "owned-a" && !ownedPresent) {
-        throw new Error("Owned sandbox is absent.");
-      }
       yield { payload: { case: "exit", value: { exitCode: 0 } } };
     },
   });
@@ -406,56 +401,113 @@ describe("executeRequest", () => {
     }
   });
 
-  it.each([true, false])(
-    "should address only the acknowledged ID when its name resolves to a replacement and owned presence is %s",
-    async (ownedPresent) => {
-      const { fixture, owner, handle, raw } = requestFixture();
-      try {
-        const { targets, requests } = installReplacement(
-          fixture.sdk.client,
-          handle.sandboxName,
-          ownedPresent,
-        );
-        const ready = {
-          ...(await handle.readiness),
-          sandboxId: "owned-a",
-          environment: { ["LANG"]: "C.UTF-8" },
-        };
-        const result = await completion(
-          executeRequest(
-            "true",
-            "/project",
-            {},
-            {
-              ...owner,
-              admit: () => ({
-                ...owner.admit(),
-                readiness: Promise.resolve(ready),
-              }),
-            },
-          ),
-        );
-        expect(targets).toEqual(["owned-a"]);
-        expect(requests).toEqual([
+  it("should refuse execution when its name resolves to a replacement", async () => {
+    const { fixture, owner, handle, raw } = requestFixture();
+    try {
+      const { targets, requests } = installReplacement(
+        fixture.sdk.client,
+        handle.sandboxName,
+      );
+      const ready = {
+        ...(await handle.readiness),
+        sandboxId: "owned-a",
+        environment: { ["LANG"]: "C.UTF-8" },
+      };
+      const result = await completion(
+        executeRequest(
+          "true",
+          "/project",
+          {},
           {
-            sandboxId: "owned-a",
-            command: ["/bin/bash", "-c", "true"],
-            workdir: "/project",
-            environment: { ["LANG"]: "C.UTF-8" },
-            timeoutSeconds: 0,
-            stdin: new Uint8Array(),
-            tty: false,
+            ...owner,
+            admit: () => ({
+              ...owner.admit(),
+              readiness: Promise.resolve(ready),
+            }),
           },
-        ]);
-        expect(result.terminals).toBe(1);
-        expect(result.exitCode).toBe(ownedPresent ? 0 : undefined);
-        expect(Boolean(result.error)).toBe(!ownedPresent);
-        await Promise.allSettled(raw);
-      } finally {
-        fixture.clock.restore();
-      }
-    },
-  );
+        ),
+      );
+      expect(targets).toEqual([]);
+      expect(requests).toEqual([]);
+      expect(result.terminals).toBe(1);
+      expect(result.error).toMatchObject({
+        failure: { operation: "identity" },
+      });
+      await Promise.allSettled(raw);
+    } finally {
+      fixture.clock.restore();
+    }
+  });
+  it("should submit canonical name and workspace with no execution duration after identity verification", async () => {
+    const { fixture, owner, handle } = requestFixture();
+    const rpc = spyOn(fixture.sdk.client.raw, "execSandbox");
+    try {
+      const result = await completion(
+        executeRequest("true", "/project", {}, owner),
+      );
+      expect(result.exitCode).toBe(NONZERO_EXIT_CODE);
+      const request = rpc.mock.calls[0]?.[0];
+      expect(request).toEqual({
+        sandbox: handle.sandboxName,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+        command: ["/bin/bash", "-c", "true"],
+        workdir: "/project",
+        environment: {},
+        stdin: new Uint8Array(),
+        tty: false,
+      });
+      const message = create(ExecSandboxRequestSchema, request);
+      expect(message.executionTimeout).toBeUndefined();
+      expect(message.sandbox).toBe(handle.sandboxName);
+    } finally {
+      rpc.mockRestore();
+      fixture.clock.restore();
+    }
+  });
+  it("should refuse execution when ownership labels change after readiness", async () => {
+    const { fixture, owner } = requestFixture();
+    fixture.native.labels = {};
+    try {
+      const result = await completion(
+        executeRequest("true", "/project", {}, owner),
+      );
+      expect(result.error).toMatchObject({
+        failure: { operation: "identity" },
+      });
+      expect(fixture.sdk.commands).toEqual([]);
+    } finally {
+      fixture.clock.restore();
+    }
+  });
+  it("should send no model command when cancellation arrives during the identity check", async () => {
+    const { fixture, owner, raw } = requestFixture();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const caller = new AbortController();
+    const original = fixture.sdk.client.sandbox.get;
+    const lookup = spyOn(fixture.sdk.client.sandbox, "get").mockImplementation(
+      async (...args) => {
+        started.resolve();
+        await release.promise;
+        return original(...args);
+      },
+    );
+    try {
+      const result = completion(
+        executeRequest("true", "/project", { signal: caller.signal }, owner),
+      );
+      await started.promise;
+      caller.abort();
+      release.resolve();
+      expect((await result).error).toMatchObject({ name: "AbortError" });
+      await Promise.allSettled(raw);
+      expect(fixture.sdk.commands).toEqual([]);
+    } finally {
+      release.resolve();
+      lookup.mockRestore();
+      fixture.clock.restore();
+    }
+  });
   it("should preserve stdout and stderr bytes without text decoding", async () => {
     const { fixture, owner, raw } = requestFixture();
     try {

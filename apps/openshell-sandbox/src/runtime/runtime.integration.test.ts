@@ -21,7 +21,6 @@ import type { SandboxRuntime } from "./types.ts";
 
 const COMMAND_EXIT_CODE = 7;
 const SANDBOX_NAME_PREFIX = /^po-/;
-const NETWORK_ID_HEX_LENGTH = 64;
 const HTTPS_PORT = 443;
 
 /** Prepares a runtime through a readiness-gated fixture command; callers own disposal.
@@ -118,15 +117,6 @@ describe("createSandboxRuntime", () => {
       });
       expect(fixture.sdk.createCount).toBe(1);
       expect(fixture.native.launches).toBe(1);
-      const dockerCommands = fixture.native.calls.filter(
-        (args) => args[0] === "--host",
-      );
-      expect(dockerCommands.length).toBeGreaterThan(0);
-      expect(
-        dockerCommands.every(
-          (args) => args[2] === "info" || args[2] === "network",
-        ),
-      ).toBe(true);
       expect(runtime.getStatus().phase).toBe("ready");
       expect(fixture.sdk.commands).toEqual(["first", "second"]);
     } finally {
@@ -148,12 +138,10 @@ describe("createSandboxRuntime", () => {
       const { recovery } = runtime.getStatus();
       expect(recovery?.gatewayEndpoint).toBeDefined();
       expect(recovery?.tlsDirectory).toBeDefined();
-      expect(recovery?.networkId).toBeDefined();
       fixture.sdk.client.raw.deleteProvider = () =>
         Promise.reject(new Error("private provider cleanup payload"));
       await expect(runtime.dispose()).rejects.toThrow();
       expect(fixture.native.sandboxPresent).toBe(false);
-      expect(fixture.native.networkPresent).toBe(true);
       expect(runtime.getStatus()).toMatchObject({
         phase: "recovery-required",
         recovery,
@@ -354,7 +342,6 @@ describe("createSandboxRuntime", () => {
       ).rejects.toMatchObject({ failure: { operation: "stream" } });
       expect(fixture.runtime.getStatus().phase).toBe("idle");
       expect(fixture.sdk.deleteCount).toBe(1);
-      expect(fixture.native.networkPresent).toBe(true);
     } finally {
       try {
         await fixture.runtime.dispose();
@@ -393,7 +380,6 @@ describe("createSandboxRuntime", () => {
         );
         await Promise.resolve();
         expect(disposed).toBe(false);
-        expect(fixture.native.networkPresent).toBe(true);
         expect(fixture.sdk.deleteCount).toBe(0);
         release.resolve();
         await disposal;
@@ -463,7 +449,6 @@ describe("createSandboxRuntime", () => {
       await runtime.dispose();
       expect(runtime.getStatus().phase).toBe("closed");
       expect(fixture.native.sandboxPresent).toBe(false);
-      expect(fixture.native.networkPresent).toBe(false);
     } finally {
       try {
         await runtime.dispose().catch(() => undefined);
@@ -583,12 +568,10 @@ describe("createSandboxRuntime", () => {
       const disposal = runtime.dispose();
       await Promise.resolve();
       expect(deleted).toEqual([]);
-      expect(fixture.native.networkPresent).toBe(true);
       release.resolve();
       await disposal;
       expect(created).toHaveLength(1);
       expect(deleted).toEqual(created);
-      expect(fixture.native.networkPresent).toBe(false);
       expect(fixture.sdk.createCount).toBe(0);
       expect(runtime.getStatus().phase).toBe("closed");
     } finally {
@@ -648,7 +631,6 @@ describe("createSandboxRuntime", () => {
         "Provider missing",
       );
       expect(runtime.getStatus().phase).toBe("closed");
-      expect(fixture.native.networkPresent).toBe(false);
       expect(fixture.native.sandboxPresent).toBe(false);
     } finally {
       try {
@@ -669,7 +651,6 @@ describe("createSandboxRuntime", () => {
         sandboxName: expect.stringMatching(SANDBOX_NAME_PREFIX),
         gatewayEndpoint: "https://127.0.0.1:43123",
         tlsDirectory: `/state/pi-openshell-${fixture.effects.host.instanceId}/tls`,
-        networkId: "d".repeat(NETWORK_ID_HEX_LENGTH),
       });
       expect(Object.isFrozen(acquired)).toBe(true);
       expect(fixture.sdk.createCount).toBe(0);
@@ -683,7 +664,6 @@ describe("createSandboxRuntime", () => {
         recovery: acquired,
       });
       expect(runtime.getStatus().recovery).not.toHaveProperty("createOutcome");
-      expect(fixture.native.networkPresent).toBe(true);
       expect(fixture.native.launches).toBe(1);
       expect(fixture.sdk.createCount).toBe(0);
       expect(fixture.sdk.commands).toEqual([]);
@@ -694,7 +674,6 @@ describe("createSandboxRuntime", () => {
         failure: { code: "cleanup" },
       });
       expect(runtime.getStatus().recovery).toEqual(acquired);
-      expect(fixture.native.networkPresent).toBe(true);
       expect(JSON.stringify(runtime.getStatus())).not.toContain(
         "private-provider-secret",
       );
@@ -708,7 +687,7 @@ describe("createSandboxRuntime", () => {
     }
   });
   it("should defer gateway disposal while canceled SDK execution remains unsettled", async () => {
-    const { runtime, native, counts, entered, release, rawSettled } =
+    const { runtime, counts, entered, release, rawSettled } =
       await heldExecutionFixture();
     const caller = new AbortController();
     let disposed = false;
@@ -722,7 +701,6 @@ describe("createSandboxRuntime", () => {
       const cancelled = await result;
       expect(cancelled.error).toMatchObject({ name: "AbortError" });
       expect(cancelled.terminals).toBe(1);
-      expect(native.networkPresent).toBe(true);
       disposal = runtime.dispose();
       disposal.then(
         () => {
@@ -735,12 +713,10 @@ describe("createSandboxRuntime", () => {
       await Promise.resolve();
       expect(disposed).toBe(false);
       expect(counts.gatewaySignals).toBe(0);
-      expect(native.networkPresent).toBe(true);
       release.resolve();
       await rawSettled.promise;
       await disposal;
       expect(counts.gatewaySignals).toBeGreaterThan(0);
-      expect(native.networkPresent).toBe(false);
       expect(runtime.getStatus().phase).toBe("closed");
     } finally {
       caller.abort();
