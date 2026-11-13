@@ -30,7 +30,6 @@ export type SanitizedRuntimeStatus = Readonly<{
     createOutcome?: CreationOutcome;
     gatewayEndpoint?: string;
     tlsDirectory?: string;
-    networkId?: string;
   }>;
 }>;
 export type RuntimeObserver = Readonly<{

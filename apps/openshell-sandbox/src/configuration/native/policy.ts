@@ -13,10 +13,8 @@ import {
   integer,
   list,
   mapEntries,
-  optional,
   parseNativeYaml,
   string,
-  uint32,
 } from "./schema.ts";
 
 const MAX_JSON_DEPTH = 64;
@@ -77,17 +75,31 @@ function middleware(value: unknown, field: string): JsonObject {
       ["on_error"]: ["onError", string],
       endpoints: [
         "endpoints",
-        optional((input, path) =>
+        (input, path) =>
           fields(input, path, {
             include: ["include", list(string)],
             exclude: ["exclude", list(string)],
           }),
-        ),
       ],
     },
     ["middleware"],
   );
   return { config: {}, ...result };
+}
+
+/** Decode the exact native Landlock selection, retaining the authored empty-object default.
+ * @throws A field-only diagnostic for unsupported compatibility modes.
+ * @example landlock({}, "landlock") returns compatibility best_effort.
+ */
+function landlock(value: unknown, field: string): JsonObject {
+  const result = fields(value, field, {
+    compatibility: ["compatibility", string],
+  });
+  const compatibility = result["compatibility"] ?? "best_effort";
+  if (compatibility !== "best_effort" && compatibility !== "hard_requirement") {
+    invalid(`${field}.compatibility`);
+  }
+  return { compatibility };
 }
 
 /** Map the pinned canonical policy schema; absent sections stay absent and empty lists stay empty.
@@ -98,31 +110,24 @@ function policy(value: unknown, field: string): JsonObject {
     value,
     field,
     {
-      version: ["version", uint32],
+      version: ["version", integer(1n, 1n)],
       ["filesystem_policy"]: [
         "filesystem",
-        optional((input, path) =>
+        (input, path) =>
           fields(input, path, {
             ["include_workdir"]: ["includeWorkdir", boolean],
             ["read_only"]: ["readOnly", list(string)],
             ["read_write"]: ["readWrite", list(string)],
           }),
-        ),
       ],
-      landlock: [
-        "landlock",
-        optional((input, path) =>
-          fields(input, path, { compatibility: ["compatibility", string] }),
-        ),
-      ],
+      landlock: ["landlock", landlock],
       process: [
         "process",
-        optional((input, path) =>
+        (input, path) =>
           fields(input, path, {
             ["run_as_user"]: ["runAsUser", string],
             ["run_as_group"]: ["runAsGroup", string],
           }),
-        ),
       ],
       ["network_policies"]: [
         "networkPolicies",
@@ -151,7 +156,7 @@ function policy(value: unknown, field: string): JsonObject {
   return result;
 }
 
-/** Convert a captured native v0.0.116 policy to a complete SDK message without retaining YAML.
+/** Convert a captured native v0.1.0 policy to a complete SDK message without retaining YAML.
  * Runtime SDK imports occur only on invocation, after fail-closed route registration and mode validation.
  * @throws Safe source-path diagnostics for unknown, malformed, or unrepresentable native fields.
  * @example decodeNativePolicy("version: 1", "/policy.yaml") grants no implicit project access.

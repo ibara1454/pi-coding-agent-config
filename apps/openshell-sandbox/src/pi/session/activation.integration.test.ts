@@ -36,7 +36,6 @@ describe("AdapterActivation.prepare", () => {
     expect(activation.runtime).toBeUndefined();
     expect(f.runtime.sdk.deleteCount).toBe(1);
     expect(f.runtime.native.sandboxPresent).toBe(false);
-    expect(f.runtime.native.networkPresent).toBe(false);
   });
   it("should retain failed discovery ownership until observed close when shutdown cannot terminate the child", async () => {
     const f = piUnitFixture();
@@ -126,7 +125,6 @@ describe("AdapterActivation.startRuntime", () => {
       expect(activation.runtime).toBeUndefined();
       expect(runtime.sdk.deleteCount).toBe(1);
       expect(runtime.native.sandboxPresent).toBe(false);
-      expect(runtime.native.networkPresent).toBe(false);
       expect(f.setStatus).toHaveBeenCalledTimes(publications);
       expect(f.sendMessage).not.toHaveBeenCalled();
     } finally {

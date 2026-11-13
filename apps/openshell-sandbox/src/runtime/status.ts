@@ -87,7 +87,6 @@ function recoveryStatus(
       ? {
           gatewayEndpoint: prepared.handle.endpoint,
           tlsDirectory: prepared.handle.tlsDirectory,
-          networkId: prepared.handle.networkId,
         }
       : undefined);
   return Object.freeze({
@@ -103,9 +102,6 @@ function recoveryStatus(
       : {}),
     ...(gateway?.tlsDirectory !== undefined
       ? { tlsDirectory: safeText(gateway.tlsDirectory, MAX_STATUS_TEXT_LENGTH) }
-      : {}),
-    ...(gateway?.networkId !== undefined
-      ? { networkId: safeText(gateway.networkId, MAX_STATUS_TEXT_LENGTH) }
       : {}),
   });
 }

@@ -13,6 +13,7 @@ import type { GenerationInput } from "./types.ts";
  * @throws If local binding validation, native creation, or acknowledgment identity validation fails.
  * @example An unknown "registry" binding rejects without invoking onCreateAttempt or sending an RPC.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Request assembly and acknowledgment share one known-unsent to uncertain ownership transition.
 export async function createNativeSandbox(
   request: Readonly<{
     input: GenerationInput;
@@ -41,7 +42,9 @@ export async function createNativeSandbox(
   );
   const nativeRequest = {
     name: sandboxName,
-    workspace: "default",
+    workspaceScope: {
+      selection: { case: "workspace" as const, value: "default" },
+    },
     labels: { ...gateway.labels },
     spec: {
       policy,

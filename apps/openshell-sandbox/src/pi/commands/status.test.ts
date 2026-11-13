@@ -74,7 +74,6 @@ describe("registerSandboxStatus", () => {
           createOutcome: "unknown",
           gatewayEndpoint: "https://gateway",
           tlsDirectory: "/owned/tls",
-          networkId: "owned-network",
         },
       }),
     );
@@ -86,7 +85,6 @@ describe("registerSandboxStatus", () => {
       expect(message).toContain("selected-image");
       expect(message).toContain("owned-sandbox");
       expect(message).toContain("/owned/tls");
-      expect(message).toContain("owned-network");
       const policyLine = message
         .split("\n")
         .find((line) => line.includes("/policy/"));
@@ -161,7 +159,6 @@ describe("registerSandboxStatus", () => {
             ...(createOutcome ? { createOutcome } : {}),
             gatewayEndpoint: "https://127.0.0.1:43123",
             tlsDirectory: "/private/tls",
-            networkId: "private-network",
           },
         }),
       );
@@ -173,7 +170,6 @@ describe("registerSandboxStatus", () => {
         );
         expect(message).toContain("Gateway: https://127.0.0.1:43123");
         expect(message).toContain("TLS bundle directory: /private/tls");
-        expect(message).toContain("Docker network ID: private-network");
         expect(message.includes("independent backend-settlement proof")).toBe(
           createOutcome === "unknown",
         );

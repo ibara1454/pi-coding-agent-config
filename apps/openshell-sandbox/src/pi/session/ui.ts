@@ -60,7 +60,7 @@ export function publishFailure(
     "safeMessage" in diagnostic &&
     typeof diagnostic.safeMessage === "string"
       ? inlineText(diagnostic.safeMessage)
-      : `OpenShell ${operation} failed. Check settings/YAML, local Docker, and native OpenShell 0.0.116 prerequisites.`;
+      : `OpenShell ${operation} failed. Check settings/YAML, local Docker, and native OpenShell 0.1.0 prerequisites.`;
   const recovery =
     typeof diagnostic === "object" &&
     diagnostic !== null &&
@@ -76,7 +76,6 @@ export function publishFailure(
           `Sandbox: ${inlineText(coordinates.sandboxName, recoveryTextWidth)}; creation: ${coordinates.createOutcome ?? "not started"}`,
           `Gateway: ${inlineText(coordinates.gatewayEndpoint ?? "unavailable", recoveryTextWidth)}`,
           `TLS bundle directory: ${inlineText(coordinates.tlsDirectory ?? "unavailable", recoveryTextWidth)}`,
-          `Docker network ID: ${inlineText(coordinates.networkId ?? "unavailable", recoveryTextWidth)}`,
         ]
       : []),
   ].join("\n");

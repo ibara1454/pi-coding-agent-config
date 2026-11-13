@@ -94,7 +94,6 @@ function recoveryLines(status: SanitizedRuntimeStatus): string[] {
     `Sandbox: ${inlineText(recovery.sandboxName)}; creation: ${recovery.createOutcome ?? "not started"}`,
     `Gateway: ${inlineText(recovery.gatewayEndpoint ?? "unavailable")}`,
     `TLS bundle directory: ${inlineText(recovery.tlsDirectory ?? "unavailable")}`,
-    `Docker network ID: ${inlineText(recovery.networkId ?? "unavailable")}`,
     ...(recovery.createOutcome === "unknown"
       ? [
           "Unknown creation requires independent backend-settlement proof; Ready/NotFound is insufficient.",

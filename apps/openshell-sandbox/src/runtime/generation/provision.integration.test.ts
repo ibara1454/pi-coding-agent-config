@@ -2,6 +2,7 @@ import { describe, expect, test as it } from "bun:test";
 import { ok } from "node:assert/strict";
 import { create } from "@bufbuild/protobuf";
 import {
+  NetworkEnforcementMode,
   type SandboxPolicy,
   SandboxPolicySchema,
 } from "@nvidia/openshell-sdk/raw";
@@ -22,7 +23,6 @@ const HTTPS_PORT = 443;
 function boundEnvironment(): SandboxEnvironment {
   return {
     ...environment(),
-    profiles: [],
     policy: {
       sourcePath: "/policy.yaml",
       sdkPolicy: create(SandboxPolicySchema, {
@@ -38,7 +38,7 @@ function boundEnvironment(): SandboxEnvironment {
                 host: "registry.example",
                 ports: [HTTPS_PORT],
                 protocol: "rest",
-                enforcement: "enforce",
+                enforcement: NetworkEnforcementMode.ENFORCE,
                 credentialBinding: { provider: "registry" },
               },
               { host: "public.example", ports: [HTTPS_PORT] },
@@ -56,12 +56,17 @@ function boundEnvironment(): SandboxEnvironment {
 function endpointlessProfileFixture() {
   const selectedProfile = profile();
   selectedProfile.endpoints = [];
-  const fixture = gateway({ selected: selectedProfile });
+  const fixture = gateway();
   const { handle } = fixture;
   Object.assign(handle, {
     labels: { ["openshell.ai/instance-id"]: handle.instanceId },
   });
-  const selected = boundEnvironment();
+  const selected: SandboxEnvironment = {
+    ...boundEnvironment(),
+    profiles: [
+      { sourcePath: "/profiles/registry.yaml", sdkProfiles: [selectedProfile] },
+    ],
+  };
   const submissions: { policy?: SandboxPolicy; providers?: string[] }[] = [];
   Object.assign(handle.client.raw, {
     createSandbox: (request: {

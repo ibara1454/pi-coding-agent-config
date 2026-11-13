@@ -13,7 +13,6 @@ const handle: ManagedGateway = {
   client: gatewayFixture.sdk.client,
   endpoint: "unix:///gateway\u001b",
   instanceId: gatewayFixture.effects.host.instanceId,
-  networkId: "net",
   tlsDirectory: "/tls\nsecret",
   labels: {},
   signal: new AbortController().signal,
@@ -57,7 +56,6 @@ describe("runtimeStatus", () => {
         createOutcome: "unknown",
         gatewayEndpoint: "unix:///gateway",
         tlsDirectory: "/tlssecret",
-        networkId: "net",
       },
       requiredNativeReadWritePaths: ["/project\r/work"],
       image: "sha256:known",
@@ -114,7 +112,6 @@ describe("runtimeStatus", () => {
       sandboxName: generation.sandboxName,
       gatewayEndpoint: "unix:///gateway",
       tlsDirectory: "/tlssecret",
-      networkId: "net",
     });
   });
   it("should show bounded gateway coordinates before sandbox creation and omit them after cleanup", () => {
@@ -125,7 +122,6 @@ describe("runtimeStatus", () => {
       gatewayCoordinates: {
         gatewayEndpoint: "https://localhost:43123\u001b",
         tlsDirectory: `/tls\n/${"x".repeat(OVERSIZE_STATUS_TEXT)}`,
-        networkId: "network\r",
       },
       creationOutcome: undefined,
       requiredPaths: [],
@@ -147,7 +143,6 @@ describe("runtimeStatus", () => {
         0,
         MAX_STATUS_TEXT_LENGTH,
       ),
-      networkId: "network",
     });
     expect(status.recovery).not.toHaveProperty("createOutcome");
     expect(Object.isFrozen(status.recovery)).toBe(true);
@@ -195,7 +190,6 @@ describe("runtimeStatus", () => {
       sandboxName: generation.sandboxName,
       tlsDirectory: "/state//tls",
     });
-    expect(status.recovery).not.toHaveProperty("networkId");
     expect(status.recovery).not.toHaveProperty("gatewayEndpoint");
     expect(status.recovery).not.toHaveProperty("createOutcome");
   });

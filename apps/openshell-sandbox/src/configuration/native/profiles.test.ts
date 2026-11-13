@@ -49,6 +49,34 @@ const INVALID_PROFILES = [
   ],
   ["a binary lacks its path", "id: work\ndisplay_name: Work\nbinaries: [{}]"],
   [
+    "binary harness metadata was removed",
+    "id: work\ndisplay_name: Work\nbinaries: [{path: /usr/bin/git, harness: false}]",
+  ],
+  [
+    "MCP options are explicitly null",
+    "id: work\ndisplay_name: Work\nendpoints: [{host: tools.example, protocol: mcp, mcp: null}]",
+  ],
+  [
+    "a duration is malformed",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, refresh: {refresh_before: secret}}]",
+  ],
+  [
+    "a duration contains trailing text",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, refresh: {refresh_before: 1secret}}]",
+  ],
+  [
+    "a duration contains trailing whitespace",
+    'id: work\ndisplay_name: Work\ncredentials: [{name: token, refresh: {refresh_before: "1s\\n"}}]',
+  ],
+  [
+    "a duration loses nanosecond precision",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, token_grant: {token_endpoint: https://auth.example, cache_ttl: 0.1234567891s}}]",
+  ],
+  [
+    "legacy duration seconds exceed the protobuf representation",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, refresh: {refresh_before_seconds: 9223372036854775807}}]",
+  ],
+  [
     "a discovery reference is not a string",
     "id: work\ndisplay_name: Work\ndiscovery: {credentials: [1]}",
   ],
@@ -214,4 +242,130 @@ endpoints:
     expect(roundtripped.endpoints[0]?.denyRules).toEqual([]);
     expect(roundtripped.endpoints[0]?.mcp?.strictToolNames).toBeUndefined();
   });
+  it("should retain canonical MCP versions and native mode enums through the SDK wire format", async () => {
+    const [profile] = await decodeNativeProfiles(
+      `id: work
+display_name: Work
+endpoints:
+  - host: tools.example
+    protocol: McP
+    enforcement: enforce
+    access: read-only
+    mcp:
+      versions: ["2025-11-25", "2025-03-26"]
+      strict_tool_names: false
+      allow_all_known_mcp_methods: null
+  - host: defaults.example
+    protocol: mcp
+`,
+      "/profile.yaml",
+    );
+    if (!profile) {
+      throw new Error("Expected the decoded work profile.");
+    }
+    const roundtripped = fromBinary(
+      ProviderProfileSchema,
+      toBinary(ProviderProfileSchema, profile),
+    );
+    expect(roundtripped.endpoints[0]).toMatchObject({
+      enforcement: 1,
+      access: 1,
+      mcp: { versions: ["2025-03-26", "2025-11-25"], strictToolNames: false },
+    });
+    expect(
+      roundtripped.endpoints[0]?.mcp?.allowAllKnownMcpMethods,
+    ).toBeUndefined();
+    expect(roundtripped.endpoints[1]?.mcp?.versions).toEqual(["2025-11-25"]);
+  });
+  it.each([
+    ["compatibility seconds are omitted", "", undefined],
+    ["compatibility seconds are zero", "refresh_before_seconds: 0", undefined],
+    [
+      "compatibility seconds are nonzero",
+      "refresh_before_seconds: 60",
+      { seconds: 60n, nanos: 0 },
+    ],
+    ["explicit WKT is zero", 'refresh_before: "0s"', { seconds: 0n, nanos: 0 }],
+    [
+      "explicit WKT has nanoseconds",
+      'refresh_before: "1.000000001s"',
+      { seconds: 1n, nanos: 1 },
+    ],
+    [
+      "explicit WKT accompanies zero compatibility seconds",
+      'refresh_before: "0.500s", refresh_before_seconds: 0',
+      { seconds: 0n, nanos: 500_000_000 },
+    ],
+  ] as const)(
+    "should preserve native duration presence and precision through the wire when %s",
+    async (_condition, fields, expected) => {
+      const [profile] = await decodeNativeProfiles(
+        `id: work
+display_name: Work
+credentials:
+  - name: token
+    refresh: {max_lifetime: "1.250s", max_lifetime_seconds: 0, ${fields}}
+    token_grant:
+      token_endpoint: https://auth.example/token
+      cache_ttl: "0.500s"
+      cache_ttl_seconds: 0
+`,
+        "/profile.yaml",
+      );
+      if (!profile) {
+        throw new Error("Expected the decoded work profile.");
+      }
+      const roundtripped = fromBinary(
+        ProviderProfileSchema,
+        toBinary(ProviderProfileSchema, profile),
+      );
+      const duration = roundtripped.credentials[0]?.refresh?.refreshBefore;
+      expect(duration?.seconds).toBe(expected?.seconds);
+      expect(duration?.nanos).toBe(expected?.nanos);
+      expect(roundtripped.credentials[0]?.refresh?.maxLifetime).toMatchObject({
+        seconds: 1n,
+        nanos: 250_000_000,
+      });
+      expect(roundtripped.credentials[0]?.tokenGrant?.cacheTtl).toMatchObject({
+        seconds: 0n,
+        nanos: 500_000_000,
+      });
+    },
+  );
+  it.each([
+    [
+      "refresh_before repeats a nonzero value",
+      "refresh: {strategy: static, refresh_before: '60s', refresh_before_seconds: 60}",
+    ],
+    [
+      "refresh_before differs from compatibility seconds",
+      "refresh: {strategy: static, refresh_before: '3600s', refresh_before_seconds: 60}",
+    ],
+    [
+      "max_lifetime repeats a nonzero value",
+      "refresh: {strategy: static, max_lifetime: '60s', max_lifetime_seconds: 60}",
+    ],
+    [
+      "max_lifetime differs from compatibility seconds",
+      "refresh: {strategy: static, max_lifetime: '3600s', max_lifetime_seconds: 60}",
+    ],
+    [
+      "cache_ttl repeats a nonzero value",
+      "token_grant: {token_endpoint: 'https://auth.example/token', cache_ttl: '60s', cache_ttl_seconds: 60}",
+    ],
+    [
+      "cache_ttl differs from compatibility seconds",
+      "token_grant: {token_endpoint: 'https://auth.example/token', cache_ttl: '3600s', cache_ttl_seconds: 60}",
+    ],
+  ])(
+    "should reject conflicting duration declarations when %s",
+    async (_condition, metadata) => {
+      await expect(
+        decodeNativeProfiles(
+          `id: work\ndisplay_name: Work\ncredentials:\n  - name: token\n    ${metadata}`,
+          "/profile.yaml",
+        ),
+      ).rejects.toMatchObject({ code: "configuration-invalid" });
+    },
+  );
 });
