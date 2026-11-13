@@ -49,6 +49,32 @@ const INVALID_PROFILES = [
   ],
   ["a binary lacks its path", "id: work\ndisplay_name: Work\nbinaries: [{}]"],
   [
+    "a credential supplies gateway-owned token grant authorities",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, token_grant_owners: [secret]}]",
+  ],
+  [
+    "a stable placeholder is not boolean",
+    "id: work\ndisplay_name: Work\ncredentials: [{name: token, stable_placeholder: secret}]",
+  ],
+  ["annotations are null", "id: work\ndisplay_name: Work\nannotations: null"],
+  ["discovery is null", "id: work\ndisplay_name: Work\ndiscovery: null"],
+  [
+    "the provider file list is null",
+    "id: work\ndisplay_name: Work\nfiles: null",
+  ],
+  [
+    "a file template member is null",
+    "id: work\ndisplay_name: Work\nfiles: [null]",
+  ],
+  [
+    "a file template has no content",
+    "id: work\ndisplay_name: Work\nfiles: [{path: config.toml}]",
+  ],
+  [
+    "a file template contains unsupported fields",
+    "id: work\ndisplay_name: Work\nfiles: [{path: config.toml, content: text, secret: secret}]",
+  ],
+  [
     "binary harness metadata was removed",
     "id: work\ndisplay_name: Work\nbinaries: [{path: /usr/bin/git, harness: false}]",
   ],
@@ -131,6 +157,38 @@ binaries: [/usr/local/bin/node]
       ],
       binaries: [{ path: "/usr/local/bin/node" }],
     });
+  });
+  it("should retain stable placeholders and provider file templates through the SDK wire format", async () => {
+    const [profile] = await decodeNativeProfiles(
+      `id: work
+display_name: Work
+credentials:
+  - name: token
+    env_vars: [TOKEN]
+    stable_placeholder: true
+files:
+  - path: config.toml
+    content: 'endpoint = "{{config.endpoint}}"'
+    env_var: CONFIG_PATH
+`,
+      "/profile.yaml",
+    );
+    if (!profile) {
+      throw new Error("Expected the decoded work profile.");
+    }
+    const roundtripped = fromBinary(
+      ProviderProfileSchema,
+      toBinary(ProviderProfileSchema, profile),
+    );
+    expect(roundtripped.credentials[0]?.stablePlaceholder).toBe(true);
+    expect(roundtripped.credentials[0]?.tokenGrantOwners).toEqual([]);
+    expect(roundtripped.files).toMatchObject([
+      {
+        path: "config.toml",
+        content: 'endpoint = "{{config.endpoint}}"',
+        envVar: "CONFIG_PATH",
+      },
+    ]);
   });
   it("should preserve each profile in a list and normalize empty discovery instead of inventing references", async () => {
     const profiles = await decodeNativeProfiles(
@@ -252,7 +310,7 @@ endpoints:
     enforcement: enforce
     access: read-only
     mcp:
-      versions: ["2025-11-25", "2025-03-26"]
+      versions: ["2026-07-28", "2025-11-25", "2025-03-26"]
       strict_tool_names: false
       allow_all_known_mcp_methods: null
   - host: defaults.example
@@ -270,7 +328,10 @@ endpoints:
     expect(roundtripped.endpoints[0]).toMatchObject({
       enforcement: 1,
       access: 1,
-      mcp: { versions: ["2025-03-26", "2025-11-25"], strictToolNames: false },
+      mcp: {
+        versions: ["2025-03-26", "2025-11-25", "2026-07-28"],
+        strictToolNames: false,
+      },
     });
     expect(
       roundtripped.endpoints[0]?.mcp?.allowAllKnownMcpMethods,

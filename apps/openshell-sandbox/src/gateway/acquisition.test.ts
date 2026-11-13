@@ -86,7 +86,7 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
-  it.each(["0.0.116", "0.1.1", "0.1.0-dev", "0.1.0.1"])(
+  it.each(["0.1.0", "0.1.7", "0.1.8-dev", "0.1.8.1"])(
     "should refuse native release %s before creating a private namespace",
     async (version) => {
       const fixture = runtimeFixture();

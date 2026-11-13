@@ -60,7 +60,7 @@ export function publishFailure(
     "safeMessage" in diagnostic &&
     typeof diagnostic.safeMessage === "string"
       ? inlineText(diagnostic.safeMessage)
-      : `OpenShell ${operation} failed. Check settings/YAML, local Docker, and native OpenShell 0.1.0 prerequisites.`;
+      : `OpenShell ${operation} failed. Check settings/YAML, local Docker, and native OpenShell 0.1.8 prerequisites.`;
   const recovery =
     typeof diagnostic === "object" &&
     diagnostic !== null &&

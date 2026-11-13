@@ -44,6 +44,21 @@ function profile(value: unknown, field: string): JsonObject {
       description: ["description", string],
       category: ["category", enumeration(CATEGORIES)],
       credentials: ["credentials", list(credential)],
+      files: [
+        "files",
+        list((input, path) =>
+          fields(
+            input,
+            path,
+            {
+              path: ["path", string],
+              content: ["content", string],
+              ["env_var"]: ["envVar", string],
+            },
+            ["path", "content"],
+          ),
+        ),
+      ],
       endpoints: ["endpoints", list(endpoint(true))],
       binaries: ["binaries", list(binary(true))],
       ["inference_capable"]: ["inferenceCapable", boolean],

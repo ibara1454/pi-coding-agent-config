@@ -7,7 +7,7 @@ import type { GatewayHostContext as HostContext } from "./types.ts";
 
 const GATEWAY_STARTUP_MS = 30_000;
 const HEALTH_POLL_MS = 100;
-const GATEWAY_VERSION = /^v?0\.1\.0$/;
+const GATEWAY_VERSION = /^v?0\.1\.8$/;
 
 interface GatewayPortListener {
   readonly once: (event: "error", listener: (error: Error) => void) => void;

@@ -66,7 +66,7 @@ function rawResponses(
   const profiles = new Map<string, ProviderProfile>();
   return Object.assign({} as OpenShellClient["raw"], {
     ...providerResponses(),
-    health: async () => ({ status: 1, version: "0.1.0" }),
+    health: async () => ({ status: 1, version: "0.1.8" }),
     updateConfig: async () => ({}),
     getGatewayConfig: async () => ({
       settings: {

@@ -11,10 +11,10 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
 
      Start Docker and ensure its local Unix socket is accessible to the Pi user. Arrange access/file sharing for the selected project yourself; the extension does not install or restart services. For WSL2, enable the WSL2 backend and distribution integration so the socket is available inside the distribution.
 
-     **Required: Docker host networking for the trusted supervisor.** OpenShell 0.1.0 runs its supervisor with `network_mode=host` so it can reach the gateway's primary loopback listener. The model-Bash workload stays on `network_mode=none`. Docker Engine on Linux supports host networking directly; see [NVIDIA's versioned Docker-driver requirement](https://github.com/NVIDIA/OpenShell/blob/v0.1.0/crates/openshell-driver-docker/README.md#gateway-session-and-tls).
+     **Required for this integration: Docker host networking for the trusted supervisor.** OpenShell 0.1.8 defaults its supervisor to `network_mode=host` so it can reach the private gateway's loopback listener. The model-Bash workload stays on `network_mode=none`. Native bridge mode is optional and is not selected by this extension; no new Docker setting is required when upgrading a working 0.1.0 installation. See the [versioned Docker-driver requirement](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/crates/openshell-driver-docker/README.md#gateway-session-and-tls).
 
      **Docker Desktop 4.34+:** open **Settings → Resources → Network → Enable host networking**, then follow your installed version's apply/restart prompt. Selecting host mode for a container does not enable this Desktop setting. Enhanced Container Isolation is incompatible with this setup. If a restart is required, it can interrupt other containers. See [Docker's setup instructions](https://docs.docker.com/engine/network/drivers/host/#docker-desktop).
-2. Install the **native OpenShell 0.1.0 CLI and gateway** using the commands below, based on the [versioned upstream instructions](https://docs.nvidia.com/openshell/v0.1.0/about/installation). Existing 0.0.x installations require sandbox cleanup, backups, and uninstall before installation; follow the [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.0/docs/upgrade/0-1-0.mdx). Do not reuse old sandbox state or mix native/SDK versions.
+2. Install the **native OpenShell 0.1.8 CLI and gateway** using the commands below, based on the [versioned upstream instructions](https://docs.nvidia.com/openshell/v0.1.8/about/installation). Existing 0.0.x installations require sandbox cleanup, backups, and uninstall before installation; follow the [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/upgrade/0-1-0.mdx). Do not reuse old sandbox state or mix native/SDK versions.
    - **Linux/WSL2:** Debian/Ubuntu or an RPM-based distribution, x86\_64 or ARM64, glibc 2.28+, package-install privileges (`sudo`), and a working systemd user session. Enable systemd in WSL2 before using this installer.
    - **Apple Silicon macOS:** install [Homebrew](https://brew.sh/) first. Intel macOS is not supported by this release.
    - Both platforms need `curl` and a SHA-256 utility (`sha256sum` or `shasum`).
@@ -22,8 +22,8 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
      Run as your normal user; the installer requests package-manager privileges when needed. Both the installer script and the selected release are pinned:
 
      ```sh
-     installer="$(curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.0/install.sh)" &&
-       OPENSHELL_VERSION=v0.1.0 sh -c "$installer"
+     installer="$(curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.8/install.sh)" &&
+       OPENSHELL_VERSION=v0.1.8 sh -c "$installer"
      ```
 
      The installer installs `openshell` and `openshell-gateway` through the native package manager, verifies downloaded Linux packages against release checksums, and starts/registers a default local gateway through systemd or Homebrew. That default gateway is separate from the private gateway this extension owns.
@@ -37,7 +37,7 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
      openshell status
      ```
 
-     Both version commands must report `0.1.0`, both binaries must be on `PATH`, and `openshell status` should reach the installer's default gateway. This does not prove the extension's sandbox permissions or project access. Installing `openshell` from PyPI installs only the Python SDK, not these native binaries.
+     Both version commands must report `0.1.8`, both binaries must be on `PATH`, and `openshell status` should reach the installer's default gateway. This does not prove the extension's sandbox permissions or project access. Installing `openshell` from PyPI installs only the Python SDK, not these native binaries.
 3. Create a **GitHub personal access token (classic)** for [GitHub Packages authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages). Fine-grained tokens are not supported:
    - Open GitHub **Settings &gt; Developer settings &gt; Personal access tokens &gt; Tokens (classic)**, then choose **Generate new token &gt; Generate new token (classic)**. See [GitHub's token creation guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
    - Enter a descriptive name and expiration, select only **`read:packages`**, and click **Generate token**.
@@ -49,6 +49,14 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
      # For Zsh
      echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.zshrc && source ~/.zshrc
    ```
+
+### Upgrade from 0.1.0
+
+1. Close existing Pi activations cleanly and preserve any reported recovery coordinates. Back up both native binaries before replacement; worktrees share `PATH`. When returning to the 0.1.0 branch, launch Pi with that backup directory first on `PATH` because the extension checks the exact native version.
+2. Install matching 0.1.8 CLI/gateway binaries and run `bun install --frozen-lockfile` from the repository root with registry authentication available. Upgrade the gateway before launching new supervisors; let it select its matching runtime images. The installer above manages a default service: for a shared host where that service must remain untouched, stage and checksum the two native tarballs from the [0.1.8 release](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.8) instead.
+3. Review custom profiles: static credentials without placement metadata now resolve only in `Authorization` (or explicitly enabled body/WebSocket rewriting). For an API key header, declare `auth_style: header` and `header_name: x-api-key` on that credential. Query/path placements likewise need explicit metadata; `auth_style` selects the active placement. Keep endpoint bindings and grants narrow.
+4. Use `protocol: websocket` with explicit handshake/message rules for WebSockets; REST upgrades now return 403 even in audit mode. Use canonical targets for filesystem policy paths through writable-workspace symlinks, and IPv4 rather than IPv4-mapped IPv6 endpoint literals.
+5. Run `/reload` after reviewing policy/profile changes. This imports the edited profiles into a fresh private gateway; editing YAML alone does not update an active catalog. Selected-policy grants and attached-profile grants remain additive. See the [pinned release notes](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.8) for other deployment-specific changes.
 
 ## About OpenShell
 
@@ -81,7 +89,7 @@ Before normal model use:
 2. For a linked worktree, first launch Pi for inspection and run `/sandbox`. Copy the complete quoted external Git metadata paths under `Required explicit native read_write grants` into that policy, keeping their quotes and escapes (valid YAML scalars); do not attempt normal model work yet.
 3. Review the grants, edit the policy, then run `/reload` to activate it. Do not grant an ancestor directory, host home, SSH credentials, Docker socket, or other worktrees merely to make Git work. Grants remain subject to actual guest identity, host permissions, and Docker file sharing.
 
-OpenShell 0.1.0 has **no built-in provider profiles**. For authenticated HTTPS Git, review the [versioned GitHub example](https://github.com/NVIDIA/OpenShell/blob/v0.1.0/providers/github.yaml), adapt its binary paths and grants to your image, and save it as `github-profile.yaml` beside the declaring settings file. Add `./github-profile.yaml` to `openShellSandbox.profilePaths` and the following provider to `providers`, preserving any other needed entries:
+OpenShell 0.1.8 has **no built-in provider profiles**. For authenticated HTTPS Git, review the [versioned GitHub example](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/providers/github.yaml), adapt its binary paths and grants to your image, and save it as `github-profile.yaml` beside the declaring settings file. Add `./github-profile.yaml` to `openShellSandbox.profilePaths` and the following provider to `providers`, preserving any other needed entries:
 
 ```json
 {
