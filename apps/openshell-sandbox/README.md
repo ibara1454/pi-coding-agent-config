@@ -50,14 +50,6 @@ This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`
      echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.zshrc && source ~/.zshrc
    ```
 
-### Upgrade from 0.1.0
-
-1. Close existing Pi activations cleanly and preserve any reported recovery coordinates. Back up both native binaries before replacement; worktrees share `PATH`. When returning to the 0.1.0 branch, launch Pi with that backup directory first on `PATH` because the extension checks the exact native version.
-2. Install matching 0.1.8 CLI/gateway binaries and run `bun install --frozen-lockfile` from the repository root with registry authentication available. Upgrade the gateway before launching new supervisors; let it select its matching runtime images. The installer above manages a default service: for a shared host where that service must remain untouched, stage and checksum the two native tarballs from the [0.1.8 release](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.8) instead.
-3. Review custom profiles: static credentials without placement metadata now resolve only in `Authorization` (or explicitly enabled body/WebSocket rewriting). For an API key header, declare `auth_style: header` and `header_name: x-api-key` on that credential. Query/path placements likewise need explicit metadata; `auth_style` selects the active placement. Keep endpoint bindings and grants narrow.
-4. Use `protocol: websocket` with explicit handshake/message rules for WebSockets; REST upgrades now return 403 even in audit mode. Use canonical targets for filesystem policy paths through writable-workspace symlinks, and IPv4 rather than IPv4-mapped IPv6 endpoint literals.
-5. Run `/reload` after reviewing policy/profile changes. This imports the edited profiles into a fresh private gateway; editing YAML alone does not update an active catalog. Selected-policy grants and attached-profile grants remain additive. See the [pinned release notes](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.8) for other deployment-specific changes.
-
 ## About OpenShell
 
 [OpenShell](https://github.com/NVIDIA/OpenShell) is NVIDIA's runtime for running AI-agent commands in isolated environments called sandboxes. This extension uses it with Docker and a policy file to control which files and network destinations model-requested Bash can access.
