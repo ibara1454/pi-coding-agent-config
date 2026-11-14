@@ -156,7 +156,7 @@ function policy(value: unknown, field: string): JsonObject {
   return result;
 }
 
-/** Convert a captured native v0.1.0 policy to a complete SDK message without retaining YAML.
+/** Convert a captured native v0.1.8 policy to a complete SDK message without retaining YAML.
  * Runtime SDK imports occur only on invocation, after fail-closed route registration and mode validation.
  * @throws Safe source-path diagnostics for unknown, malformed, or unrepresentable native fields.
  * @example decodeNativePolicy("version: 1", "/policy.yaml") grants no implicit project access.

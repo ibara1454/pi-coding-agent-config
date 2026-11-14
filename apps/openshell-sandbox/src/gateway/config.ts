@@ -149,7 +149,7 @@ function verifyTlsMaterial(material: Buffer[]): GatewayTls {
 
 /** Writes native operational configuration, never provider secrets or a second user policy.
  * Bind mounts use the extension's host validation; native label admission cannot authorize paths.
- * Trusted runtime images and binaries continue to use native version-pinned defaults.
+ * Trusted runtime images and binaries use native defaults; supervisors receive only the CA.
  * @param host - Validated local Docker endpoint and filesystem owning the configuration write.
  * @param state - Private gateway state and verified TLS directory.
  * @param config - Private namespace and reserved loopback port.
@@ -177,8 +177,6 @@ log_level = "warn"
 enable_loopback_service_http = false
 server_sans = ${q(GATEWAY_SANS)}
 guest_tls_ca = ${q(join(tls, "ca.crt"))}
-guest_tls_cert = ${q(join(tls, "client/tls.crt"))}
-guest_tls_key = ${q(join(tls, "client/tls.key"))}
 [openshell.gateway.tls]
 cert_path = ${q(join(tls, "server/tls.crt"))}
 key_path = ${q(join(tls, "server/tls.key"))}

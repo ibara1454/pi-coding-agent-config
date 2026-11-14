@@ -109,6 +109,7 @@ describe("runGenerationSetup", () => {
         resourceVersion: "1",
         workspace: "default",
         serviceUrls: {},
+        restartCount: 0,
         ...replacement,
       });
       try {

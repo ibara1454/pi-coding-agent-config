@@ -30,7 +30,7 @@ export function runtimeTestProcesses(
     if (managed) {
       state.launches += 1;
     }
-    const stdout = argv[0] === "--version" ? "openshell-gateway 0.1.0" : "";
+    const stdout = argv[0] === "--version" ? "openshell-gateway 0.1.8" : "";
     queueMicrotask(() => {
       child.emit("spawn");
       if (!managed) {

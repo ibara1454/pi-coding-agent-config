@@ -49,6 +49,16 @@ const INVALID_ENDPOINTS = [
     false,
     { ["provider_credentialed"]: true },
   ],
+  [
+    "an endpoint supplies gateway-owned token grant authority",
+    false,
+    { ["token_grant_owner"]: "provider" },
+  ],
+  [
+    "a profile endpoint supplies gateway-owned token grant authority",
+    true,
+    { host: "api.example", ["token_grant_owner"]: "provider" },
+  ],
   ["policy MCP options occur without MCP protocol", false, { mcp: {} }],
   [
     "policy MCP options occur on REST traffic",
@@ -218,12 +228,21 @@ describe("endpoint", () => {
           {
             host: "tools.example",
             protocol: "mcp",
-            mcp: { versions: ["2025-11-25", "2025-03-26", "2025-06-18"] },
+            mcp: {
+              versions: [
+                "2026-07-28",
+                "2025-11-25",
+                "2025-03-26",
+                "2025-06-18",
+              ],
+            },
           },
           "endpoint",
         ),
       ).toMatchObject({
-        mcp: { versions: ["2025-03-26", "2025-06-18", "2025-11-25"] },
+        mcp: {
+          versions: ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"],
+        },
       });
     },
   );
@@ -232,6 +251,7 @@ describe("endpoint", () => {
     ["duplicate", ["2025-11-25", "2025-11-25"]],
     ["unsupported", ["latest"]],
     ["padded", [" 2025-11-25"]],
+    ["unreleased revision", ["2026-07-29"]],
     ["null", JSON.parse("null")],
   ])(
     "should reject policy and profile MCP revisions when the allowlist is %s",

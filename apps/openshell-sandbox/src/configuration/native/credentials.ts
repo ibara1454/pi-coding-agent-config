@@ -175,6 +175,7 @@ export function credential(value: unknown, field: string): JsonObject {
       description: ["description", string],
       ["env_vars"]: ["envVars", list(string)],
       required: ["required", boolean],
+      ["stable_placeholder"]: ["stablePlaceholder", boolean],
       ["auth_style"]: ["authStyle", string],
       ["header_name"]: ["headerName", string],
       ["query_param"]: ["queryParam", string],

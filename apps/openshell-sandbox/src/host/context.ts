@@ -151,7 +151,7 @@ export async function withGatewayExecutable(
     return Object.freeze({ ...host, gatewayExecutable: executable });
   }
   const safeMessage =
-    "OpenShell preparation requires the native openshell-gateway 0.1.0 executable on PATH. Install it using the official native installation guide, then /reload.";
+    "OpenShell preparation requires the native openshell-gateway 0.1.8 executable on PATH. Install it using the official native installation guide, then /reload.";
   throw Object.assign(new Error(safeMessage), { safeMessage });
 }
 

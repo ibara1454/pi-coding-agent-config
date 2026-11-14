@@ -43,7 +43,12 @@ const COMMON: Fields = {
 };
 
 const DEFAULT_MCP_VERSION = "2025-11-25";
-const MCP_VERSIONS = ["2025-03-26", "2025-06-18", DEFAULT_MCP_VERSION];
+const MCP_VERSIONS = [
+  "2025-03-26",
+  "2025-06-18",
+  DEFAULT_MCP_VERSION,
+  "2026-07-28",
+];
 
 /** Map exact native endpoint modes to protobuf enums without accepting normalized aliases.
  * @throws A field-only diagnostic for unknown or removed modes.

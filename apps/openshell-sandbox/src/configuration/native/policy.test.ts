@@ -133,6 +133,20 @@ network_middlewares:
     ["filesystem policy is null", "version: 1\nfilesystem_policy: null"],
     ["process policy is null", "version: 1\nprocess: null"],
     ["landlock policy is null", "version: 1\nlandlock: null"],
+    ["network policy map is null", "version: 1\nnetwork_policies: null"],
+    ["network middleware map is null", "version: 1\nnetwork_middlewares: null"],
+    [
+      "a network endpoint is null",
+      "version: 1\nnetwork_policies: {api: {endpoints: [null]}}",
+    ],
+    [
+      "a persisted GraphQL operation is null",
+      "version: 1\nnetwork_policies: {api: {endpoints: [{graphql_persisted_queries: {lookup: null}}]}}",
+    ],
+    [
+      "an allow query restriction is null",
+      "version: 1\nnetwork_policies: {api: {endpoints: [{rules: [{allow: {query: null}}]}]}}",
+    ],
     [
       "landlock compatibility is unknown",
       "version: 1\nlandlock: {compatibility: HARD_REQUIREMENT}",
@@ -383,4 +397,26 @@ network_policies:
       }
     },
   );
+  it("should retain the sessionless MCP revision and pinned omission default through the SDK wire format", async () => {
+    const policy = await decodeNativePolicy(
+      `version: 1
+network_policies:
+  api:
+    endpoints:
+      - {host: tools.example, protocol: mcp, mcp: {versions: ["2026-07-28", "2025-03-26"]}}
+      - {host: defaults.example, protocol: mcp}
+`,
+      "/policy.yaml",
+    );
+    const roundtripped = fromBinary(
+      SandboxPolicySchema,
+      toBinary(SandboxPolicySchema, policy),
+    );
+    expect(
+      roundtripped.networkPolicies["api"]?.endpoints[0]?.mcp?.versions,
+    ).toEqual(["2025-03-26", "2026-07-28"]);
+    expect(
+      roundtripped.networkPolicies["api"]?.endpoints[1]?.mcp?.versions,
+    ).toEqual(["2025-11-25"]);
+  });
 });

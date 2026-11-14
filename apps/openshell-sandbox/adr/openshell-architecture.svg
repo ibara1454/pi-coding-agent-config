@@ -9,7 +9,7 @@
 </defs>
 <rect width="1080" height="1000" fill="#ffffff"/>
 <text id="diagram-title" x="30" y="36" class="heading">Where credentials go in the Pi model-Bash integration</text>
-<text x="30" y="64" class="body muted">OpenShell v0.1.0 / local Docker — only model-requested Bash runs in the sandbox.</text>
+<text x="30" y="64" class="body muted">OpenShell v0.1.8 / local Docker — only model-requested Bash runs in the sandbox.</text>
 <rect x="25" y="90" width="420" height="710" rx="18" fill="#eff6ff" stroke="#2563eb" class="box"/>
 <text x="45" y="128" class="title opaque">HOST</text>
 <rect x="505" y="90" width="550" height="710" rx="18" fill="#fffbeb" stroke="#d97706" class="box"/>
@@ -34,7 +34,8 @@
 <text x="235" y="604" text-anchor="middle" class="body">User Bash (! / !!) → host</text>
 <text x="235" y="628" text-anchor="middle" class="small muted">Uses the normal host environment</text>
 <path d="M425 505 H482 V435 H540" stroke="#b91c1c" class="arrow" marker-end="url(#red)"/>
-<text x="480" y="412" text-anchor="middle" class="small muted">mTLS</text>
+<text x="480" y="392" text-anchor="middle" class="small muted">TLS +</text>
+<text x="480" y="412" text-anchor="middle" class="small muted">bearer</text>
 <rect x="545" y="330" width="465" height="190" rx="12" fill="#fff1f2" stroke="#b91c1c" class="box"/>
 <text x="777" y="364" text-anchor="middle" class="title">2. Supervisor / policy proxy</text>
 <text x="777" y="391" text-anchor="middle" class="body secret">Trusted; separate container; real credentials</text>
