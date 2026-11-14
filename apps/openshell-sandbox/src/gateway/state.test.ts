@@ -90,7 +90,7 @@ describe("createGatewayState", () => {
         (): Promise<void> => Promise.reject(new Error("unresolved")),
       );
       state.capture({
-        kind: "network",
+        kind: "process",
         release,
       });
       await expect(state.close()).rejects.toThrow(
@@ -112,7 +112,7 @@ describe("createGatewayState", () => {
       fixture.clock.restore();
     }
   });
-  it("should release captured process before network and remove state only after both", async () => {
+  it("should release captured processes before other resources and remove state only after both", async () => {
     const fixture = runtimeFixture();
     try {
       const state = await createGatewayState(
@@ -122,9 +122,9 @@ describe("createGatewayState", () => {
       );
       const order: string[] = [];
       state.capture({
-        kind: "network",
+        kind: "client",
         release: () => {
-          order.push("network");
+          order.push("client");
           return Promise.resolve();
         },
       });
@@ -136,7 +136,7 @@ describe("createGatewayState", () => {
         },
       });
       await state.close();
-      expect(order).toEqual(["process", "network"]);
+      expect(order).toEqual(["process", "client"]);
       await expect(
         fixture.effects.host.filesystem.lstat(directory),
       ).rejects.toMatchObject({ code: "ENOENT" });
@@ -169,7 +169,7 @@ describe("createGatewayState", () => {
       });
       expect(Object.isFrozen(state.environment)).toBe(true);
       state.capture({
-        kind: "network",
+        kind: "process",
         release: async () => undefined,
       });
       expect(Object.isFrozen(captured.at(-1))).toBe(true);
@@ -201,9 +201,9 @@ describe("createGatewayState", () => {
         () => undefined,
       );
       state.capture({
-        kind: "network",
+        kind: "client",
         release: () => {
-          order.push("network");
+          order.push("client");
           if (!retriable) {
             return Promise.reject(
               new HostProcessError("safe uncertain cleanup", uncertain),
@@ -222,7 +222,7 @@ describe("createGatewayState", () => {
         (await fixture.effects.host.filesystem.lstat(directory)).isDirectory(),
       ).toBe(true);
       await state.close();
-      expect(order).toEqual(["network", "process", "network"]);
+      expect(order).toEqual(["client", "process", "client"]);
       await expect(
         fixture.effects.host.filesystem.lstat(directory),
       ).rejects.toMatchObject({ code: "ENOENT" });

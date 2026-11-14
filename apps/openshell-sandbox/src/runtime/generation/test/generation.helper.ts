@@ -1,5 +1,5 @@
 import type { ProjectWorkspace } from "../../../workspace/index.ts";
-import { type RuntimeFixture, TEST_NETWORK } from "../../test/index.helper.ts";
+import type { RuntimeFixture } from "../../test/index.helper.ts";
 import { deadline, SETUP_TIMEOUT_MS } from "../../work/index.ts";
 import type { GenerationWork } from "../setup.ts";
 import type {
@@ -27,7 +27,6 @@ export function gateway(fixture: RuntimeFixture): PreparedGateway {
       client: fixture.sdk.client,
       endpoint: "http://127.0.0.1:43123",
       instanceId: fixture.effects.host.instanceId,
-      networkId: TEST_NETWORK,
       tlsDirectory: "/state/test/tls",
       labels: { "openshell.ai/instance-id": fixture.effects.host.instanceId },
       signal: fixture.activation.signal,

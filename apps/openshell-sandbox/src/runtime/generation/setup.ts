@@ -109,8 +109,8 @@ export async function awaitGenerationReadiness(
   }
 }
 
-/** Acquires workspace, gateway, providers, and sandbox; returns the acknowledged SDK ID after readiness.
- * @example a same-name replacement after readiness cannot receive later model commands.
+/** Acquires workspace, gateway, providers, and sandbox; retains acknowledged SDK identity after readiness.
+ * @example every model execution rechecks ownership before sending the canonical-name RPC.
  */
 export async function runGenerationSetup(
   work: GenerationWork,

@@ -10,7 +10,6 @@ import type { GatewayHostContext as HostContext } from "./types.ts";
 const STARTUP_DEADLINE_MS = 30_000;
 const TRANSIENT_FAILURE_COUNT = 1;
 const EXPECTED_HEALTH_CALLS = 2;
-const POLICY_SETTING_COUNT = 3;
 
 const tls = {
   caCert: Buffer.from("ca"),
@@ -35,11 +34,11 @@ describe("connectGateway", () => {
           ? Promise.reject(new Error("transient"))
           : originalHealth(...args);
       };
-      let updates = 0;
+      const updates: unknown[] = [];
       const originalUpdate = client.raw.updateConfig;
-      client.raw.updateConfig = (...args) => {
-        updates += 1;
-        return originalUpdate(...args);
+      client.raw.updateConfig = (request, ...args) => {
+        updates.push(request);
+        return originalUpdate(request, ...args);
       };
       const host: HostContext = {
         ...fixture.effects.host,
@@ -63,7 +62,18 @@ describe("connectGateway", () => {
         ),
       ).toBe(client);
       expect(healthCalls).toBe(EXPECTED_HEALTH_CALLS);
-      expect(updates).toBe(POLICY_SETTING_COUNT);
+      expect(updates).toEqual([
+        {
+          global: true,
+          settingKey: "agent_policy_proposals_enabled",
+          settingValue: { value: { case: "boolValue", value: false } },
+        },
+        {
+          global: true,
+          settingKey: "proposal_approval_mode",
+          settingValue: { value: { case: "stringValue", value: "manual" } },
+        },
+      ]);
     } finally {
       fixture.clock.restore();
     }
@@ -75,7 +85,7 @@ describe("connectGateway", () => {
         const original = client.raw.health;
         client.raw.health = async (...args) => ({
           ...(await original(...args)),
-          version: "0.0.999",
+          version: "0.0.116",
         });
       },
     ],
@@ -140,15 +150,15 @@ describe("connectGateway", () => {
       fixture.clock.restore();
     }
   });
-  it("should reject unapplied credential policy controls", async () => {
+  it("should reject enabled agent proposals instead of exposing the client", async () => {
     const fixture = runtimeFixture();
     try {
       const original = fixture.sdk.client.raw.getGatewayConfig;
       fixture.sdk.client.raw.getGatewayConfig = async (...args) => {
         const response = await original(...args);
-        const setting = response.settings["providers_v2_enabled"];
+        const setting = response.settings["agent_policy_proposals_enabled"];
         if (!setting) {
-          throw new Error("Expected synthetic credential setting.");
+          throw new Error("Expected synthetic proposal setting.");
         }
         setting.value = { case: "boolValue", value: true };
         return response;
@@ -160,7 +170,7 @@ describe("connectGateway", () => {
           child,
           fixture.activation.signal,
         ),
-      ).rejects.toThrow("credential policy controls");
+      ).rejects.toThrow("proposal controls");
     } finally {
       fixture.clock.restore();
     }

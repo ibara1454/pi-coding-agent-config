@@ -7,7 +7,7 @@ import type { GatewayHostContext as HostContext } from "./types.ts";
 
 const GATEWAY_STARTUP_MS = 30_000;
 const HEALTH_POLL_MS = 100;
-const GATEWAY_VERSION = /^v?0\.0\.116$/;
+const GATEWAY_VERSION = /^v?0\.1\.0$/;
 
 interface GatewayPortListener {
   readonly once: (event: "error", listener: (error: Error) => void) => void;
@@ -109,23 +109,24 @@ async function waitHealthy(
   }
 }
 
-/** Pins independent registered settings; never supplies an invented settings map or global policy. */
+/** Disable agent policy proposals and pin manual approval before exposing the client.
+ * @param client - Private mTLS client whose gateway-global settings are changed.
+ * @param signal - Cancels the bounded setting writes and authenticated readback.
+ * @throws On failed writes or missing, mistyped, or different readback values.
+ * @example await configureGateway(client, signal); // proposals are disabled and approval is manual
+ */
 async function configureGateway(
   client: OpenShellClient,
   signal: AbortSignal,
 ): Promise<void> {
-  const booleans = ["providers_v2_enabled", "agent_policy_proposals_enabled"];
-  await booleans.reduce<Promise<unknown>>(async (previous, settingKey) => {
-    await previous;
-    return client.raw.updateConfig(
-      {
-        global: true,
-        settingKey,
-        settingValue: { value: { case: "boolValue", value: false } },
-      },
-      { signal, timeoutMs: 5000 },
-    );
-  }, Promise.resolve());
+  await client.raw.updateConfig(
+    {
+      global: true,
+      settingKey: "agent_policy_proposals_enabled",
+      settingValue: { value: { case: "boolValue", value: false } },
+    },
+    { signal, timeoutMs: 5000 },
+  );
   await client.raw.updateConfig(
     {
       global: true,
@@ -138,16 +139,9 @@ async function configureGateway(
     {},
     { signal, timeoutMs: 5000 },
   );
-  if (
-    !booleans.every(
-      (key) =>
-        settings[key]?.value.case === "boolValue" &&
-        settings[key]?.value.value === false,
-    )
-  ) {
-    throw new Error(
-      "Private gateway credential policy controls did not apply.",
-    );
+  const proposals = settings["agent_policy_proposals_enabled"]?.value;
+  if (proposals?.case !== "boolValue" || proposals.value !== false) {
+    throw new Error("Private gateway proposal controls did not apply.");
   }
   const approval = settings["proposal_approval_mode"]?.value;
   if (approval?.case !== "stringValue" || approval.value !== "manual") {

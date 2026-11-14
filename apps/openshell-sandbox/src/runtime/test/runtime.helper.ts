@@ -42,8 +42,6 @@ export function runtimeFixture(): RuntimeFixture {
     sandboxId: undefined,
     sandboxName: undefined,
     sandboxPresent: false,
-    networkPresent: false,
-    namespace: "",
     calls: [],
     launches: 0,
   };

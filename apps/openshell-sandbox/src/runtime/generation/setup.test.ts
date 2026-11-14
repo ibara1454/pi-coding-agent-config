@@ -107,6 +107,8 @@ describe("runGenerationSetup", () => {
         labels: { ...prepared.handle.labels },
         phase: "ready",
         resourceVersion: "1",
+        workspace: "default",
+        serviceUrls: {},
         ...replacement,
       });
       try {

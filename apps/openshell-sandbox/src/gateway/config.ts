@@ -55,7 +55,7 @@ export async function prepareGatewayTls(
   return verifyTlsMaterial(await readTlsMaterial(host, state));
 }
 
-/** Enforce ownership, type, size, and owner-only modes for all eight native files.
+/** Enforce ownership, type, size, and owner-only modes for all nine native files.
  * @param host - Owner identity and filesystem.
  * @param state - Private native credential directory.
  * @returns Buffers for only the five mTLS files, in verification order.
@@ -72,6 +72,7 @@ async function readTlsMaterial(
     "server/tls.key",
     "client/tls.crt",
     "client/tls.key",
+    "ca.key",
     "jwt/signing.pem",
     "jwt/public.pem",
     "jwt/kid",
@@ -102,7 +103,7 @@ async function readTlsMaterial(
       throw new Error("Private TLS material is incomplete.");
     }
     await host.filesystem.chmod(path, OWNER_FILE_MODE);
-    if (!leaf.startsWith("jwt/")) {
+    if (leaf !== "ca.key" && !leaf.startsWith("jwt/")) {
       material.push(await host.filesystem.readFile(path));
     }
   }, Promise.resolve());
@@ -147,7 +148,8 @@ function verifyTlsMaterial(material: Buffer[]): GatewayTls {
 }
 
 /** Writes native operational configuration, never provider secrets or a second user policy.
- * Supervisor resolution uses native defaults; no binary or image override is emitted.
+ * Bind mounts use the extension's host validation; native label admission cannot authorize paths.
+ * Trusted runtime images and binaries continue to use native version-pinned defaults.
  * @param host - Validated local Docker endpoint and filesystem owning the configuration write.
  * @param state - Private gateway state and verified TLS directory.
  * @param config - Private namespace and reserved loopback port.
@@ -166,14 +168,17 @@ export async function writeGatewayConfig(
   const { namespace, port } = config;
   const q = JSON.stringify;
   const tls = state.tlsDirectory;
-  const content = `[openshell]\nversion = 1
+  const content = `[openshell]\nversion = 2
 [openshell.gateway]
 name = ${q(namespace)}
 bind_address = ${q(`127.0.0.1:${port}`)}
-compute_drivers = ["docker"]
+compute_driver = "docker"
 log_level = "warn"
 enable_loopback_service_http = false
 server_sans = ${q(GATEWAY_SANS)}
+guest_tls_ca = ${q(join(tls, "ca.crt"))}
+guest_tls_cert = ${q(join(tls, "client/tls.crt"))}
+guest_tls_key = ${q(join(tls, "client/tls.key"))}
 [openshell.gateway.tls]
 cert_path = ${q(join(tls, "server/tls.crt"))}
 key_path = ${q(join(tls, "server/tls.key"))}
@@ -189,13 +194,12 @@ kid_path = ${q(join(tls, "jwt/kid"))}
 gateway_id = ${q(namespace)}
 [openshell.drivers.docker]
 socket_path = ${q(host.dockerEndpoint.slice("unix://".length))}
-sandbox_namespace = ${q(namespace)}
-network_name = ${q(namespace)}
-grpc_endpoint = ${q(`https://host.openshell.internal:${port}`)}
+sandbox_label = ${q(namespace)}
+grpc_endpoint = ${q(`https://127.0.0.1:${port}`)}
 enable_bind_mounts = true
-guest_tls_ca = ${q(join(tls, "ca.crt"))}
-guest_tls_cert = ${q(join(tls, "client/tls.crt"))}
-guest_tls_key = ${q(join(tls, "client/tls.key"))}
+allow_driver_config = true
+[openshell.drivers.docker.resource_admission]
+enabled = false
 `;
   const path = join(state.directory, "gateway.toml");
   await host.filesystem.writeFile(path, content, { mode: 0o600, flag: "wx" });

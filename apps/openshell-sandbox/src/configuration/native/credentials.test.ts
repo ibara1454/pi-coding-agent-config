@@ -102,7 +102,7 @@ describe("credential", () => {
       required: true,
       refresh: {
         strategy: 3,
-        refreshBeforeSeconds: "60",
+        refreshBefore: "60s",
         material: [{ name: "refresh_token", required: true, secret: true }],
         additionalOutputs: [{ output: "session_token", credential: "session" }],
       },
@@ -115,6 +115,28 @@ describe("credential", () => {
         ],
         subjectToken: { source: "credential", credential: "access" },
       },
+    });
+  });
+  it("should lower all compatibility durations when explicit durations are absent", () => {
+    expect(
+      credential(
+        {
+          name: "token",
+          refresh: {
+            strategy: "static",
+            ["refresh_before_seconds"]: 60,
+            ["max_lifetime_seconds"]: 120,
+          },
+          ["token_grant"]: {
+            ["token_endpoint"]: "https://auth.example/token",
+            ["cache_ttl_seconds"]: 30,
+          },
+        },
+        "credential",
+      ),
+    ).toMatchObject({
+      refresh: { refreshBefore: "60s", maxLifetime: "120s" },
+      tokenGrant: { cacheTtl: "30s" },
     });
   });
   it("should select explicit token exchange grants while preserving null optional metadata", () => {
@@ -139,7 +161,7 @@ describe("credential", () => {
       // biome-ignore lint/plugin/biome-rules/use-undefined: The protobuf JSON mapping must retain native null refresh metadata until SDK decoding.
       refresh: null,
       // biome-ignore lint/plugin/biome-rules/use-undefined: The protobuf JSON mapping must retain the explicit null subject-token option.
-      tokenGrant: { grantType: 2, cacheTtlSeconds: "30", subjectToken: null },
+      tokenGrant: { grantType: 2, cacheTtl: "30s", subjectToken: null },
     });
   });
   it.each(INVALID_CREDENTIALS)("should reject when %s", (_case, input) => {

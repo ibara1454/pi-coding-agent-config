@@ -35,7 +35,10 @@ async function getOwnedProviderType(
   signal: AbortSignal,
 ): Promise<string | undefined> {
   const found = await gateway.client.raw.getProvider(
-    { name, workspace: "default" },
+    {
+      name,
+      workspaceScope: { selection: { case: "workspace", value: "default" } },
+    },
     { signal, timeoutMs: PROVIDER_RPC_TIMEOUT_MS },
   );
   if (acknowledgedProviderId(found, name) !== nativeId) {
@@ -57,12 +60,20 @@ async function deleteOwnedProvider(
 ): Promise<void> {
   const signal = AbortSignal.timeout(PROVIDER_RPC_TIMEOUT_MS);
   const options = { signal, timeoutMs: PROVIDER_RPC_TIMEOUT_MS };
+  // Native dependencies must load only after fail-closed model Bash registration.
+  const { DeletionOutcome } = await import("@nvidia/openshell-sdk/raw");
   try {
     await getOwnedProviderType(gateway, name, nativeId, signal);
-    await gateway.client.raw.deleteProvider(
-      { name, workspace: "default" },
+    const deleted = await gateway.client.raw.deleteProvider(
+      {
+        name,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+      },
       options,
     );
+    if (deleted.outcome !== DeletionOutcome.COMPLETED) {
+      throw new Error("Provider deletion was not confirmed.");
+    }
   } catch (error) {
     throw nativeFailure(
       "Native provider ownership or deletion failed; preserving private gateway.",
@@ -98,7 +109,7 @@ async function createAndScrub(
     capture();
     return await gateway.client.raw.createProvider(
       {
-        workspace: "default",
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
         provider: {
           metadata: { name, workspace: "default" },
           type: provider.profile,

@@ -1,5 +1,7 @@
 import { create } from "@bufbuild/protobuf";
+import { SdkError } from "@nvidia/openshell-sdk";
 import {
+  DeletionOutcome,
   ImportProviderProfilesResponseSchema,
   type ProviderProfile,
   type ProviderProfileResponse,
@@ -90,9 +92,11 @@ function providerResponse(name: string, type: string): ProviderResponse {
 /** Replaces native RPC effects and retains every captured provider for test-owned cleanup.
  * @example imported=false prevents both creation and credential access.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Keeps one fixture's imported profiles and provider lifecycle in the same owner.
 export function gateway(options: GatewayOptions = {}) {
   const calls: string[] = [];
   const created = new Map<string, string>();
+  const importedProfiles = new Map<string, ProviderProfile>();
   const owned: OwnedResource[] = [];
   // biome-ignore lint/plugin/biome-rules/use-undefined: Object.create requires null for a prototype-free native gateway fixture.
   const handle: ManagedGateway = Object.assign(Object.create(null), {
@@ -100,22 +104,37 @@ export function gateway(options: GatewayOptions = {}) {
     signal: new AbortController().signal,
     client: {
       raw: {
-        importProviderProfiles: () => {
+        importProviderProfiles: (request: {
+          profiles: { profile: ProviderProfile }[];
+        }) => {
           calls.push("import");
+          if (options.imported !== false) {
+            for (const { profile: selected } of request.profiles) {
+              importedProfiles.set(selected.id, selected);
+            }
+          }
           return Promise.resolve(
             create(ImportProviderProfilesResponseSchema, {
               imported: options.imported ?? true,
-              profiles: [profile()],
+              profiles: request.profiles.map(
+                ({ profile: selected }) => selected,
+              ),
             }),
           );
         },
-        getProviderProfile: (request: { id: string }) =>
-          options.lookup?.(request.id) ??
-          Promise.resolve(
-            create(ProviderProfileResponseSchema, {
-              profile: options.selected ?? profile(),
-            }),
-          ),
+        getProviderProfile: (request: { id: string }) => {
+          const selected = options.selected ?? importedProfiles.get(request.id);
+          return (
+            options.lookup?.(request.id) ??
+            (selected
+              ? Promise.resolve(
+                  create(ProviderProfileResponseSchema, { profile: selected }),
+                )
+              : Promise.reject(
+                  new SdkError("not_found", "Provider profile missing"),
+                ))
+          );
+        },
         createProvider: (request: {
           provider: { metadata: { name: string }; type: string };
         }) => {
@@ -141,7 +160,7 @@ export function gateway(options: GatewayOptions = {}) {
         },
         deleteProvider: () => {
           calls.push("delete");
-          return Promise.resolve({});
+          return Promise.resolve({ outcome: DeletionOutcome.COMPLETED });
         },
       },
     },

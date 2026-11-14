@@ -27,7 +27,6 @@ export function acknowledgedCleanup(): AcknowledgedCleanup {
   fixture.native.sandboxId = "sandbox-1";
   fixture.native.sandboxName = "test-sandbox";
   fixture.native.sandboxPresent = true;
-  fixture.native.namespace = `pi-openshell-${fixture.effects.host.instanceId}`;
   fixture.native.labels = { ...prepared.handle.labels };
   const release = mock(() => Promise.resolve());
   const owned = resources(prepared, {

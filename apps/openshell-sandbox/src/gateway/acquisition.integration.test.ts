@@ -2,13 +2,8 @@ import { describe, expect, test as it } from "bun:test";
 import type { OwnedResource } from "../host/index.ts";
 import { runtimeFixture } from "../runtime/test/index.helper.ts";
 import { startPrivateGateway } from "./acquisition.ts";
-import { withDockerOutput } from "./test/acquisition-effects.helper.ts";
-import type {
-  GatewayRecoveryCoordinates,
-  GatewayHostContext as HostContext,
-} from "./types.ts";
+import type { GatewayHostContext as HostContext } from "./types.ts";
 
-const NATIVE_ID_LENGTH = 64;
 const SECOND_PORT = 43_124;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
@@ -16,7 +11,6 @@ describe("startPrivateGateway", () => {
   it("should isolate namespace state and endpoint between concurrent activations", async () => {
     const first = runtimeFixture();
     const second = runtimeFixture();
-    second.native.networkId = "e".repeat(NATIVE_ID_LENGTH);
     const secondHost: HostContext = {
       ...second.effects.host,
       instanceId: "qrstuvwxyzabcdef",
@@ -43,52 +37,18 @@ describe("startPrivateGateway", () => {
       ),
     ]);
     try {
-      expect(first.native.namespace).not.toBe(second.native.namespace);
+      expect(left.labels).not.toEqual(right.labels);
       expect(left.endpoint).not.toBe(right.endpoint);
       await left.close();
       await expect(
         first.effects.host.filesystem.lstat(firstStateDirectory),
       ).rejects.toMatchObject({ code: "ENOENT" });
-      expect(second.native.networkPresent).toBe(true);
       expect(
-        await secondHost.filesystem.readFile(
-          `${secondStateDirectory}/gateway.toml`,
-          "utf8",
-        ),
-      ).toContain(second.native.namespace);
+        (await secondHost.filesystem.lstat(secondStateDirectory)).isDirectory(),
+      ).toBe(true);
     } finally {
       await Promise.all([left.close(), right.close()]);
     }
-  });
-  it("should retain unresolved network acquisitions when create acknowledgement is missing", async () => {
-    const fixture = runtimeFixture();
-    const host = withDockerOutput(
-      fixture.effects.host,
-      "network create",
-      "",
-      1,
-    );
-    const resources: OwnedResource[] = [];
-    const coordinates: GatewayRecoveryCoordinates[] = [];
-    await expect(
-      startPrivateGateway(
-        host,
-        fixture.activation.signal,
-        (resource) => resources.push(resource),
-        (known) => coordinates.push(known),
-      ),
-    ).rejects.toBeInstanceOf(Error);
-    expect(coordinates).toEqual([
-      { tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls" },
-    ]);
-    const network = resources.find((resource) => resource.kind === "network");
-    expect(network).toBeDefined();
-    await expect(network?.release()).rejects.toBeInstanceOf(Error);
-    expect(
-      (
-        await host.filesystem.lstat("/state/pi-openshell-abcdefghijklmnop")
-      ).isDirectory(),
-    ).toBe(true);
   });
   it("should release launched gateway and state when authenticated connection fails", async () => {
     const fixture = runtimeFixture();
@@ -123,13 +83,8 @@ describe("startPrivateGateway", () => {
       "Private OpenShell gateway preparation failed",
     );
     expect(failure.message).not.toContain("secret SDK");
-    expect(captured.map((item) => item.kind)).toEqual([
-      "state",
-      "network",
-      "process",
-    ]);
+    expect(captured.map((item) => item.kind)).toEqual(["state", "process"]);
     expect(fixture.native.launches).toBe(1);
-    expect(fixture.native.networkPresent).toBe(false);
     await expect(
       host.filesystem.lstat("/state/pi-openshell-abcdefghijklmnop"),
     ).rejects.toMatchObject({ code: "ENOENT" });

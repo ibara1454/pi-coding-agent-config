@@ -1,5 +1,5 @@
 import type { EventEmitter } from "node:events";
-import { generation } from "../../generation/test/index.helper.ts";
+import { gateway, generation } from "../../generation/test/index.helper.ts";
 import { unitRuntimeFixture } from "../../test/index.helper.ts";
 import type { ExecutionEvents, RequestOwner } from "../types.ts";
 
@@ -9,7 +9,14 @@ import type { ExecutionEvents, RequestOwner } from "../types.ts";
  */
 export function requestFixture() {
   const fixture = unitRuntimeFixture();
-  const handle = generation(fixture);
+  const prepared = gateway(fixture);
+  const handle = generation(fixture, prepared);
+  Object.assign(fixture.native, {
+    sandboxId: "sandbox-1",
+    sandboxName: handle.sandboxName,
+    sandboxPresent: true,
+    labels: prepared.handle.labels,
+  });
   const raw: Promise<unknown>[] = [];
   const owner: RequestOwner = {
     effects: fixture.effects,

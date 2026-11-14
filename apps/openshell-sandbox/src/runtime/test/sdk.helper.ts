@@ -4,6 +4,10 @@ import {
   type SandboxClient,
   SdkError,
 } from "@nvidia/openshell-sdk";
+import {
+  DeletionOutcome,
+  type ProviderProfile,
+} from "@nvidia/openshell-sdk/raw";
 import type { RuntimeNativeState } from "./process.helper.ts";
 
 const MODEL_COMMAND_ARGUMENT_COUNT = 3;
@@ -54,19 +58,18 @@ export function runtimeTestSdk(native: RuntimeNativeState): RuntimeSdkControl {
  * @returns A test-owned raw client with streamed workload responses.
  * @example deleting a sandbox updates native presence before waitDeleted checks it.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Keeps one fixture's native resource responses and shared state together.
 function rawResponses(
   control: RuntimeSdkControl,
   native: RuntimeNativeState,
 ): OpenShellClient["raw"] {
+  const profiles = new Map<string, ProviderProfile>();
   return Object.assign({} as OpenShellClient["raw"], {
     ...providerResponses(),
-    health: async () => ({ status: 1, version: "0.0.116" }),
+    health: async () => ({ status: 1, version: "0.1.0" }),
     updateConfig: async () => ({}),
     getGatewayConfig: async () => ({
       settings: {
-        ["providers_v2_enabled"]: {
-          value: { case: "boolValue", value: false },
-        },
         ["agent_policy_proposals_enabled"]: {
           value: { case: "boolValue", value: false },
         },
@@ -75,19 +78,31 @@ function rawResponses(
         },
       },
     }),
-    importProviderProfiles: async (request: {
-      profiles: { profile: { id: string } }[];
-    }) => ({
-      imported: true,
-      profiles: request.profiles.map(({ profile }) => ({ id: profile.id })),
-    }),
-    getProviderProfile: async (request: { id: string }) => ({
-      profile: { id: request.id, providerType: "test", credentialKeys: [] },
-    }),
+    importProviderProfiles: (request: {
+      profiles: { profile: ProviderProfile }[];
+    }) => {
+      for (const { profile } of request.profiles) {
+        profiles.set(profile.id, profile);
+      }
+      return Promise.resolve({
+        imported: true,
+        profiles: request.profiles.map(({ profile }) => profile),
+      });
+    },
+    getProviderProfile: (request: { id: string }) => {
+      const profile = profiles.get(request.id);
+      if (!profile) {
+        return Promise.reject(
+          new SdkError("not_found", "Provider profile missing"),
+        );
+      }
+      return Promise.resolve({ profile });
+    },
     createSandbox: async (request: {
       name: string;
       labels: Record<string, string>;
     }) => {
+      native.labels = request.labels;
       control.createCount += 1;
       native.sandboxName = request.name;
       native.sandboxId = `sandbox-${control.createCount}`;
@@ -113,10 +128,13 @@ function rawResponses(
       control.deleteCount += 1;
       await control.beforeDelete();
       native.sandboxPresent = false;
-      return { deleted: true };
+      return {
+        outcome: DeletionOutcome.COMPLETED,
+        sandboxId: native.sandboxId,
+      };
     },
     execSandbox: (
-      request: { sandboxId: string; command: string[] },
+      request: { sandbox: string; command: string[] },
       options: { signal: AbortSignal },
     ) => executionResponses(control, request, options),
   });
@@ -128,11 +146,11 @@ function rawResponses(
  * @param options - Caller-owned cancellation signal forwarded to workload events.
  * @returns Raw SDK payloads in their original event order.
  * @throws Rejects non-model execution and propagates errors from the supplied workload handler.
- * @example executionResponses(control, { sandboxId: "owned", command: ["/bin/bash", "-c", "true"] }, { signal });
+ * @example executionResponses(control, { sandbox: "owned", command: ["/bin/bash", "-c", "true"] }, { signal });
  */
 async function* executionResponses(
   control: RuntimeSdkControl,
-  request: { sandboxId: string; command: string[] },
+  request: { sandbox: string; command: string[] },
   options: { signal: AbortSignal },
 ) {
   await Promise.resolve();
@@ -190,7 +208,7 @@ function providerResponses() {
     },
     deleteProvider: (request: { name: string }) => {
       providers.delete(request.name);
-      return Promise.resolve({});
+      return Promise.resolve({ outcome: DeletionOutcome.COMPLETED });
     },
   };
 }
@@ -223,8 +241,12 @@ function sandboxResponses(
         phase: "ready",
       };
     },
-    waitDeleted: () =>
-      native.sandboxPresent
+    waitDeleted: (
+      _name: string,
+      _timeout: number,
+      options?: { expectedSandboxId?: string },
+    ) =>
+      native.sandboxPresent && native.sandboxId === options?.expectedSandboxId
         ? Promise.reject(new Error("Sandbox deletion was not confirmed."))
         : Promise.resolve(),
   });

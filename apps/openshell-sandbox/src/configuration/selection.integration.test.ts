@@ -110,7 +110,7 @@ describe("loadSandboxEnvironment", () => {
     expect(profile?.category).toBe(1);
     expect(profile?.credentials[0]?.refresh).toMatchObject({
       strategy: 3,
-      refreshBeforeSeconds: 60n,
+      refreshBefore: { seconds: 60n, nanos: 0 },
       material: [{ name: "refresh_token", required: true, secret: true }],
       additionalOutputs: [{ output: "session_token", credential: "session" }],
     });

@@ -139,12 +139,14 @@ async function deleteAcknowledged(
   if (!sandbox) {
     return;
   }
-  if (sandbox.phase === "ready" || sandbox.phase === "stopping") {
+  if (["ready", "starting", "stopping"].includes(sandbox.phase)) {
     await stopAndReobserve(resources, effects, limit);
     return;
   }
   if (
-    !["provisioning", "error", "stopped", "deleting"].includes(sandbox.phase)
+    !["provisioning", "error", "stopped", "completed", "deleting"].includes(
+      sandbox.phase,
+    )
   ) {
     throw new RuntimeFailure(
       "cleanup",
@@ -153,15 +155,32 @@ async function deleteAcknowledged(
     );
   }
   if (sandbox.phase !== "deleting") {
-    await gateway.handle.client.raw.deleteSandbox(
-      { name: resources.sandboxName, workspace: "default" },
+    const response = await gateway.handle.client.raw.deleteSandbox(
+      {
+        name: resources.sandboxName,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+      },
       { signal: limit.signal, timeoutMs: limit.remaining() },
     );
+    // Native dependencies must load only after fail-closed model Bash registration.
+    const { DeletionOutcome } = await import("@nvidia/openshell-sdk/raw");
+    if (
+      response.sandboxId !== resources.sandboxId ||
+      ![DeletionOutcome.COMPLETED, DeletionOutcome.ACCEPTED].includes(
+        response.outcome,
+      )
+    ) {
+      throw new RuntimeFailure(
+        "cleanup",
+        "deletion",
+        "Sandbox deletion did not acknowledge the owned identity.",
+      );
+    }
   }
   await gateway.handle.client.sandbox.waitDeleted(
     resources.sandboxName,
     limit.remaining() / MILLISECONDS_PER_SECOND,
-    { signal: limit.signal },
+    { signal: limit.signal, expectedSandboxId: sandbox.id },
   );
 }
 
@@ -185,7 +204,10 @@ async function stopAndReobserve(
   let stopError: unknown;
   try {
     await gateway.handle.client.raw.stopSandbox(
-      { name: resources.sandboxName, workspace: "default" },
+      {
+        name: resources.sandboxName,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+      },
       { signal: limit.signal, timeoutMs: limit.remaining() },
     );
   } catch (error) {
@@ -199,7 +221,7 @@ async function stopAndReobserve(
     }
     return;
   }
-  if (sandbox.phase === "ready" || sandbox.phase === "stopping") {
+  if (["ready", "starting", "stopping"].includes(sandbox.phase)) {
     const paused = Promise.withResolvers<void>();
     const timer = effects.setTimer(
       paused.resolve,

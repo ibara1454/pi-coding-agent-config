@@ -9,7 +9,6 @@ describe("prepareGeneration", () => {
     const fixture = unitRuntimeFixture();
     try {
       const prepared = gateway(fixture);
-      fixture.native.namespace = `pi-openshell-${fixture.effects.host.instanceId}`;
       fixture.native.labels = { ...prepared.handle.labels };
       const events: GenerationEvent[] = [];
       const generation = prepareGeneration(

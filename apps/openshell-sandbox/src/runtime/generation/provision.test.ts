@@ -2,6 +2,7 @@ import { describe, expect, test as it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
+  NetworkEnforcementMode,
   NetworkPolicyRuleSchema,
   type SandboxPolicy,
   SandboxPolicySchema,
@@ -35,7 +36,7 @@ function boundProviderFixture() {
         host: "registry.example",
         ports: [HTTPS_PORT],
         protocol: "rest",
-        enforcement: "enforce",
+        enforcement: NetworkEnforcementMode.ENFORCE,
         credentialBinding: { provider: "registry" },
       },
       { host: "public.example", ports: [HTTPS_PORT] },
@@ -88,7 +89,7 @@ describe("createNativeSandbox", () => {
       expect(captured.events).toEqual(["attempt", "create"]);
       expect(captured.request).toMatchObject({
         name: "chosen",
-        workspace: "default",
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
         labels: prepared.handle.labels,
         spec: {
           policy: {

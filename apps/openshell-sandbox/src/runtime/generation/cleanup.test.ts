@@ -6,7 +6,12 @@ import {
   test as it,
   mock,
 } from "bun:test";
+import { create } from "@bufbuild/protobuf";
 import { type SandboxRef, SdkError } from "@nvidia/openshell-sdk";
+import {
+  DeleteSandboxResponseSchema,
+  DeletionOutcome,
+} from "@nvidia/openshell-sdk/raw";
 import type { OwnedResource } from "../../host/index.ts";
 import { unitRuntimeFixture } from "../test/index.helper.ts";
 import { cleanupGeneration } from "./cleanup.ts";
@@ -17,6 +22,8 @@ import {
 } from "./test/cleanup.helper.ts";
 import { gateway, resources } from "./test/generation.helper.ts";
 import type { GenerationResources } from "./types.ts";
+
+const UNKNOWN_DELETION_OUTCOME = 99;
 
 const MISSING_IDENTITIES: [string, Partial<GenerationResources>, string][] = [
   [
@@ -174,6 +181,54 @@ describe("cleanupGeneration", () => {
       expect(setup.fixture.sdk.deleteCount).toBe(1);
       expect(setup.release).toHaveBeenCalledTimes(1);
       expect(setup.fixture.clock.pending()).toBe(0);
+    });
+    it.each([
+      ["unspecified outcome", DeletionOutcome.UNSPECIFIED, "sandbox-1"],
+      ["future outcome", UNKNOWN_DELETION_OUTCOME, "sandbox-1"],
+      ["different acknowledged id", DeletionOutcome.COMPLETED, "replacement"],
+    ])(
+      "should retain resources when deletion returns %s",
+      async (_condition, outcome, sandboxId) => {
+        setup.fixture.sdk.client.raw.deleteSandbox = mock(async () =>
+          create(DeleteSandboxResponseSchema, { outcome, sandboxId }),
+        );
+        await expect(
+          cleanupGeneration({
+            tasksFinished: Promise.resolve(),
+            snapshot: () => setup.owned,
+            effects: setup.fixture.effects,
+          }),
+        ).rejects.toMatchObject({ failure: { operation: "deletion" } });
+        expect(setup.release).not.toHaveBeenCalled();
+      },
+    );
+    it("should wait for the acknowledged id after asynchronous deletion admission", async () => {
+      setup.fixture.sdk.client.raw.deleteSandbox = mock(async () =>
+        create(DeleteSandboxResponseSchema, {
+          outcome: DeletionOutcome.ACCEPTED,
+          sandboxId: "sandbox-1",
+        }),
+      );
+      const waitDeleted = mock(() => {
+        setup.fixture.native.sandboxId = "replacement";
+        return Promise.resolve();
+      });
+      setup.fixture.sdk.client.sandbox.waitDeleted = waitDeleted;
+      await cleanupGeneration({
+        tasksFinished: Promise.resolve(),
+        snapshot: () => setup.owned,
+        effects: setup.fixture.effects,
+      });
+      expect(waitDeleted).toHaveBeenCalledWith(
+        setup.owned.sandboxName,
+        expect.any(Number),
+        {
+          signal: expect.any(AbortSignal),
+          expectedSandboxId: "sandbox-1",
+        },
+      );
+      expect(setup.fixture.native.sandboxPresent).toBe(true);
+      expect(setup.release).toHaveBeenCalledTimes(1);
     });
     it("should preserve a same-name replacement without stopping or deleting it", async () => {
       setup.fixture.native.sandboxId = "replacement";

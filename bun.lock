@@ -72,7 +72,7 @@
       "dependencies": {
         "@bufbuild/protobuf": "2.15.0",
         "@connectrpc/connect": "2.2.0",
-        "@nvidia/openshell-sdk": "0.0.116",
+        "@nvidia/openshell-sdk": "0.1.0",
         "yaml": "^2.8.1",
       },
       "peerDependencies": {
@@ -190,7 +190,7 @@
 
     "@isaacs/nonrecursive-glob-match": ["@isaacs/nonrecursive-glob-match@1.0.3", "", {}, "sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA=="],
 
-    "@nvidia/openshell-sdk": ["@nvidia/openshell-sdk@0.0.116", "https://npm.pkg.github.com/download/@nvidia/openshell-sdk/0.0.116/3380652847354127ed1bb8010490f8815040ada3", { "dependencies": { "@bufbuild/protobuf": "^2.2.3", "@connectrpc/connect": "^2.0.0", "@connectrpc/connect-node": "^2.0.0" } }, "sha512-MFnyX2vs47f/yVJRUXKmA7C6wZDH03ZGFFg+R5gZME+yMQDg9WF6G4Kdz/APM7nCUpaoGk2bwNEdUUmR60J54A=="],
+    "@nvidia/openshell-sdk": ["@nvidia/openshell-sdk@0.1.0", "https://npm.pkg.github.com/download/@nvidia/openshell-sdk/0.1.0/bd4d20876d890d407d0afa398c189432415891dc", { "dependencies": { "@bufbuild/protobuf": "^2.2.3", "@connectrpc/connect": "^2.0.0", "@connectrpc/connect-node": "^2.0.0" } }, "sha512-3N02AV2zf6l8WWHhOMXs0ffEIBxYZ5s7OUjqd00KFCu6Jc+3hxKkBWaG2nPKFNbBsyJVjjDojbh5GJl48DN6pA=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 

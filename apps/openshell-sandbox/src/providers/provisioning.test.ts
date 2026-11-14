@@ -15,7 +15,7 @@ import {
   profile,
 } from "./test/provisioning.helper.ts";
 
-const NATIVE_PROVIDER_NAME = /^po-[a-zA-Z0-9-]+-0$/;
+const NATIVE_PROVIDER_NAME = /^po-[a-zA-Z0-9-]+-0$/u;
 const MAX_NATIVE_PROVIDER_NAME_LENGTH = 253;
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This suite groups one operation's cases.
@@ -148,7 +148,7 @@ describe("provisionProviders", () => {
     expect(calls).not.toContain("create");
   });
   it("should preserve profile sources and bounded workspace options in a single import", async () => {
-    const { handle, capture } = gateway();
+    const { handle, capture } = gateway({ selected: profile() });
     const selected = profile();
     const extra = profile("extra", "EXTRA_TOKEN");
     const configured = {
@@ -179,7 +179,7 @@ describe("provisionProviders", () => {
           { profile: selected, source: "/profiles/selected.yaml" },
           { profile: extra, source: "/profiles/extra.yaml" },
         ],
-        workspace: "default",
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
       };
       const options = { signal: handle.signal, timeoutMs: 30_000 };
       expect(imported).toHaveBeenCalledWith(request, options);
@@ -234,18 +234,21 @@ describe("provisionProviders", () => {
     },
   );
 
-  it("should avoid native profile import when no custom profiles were selected", async () => {
+  it("should refuse an unimported profile without implicit built-ins or credential reads", async () => {
     const { handle, calls, capture } = gateway();
-    const base = environment();
-    const result = await provisionProviders(
-      handle,
-      { ...base, profiles: [] },
-      () => "secret",
-      capture,
+    await expect(
+      provisionProviders(
+        handle,
+        { ...environment(), profiles: [] },
+        () => {
+          throw new Error("unexpected credential access");
+        },
+        capture,
+      ),
+    ).rejects.toThrow(
+      "Unable to validate the selected native provider profiles",
     );
-    expect(Object.keys(result)).toEqual(["registry"]);
-    expect(result["registry"]).toMatch(NATIVE_PROVIDER_NAME);
-    expect(calls).toEqual(["create", "get"]);
+    expect(calls).toEqual([]);
   });
   it("should return empty selections without native calls when no profiles or providers are selected", async () => {
     const { handle, calls, capture } = gateway();

@@ -33,7 +33,7 @@ export type PreparedGateway = Readonly<{
   providerNames: Readonly<Record<string, string>>;
   providerResources: readonly OwnedResource[];
 }>;
-/** Readiness retains the create acknowledgment ID; workload RPCs must never re-resolve sandboxName. */
+/** Readiness retains the create acknowledgment ID for identity checks before canonical-name RPCs. */
 export type ReadySandbox = Readonly<{
   gateway: PreparedGateway;
   sandboxId: string;

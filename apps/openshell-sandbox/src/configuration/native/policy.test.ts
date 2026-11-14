@@ -16,32 +16,22 @@ interface McpProjection {
 }
 
 const MCP_PROJECTIONS: readonly [string, string, McpProjection][] = [
-  ["MCP options are omitted", "", { present: false, bodyLimit: 0 }],
-  ["MCP options are empty", "mcp: {}", { present: false, bodyLimit: 0 }],
+  ["MCP options are omitted", "", { present: true, bodyLimit: 0 }],
+  ["MCP options are empty", "mcp: {}", { present: true, bodyLimit: 0 }],
   [
-    "strict-tool flag is null",
-    "mcp: {strict_tool_names: null}",
-    { present: false, bodyLimit: 0 },
-  ],
-  [
-    "known-method flag is null",
-    "mcp: {allow_all_known_mcp_methods: null}",
-    { present: false, bodyLimit: 0 },
-  ],
-  [
-    "both flags are null with a body limit",
-    `mcp: {strict_tool_names: null, allow_all_known_mcp_methods: null, max_body_bytes: ${SMALL_MCP_BODY_LIMIT}}`,
-    { present: false, bodyLimit: SMALL_MCP_BODY_LIMIT },
-  ],
-  [
-    "strict-tool flag is false and known-method flag is null",
-    "mcp: {strict_tool_names: false, allow_all_known_mcp_methods: null}",
+    "strict-tool flag is false",
+    "mcp: {strict_tool_names: false}",
     { present: true, strictToolNames: false, bodyLimit: 0 },
   ],
   [
-    "known-method flag is false and strict-tool flag is null",
-    "mcp: {strict_tool_names: null, allow_all_known_mcp_methods: false}",
+    "known-method flag is false",
+    "mcp: {allow_all_known_mcp_methods: false}",
     { present: true, allowAllKnownMcpMethods: false, bodyLimit: 0 },
+  ],
+  [
+    "only a body limit is supplied",
+    `mcp: {max_body_bytes: ${SMALL_MCP_BODY_LIMIT}}`,
+    { present: true, bodyLimit: SMALL_MCP_BODY_LIMIT },
   ],
   [
     "strict-tool flag is true with a body limit",
@@ -56,12 +46,12 @@ describe("decodeNativePolicy", () => {
     const policy = await decodeNativePolicy(
       `version: 1
 filesystem_policy: {include_workdir: false, read_only: [/usr], read_write: []}
-process: {run_as_user: sandbox, run_as_group: sandbox}
+process: {run_as_user: "1000", run_as_group: "1000"}
 landlock: {compatibility: hard_requirement}
 network_policies:
   outbound:
-    endpoints: [{host: api.example, port: 443, protocol: https}]
-    binaries: [{path: /usr/bin/curl, harness: true}]
+    endpoints: [{host: api.example, port: 443, protocol: rest, enforcement: enforce, access: read-only}]
+    binaries: [{path: /usr/bin/curl}]
 `,
       "/policy.yaml",
     );
@@ -71,17 +61,31 @@ network_policies:
       readWrite: [],
     });
     expect(policy.process).toMatchObject({
-      runAsUser: "sandbox",
-      runAsGroup: "sandbox",
+      runAsUser: "1000",
+      runAsGroup: "1000",
     });
     expect(policy.landlock).toMatchObject({
       compatibility: "hard_requirement",
     });
     expect(policy.networkPolicies["outbound"]).toMatchObject({
       name: "outbound",
-      endpoints: [{ host: "api.example", ports: [EXAMPLE_PORT] }],
+      endpoints: [
+        {
+          host: "api.example",
+          ports: [EXAMPLE_PORT],
+          enforcement: 1,
+          access: 1,
+        },
+      ],
       binaries: [{ path: "/usr/bin/curl" }],
     });
+  });
+  it("should retain the native best-effort default when Landlock is explicitly empty", async () => {
+    const policy = await decodeNativePolicy(
+      "version: 1\nlandlock: {}",
+      "/policy.yaml",
+    );
+    expect(policy.landlock?.compatibility).toBe("best_effort");
   });
   it("should preserve middleware selectors and JSON configuration when a named middleware is supplied", async () => {
     const policy = await decodeNativePolicy(
@@ -90,7 +94,7 @@ network_middlewares:
   audit:
     middleware: audit
     order: -1
-    on_error: deny
+    on_error: fail_closed
     endpoints: {include: [api.example], exclude: [private.example]}
     config: {nested: {enabled: true, count: 3}, choices: [null, false, 2.5]}
 `,
@@ -100,7 +104,7 @@ network_middlewares:
       name: "audit",
       middleware: "audit",
       order: -1,
-      onError: "deny",
+      onError: "fail_closed",
       endpoints: { include: ["api.example"], exclude: ["private.example"] },
       config: {
         nested: { enabled: true, count: 3 },
@@ -125,6 +129,34 @@ network_middlewares:
   it.each([
     ["policy version is absent", "filesystem_policy: {}"],
     ["policy version exceeds uint32", "version: 4294967296"],
+    ["policy version is unsupported", "version: 2"],
+    ["filesystem policy is null", "version: 1\nfilesystem_policy: null"],
+    ["process policy is null", "version: 1\nprocess: null"],
+    ["landlock policy is null", "version: 1\nlandlock: null"],
+    [
+      "landlock compatibility is unknown",
+      "version: 1\nlandlock: {compatibility: HARD_REQUIREMENT}",
+    ],
+    [
+      "policy binary harness field was removed",
+      "version: 1\nnetwork_policies: {x: {binaries: [{path: /usr/bin/git, harness: true}]}}",
+    ],
+    [
+      "middleware endpoints are null",
+      "version: 1\nnetwork_middlewares: {audit: {middleware: audit, endpoints: null}}",
+    ],
+    [
+      "MCP strict-tool flag is null",
+      "version: 1\nnetwork_policies: {x: {endpoints: [{host: x, protocol: mcp, mcp: {strict_tool_names: null}}]}}",
+    ],
+    [
+      "MCP known-method flag is null",
+      "version: 1\nnetwork_policies: {x: {endpoints: [{host: x, protocol: mcp, mcp: {allow_all_known_mcp_methods: null}}]}}",
+    ],
+    [
+      "policy tool selector is null",
+      "version: 1\nnetwork_policies: {x: {endpoints: [{host: x, protocol: mcp, rules: [{allow: {tool: null}}]}]}}",
+    ],
     ["a policy field is unknown", "version: 1\nallow_everything: true"],
     [
       "a policy include is unsupported",
@@ -185,7 +217,7 @@ network_middlewares:
   );
   it("should preserve null boolean string and numeric middleware leaves when nested JSON is representable", async () => {
     const result = await decodeNativePolicy(
-      "version: 1\nnetwork_middlewares: {audit: {middleware: audit, endpoints: null, config: {nothing: null, enabled: false, label: text, count: -2, ratio: 1.5, entries: [null, true]}}}",
+      "version: 1\nnetwork_middlewares: {audit: {middleware: audit, config: {nothing: null, enabled: false, label: text, count: -2, ratio: 1.5, entries: [null, true]}}}",
       "/policy.yaml",
     );
     const audit = Object.values(result.networkMiddlewares).find(
@@ -284,7 +316,6 @@ network_policies:
 network_middlewares:
   prototype:
     middleware: audit
-    endpoints: null
     config: {entries: [{constructor: allowed, prototype: allowed, toString: allowed, __proto: allowed, __proto___: allowed, nothing: null}]}
 `,
       "/policy.yaml",
@@ -327,7 +358,7 @@ network_policies:
     endpoints:
       - host: api.example.com
         port: 443
-        protocol: rest
+        protocol: mcp
         enforcement: enforce
         access: read-only
         ${options}
@@ -343,6 +374,7 @@ network_policies:
         const endpoint = decoded.networkPolicies["api"]?.endpoints[0];
         expect(endpoint).toBeDefined();
         expect(endpoint?.mcp !== undefined).toBe(expected.present);
+        expect(endpoint?.mcp?.versions).toEqual(["2025-11-25"]);
         expect(endpoint?.mcp?.strictToolNames).toBe(expected.strictToolNames);
         expect(endpoint?.mcp?.allowAllKnownMcpMethods).toBe(
           expected.allowAllKnownMcpMethods,

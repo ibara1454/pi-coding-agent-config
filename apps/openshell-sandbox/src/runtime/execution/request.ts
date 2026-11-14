@@ -214,26 +214,50 @@ class ExecutionRequest {
       this.cwd,
       resolved,
     );
-    return await this.streamExecution(resources, workdir, signal);
+    return await this.streamExecution(
+      resources,
+      generation.sandboxName,
+      workdir,
+      signal,
+    );
   }
 
-  /** Streams bytes from the acknowledged immutable ID; never resolves a mutable sandbox name.
+  /** Rechecks acknowledged identity before the canonical-name RPC on our private gateway.
    * Retains raw work through settlement; missing, duplicate, or late terminal data invalidates execution.
-   * @example data arrives before the single terminal result even if the name now refers to another sandbox.
+   * @example a name reassigned since readiness rejects before any model command is sent.
    */
   async streamExecution(
     resources: ReadySandbox,
+    sandboxName: string,
     workdir: string,
     signal: AbortSignal,
   ): Promise<number> {
+    const sandbox = await resources.gateway.handle.client.sandbox.get(
+      sandboxName,
+      { signal },
+    );
+    assertLive(signal);
+    if (
+      sandbox.id !== resources.sandboxId ||
+      sandbox.name !== sandboxName ||
+      Object.entries(resources.gateway.handle.labels).some(
+        ([key, value]) => sandbox.labels[key] !== value,
+      )
+    ) {
+      throw new RuntimeFailure(
+        "execution",
+        "identity",
+        "Sandbox ownership changed; refusing execution.",
+      );
+    }
     this.executionStarted = true;
     const stream = resources.gateway.handle.client.raw.execSandbox(
       {
-        sandboxId: resources.sandboxId,
+        sandbox: sandboxName,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
         command: ["/bin/bash", "-c", this.command],
         workdir,
         environment: resources.environment,
-        timeoutSeconds: 0,
         stdin: new Uint8Array(),
         tty: false,
       },

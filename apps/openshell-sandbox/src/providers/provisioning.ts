@@ -25,7 +25,10 @@ async function selectProvider(
 ): Promise<ProviderSelection> {
   const response = await gateway.client.raw
     .getProviderProfile(
-      { id: provider.profile, workspace: "default" },
+      {
+        id: provider.profile,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+      },
       { signal: gateway.signal, timeoutMs: 30_000 },
     )
     .catch(() => {
@@ -108,7 +111,10 @@ async function importProfiles(
   try {
     const options = { signal: gateway.signal, timeoutMs: 30_000 };
     const result = await gateway.client.raw.importProviderProfiles(
-      { profiles, workspace: "default" },
+      {
+        profiles,
+        workspaceScope: { selection: { case: "workspace", value: "default" } },
+      },
       options,
     );
     const expected = profiles.map(({ profile }) => profile.id);

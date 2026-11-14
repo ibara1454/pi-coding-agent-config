@@ -4,7 +4,6 @@ export {
   resolveDockerHost,
   withGatewayExecutable,
 } from "./context.ts";
-export { dockerCommand } from "./ownership.ts";
 export {
   defaultProcessEffects,
   nativeFailure,

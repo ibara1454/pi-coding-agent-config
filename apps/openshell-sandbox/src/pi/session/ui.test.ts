@@ -71,7 +71,6 @@ describe("publishFailure", () => {
         createOutcome: "acknowledged",
         gatewayEndpoint: "https://127.0.0.1:43123",
         tlsDirectory,
-        networkId: "old-network",
       },
     });
     const failure = publishFailure(
@@ -84,7 +83,6 @@ describe("publishFailure", () => {
     expect(failure.message).toContain("old-sandbox");
     expect(failure.message).toContain("https://127.0.0.1:43123");
     expect(failure.message).toContain(tlsDirectory);
-    expect(failure.message).toContain("old-network");
     expect(failure.message).not.toContain("PRIVATE_CLEANUP");
     expect(f.sendMessage.mock.calls[0]?.[0].content).toBe(failure.message);
     expect(f.notify).not.toHaveBeenCalled();

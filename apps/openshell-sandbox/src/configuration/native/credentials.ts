@@ -1,4 +1,5 @@
 import type { JsonObject } from "@bufbuild/protobuf";
+import { invalid } from "../validation/index.ts";
 import {
   boolean,
   enumeration,
@@ -19,17 +20,52 @@ const REFRESH_STRATEGIES = {
   ["google_service_account_jwt"]: 5,
   ["aws_sts_assume_role"]: 6,
 };
+const DURATION_PATTERN = /^-?\d+(?:\.\d{1,9})?s$/u;
+
+/** Validate complete native Duration strings before the SDK's prefix parser consumes them.
+ * @throws A field-only diagnostic for malformed or sub-nanosecond values.
+ * @example duration("0.500s", "cache_ttl") preserves exact fractional seconds.
+ */
+function duration(value: unknown, field: string): string {
+  const result = string(value, field);
+  if (result.trim() !== result || !DURATION_PATTERN.test(result)) {
+    invalid(field);
+  }
+  return result;
+}
+
+/** Lower compatibility seconds without discarding conflicting native duration declarations.
+ * Zero compatibility seconds mean absence, while an explicit "0s" retains message presence.
+ * @throws A field-only diagnostic when a Duration and nonzero seconds alias are both supplied.
+ * @example durations({refreshBeforeSeconds:"60"}, "refresh") returns refreshBefore:"60s".
+ */
+function durations(value: JsonObject, field: string): JsonObject {
+  const result = { ...value };
+  for (const name of ["refreshBefore", "maxLifetime", "cacheTtl"]) {
+    const seconds = result[`${name}Seconds`];
+    delete result[`${name}Seconds`];
+    if (seconds !== undefined && seconds !== "0") {
+      if (result[name] !== undefined) {
+        invalid(`${field}.${name}`);
+      }
+      result[name] = `${seconds}s`;
+    }
+  }
+  return result;
+}
 
 /** Decode native credential renewal capability metadata, never selecting or starting renewal.
  * @example refresh({strategy:"static"}, "refresh") preserves the native static enum.
  */
 function refresh(value: unknown, field: string): JsonObject {
-  return fields(value, field, {
+  const result = fields(value, field, {
     strategy: ["strategy", enumeration(REFRESH_STRATEGIES)],
     ["token_url"]: ["tokenUrl", string],
     scopes: ["scopes", list(string)],
     ["refresh_before_seconds"]: ["refreshBeforeSeconds", int64],
     ["max_lifetime_seconds"]: ["maxLifetimeSeconds", int64],
+    ["refresh_before"]: ["refreshBefore", duration],
+    ["max_lifetime"]: ["maxLifetime", duration],
     material: [
       "material",
       list((input, path) =>
@@ -61,6 +97,7 @@ function refresh(value: unknown, field: string): JsonObject {
       ),
     ],
   });
+  return durations(result, field);
 }
 
 /** Decode the native token-grant schema, retaining its non-protobuf client_credentials default.
@@ -85,6 +122,7 @@ function tokenGrant(value: unknown, field: string): JsonObject {
       ["client_assertion_type"]: ["clientAssertionType", string],
       scopes: ["scopes", list(string)],
       ["cache_ttl_seconds"]: ["cacheTtlSeconds", int64],
+      ["cache_ttl"]: ["cacheTtl", duration],
       ["requested_token_type"]: ["requestedTokenType", string],
       ["audience_overrides"]: [
         "audienceOverrides",
@@ -121,10 +159,11 @@ function tokenGrant(value: unknown, field: string): JsonObject {
     },
     ["token_endpoint"],
   );
-  return { grantType: 1, ...result };
+  return durations({ grantType: 1, ...result }, field);
 }
 
 /** Decode all pinned profile credential fields; refresh is allowed only at this credential nesting.
+ * @throws On unsupported fields or conflicting native duration declarations.
  * @example credential({name:"token",env_vars:["TOKEN"],refresh:{strategy:"static"}}, "credential") retains metadata only.
  */
 export function credential(value: unknown, field: string): JsonObject {

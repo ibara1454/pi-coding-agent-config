@@ -71,7 +71,7 @@ export function selectors(profile: boolean): Decoder {
       fields: ["fields", list(string)],
       query: ["query", dictionary(match)],
       params: ["params", profile ? dictionary(match) : policyParams],
-      tool: ["tool", optional(match)],
+      tool: ["tool", profile ? optional(match) : match],
     });
     const { tool, ...matched } = result;
     if (tool !== undefined && tool !== null) {

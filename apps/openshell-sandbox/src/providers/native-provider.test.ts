@@ -1,9 +1,15 @@
 import { describe, expect, test as it, spyOn } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { ProviderResponseSchema } from "@nvidia/openshell-sdk/raw";
+import {
+  DeleteProviderResponseSchema,
+  DeletionOutcome,
+  ProviderResponseSchema,
+} from "@nvidia/openshell-sdk/raw";
 import type { OwnedResource } from "../host/index.ts";
 import { createNativeProvider } from "./native-provider.ts";
 import { gateway } from "./test/provisioning.helper.ts";
+
+const UNKNOWN_DELETION_OUTCOME = 99;
 
 const selection = {
   provider: {
@@ -298,7 +304,7 @@ describe("createNativeProvider", () => {
         deletionAttempts += 1;
         return deletionAttempts === 1
           ? Promise.reject(new Error("RAW-NATIVE-SECRET"))
-          : Promise.resolve({});
+          : Promise.resolve({ outcome: DeletionOutcome.COMPLETED });
       },
     });
     const failure = owned[0]?.release();
@@ -312,4 +318,30 @@ describe("createNativeProvider", () => {
     await owned[0]?.release();
     expect(deletionAttempts).toBe(2);
   });
+  it.each([
+    ["unspecified", DeletionOutcome.UNSPECIFIED],
+    ["asynchronous", DeletionOutcome.ACCEPTED],
+    ["unknown", UNKNOWN_DELETION_OUTCOME],
+  ])(
+    "should retain ownership when provider deletion outcome is %s",
+    async (_condition, outcome) => {
+      const { handle, owned, capture } = gateway();
+      await createNativeProvider(handle, selection, () => "secret", capture);
+      const deletion = spyOn(
+        handle.client.raw,
+        "deleteProvider",
+      ).mockResolvedValue(create(DeleteProviderResponseSchema, { outcome }));
+      try {
+        await expect(owned[0]?.release()).rejects.toThrow(
+          "Native provider ownership or deletion failed",
+        );
+        await expect(owned[0]?.release()).rejects.toThrow(
+          "Native provider ownership or deletion failed",
+        );
+        expect(deletion).toHaveBeenCalledTimes(2);
+      } finally {
+        deletion.mockRestore();
+      }
+    },
+  );
 });

@@ -3,16 +3,9 @@ import type { SpawnOptions, spawn } from "node:child_process";
 import process from "node:process";
 import type { OwnedResource } from "../host/index.ts";
 import { nativeResponseChild } from "../host/test/index.helper.ts";
-import {
-  unitRuntimeFixture as runtimeFixture,
-  TEST_NETWORK,
-} from "../runtime/test/index.helper.ts";
+import { unitRuntimeFixture as runtimeFixture } from "../runtime/test/index.helper.ts";
 import { startPrivateGateway } from "./acquisition.ts";
-import {
-  directory,
-  withDockerOutput,
-  withStats,
-} from "./test/acquisition-effects.helper.ts";
+import { directory, withStats } from "./test/acquisition-effects.helper.ts";
 import { failedGatewayLaunch } from "./test/process.helper.ts";
 import type {
   GatewayHostContext,
@@ -93,43 +86,45 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
-  it("should refuse unpinned prerequisite output before creating a private namespace", async () => {
-    const fixture = runtimeFixture();
-    try {
-      const original = fixture.effects.host.processEffects.spawn;
-      const host = {
-        ...fixture.effects.host,
-        processEffects: {
-          ...fixture.effects.host.processEffects,
-          spawn: ((
-            executable: string,
-            args: readonly string[],
-            options: SpawnOptions,
-          ) =>
-            args[0] === "--version"
-              ? nativeResponseChild(
-                  "openshell-gateway 0.0.999 secret-native-payload",
-                )
-              : original(executable, args, options)) as typeof spawn,
-        },
-      };
-      const captured: OwnedResource[] = [];
-      const failure = await startPrivateGateway(
-        host,
-        fixture.activation.signal,
-        (item) => captured.push(item),
-        () => undefined,
-      ).catch((error: unknown) => error);
-      expect(String(failure)).toContain(
-        "Private OpenShell gateway preparation failed",
-      );
-      expect(String(failure)).not.toContain("secret-native-payload");
-      expect(captured).toEqual([]);
-      expect(fixture.native.networkPresent).toBe(false);
-    } finally {
-      fixture.clock.restore();
-    }
-  });
+  it.each(["0.0.116", "0.1.1", "0.1.0-dev", "0.1.0.1"])(
+    "should refuse native release %s before creating a private namespace",
+    async (version) => {
+      const fixture = runtimeFixture();
+      try {
+        const original = fixture.effects.host.processEffects.spawn;
+        const host = {
+          ...fixture.effects.host,
+          processEffects: {
+            ...fixture.effects.host.processEffects,
+            spawn: ((
+              executable: string,
+              args: readonly string[],
+              options: SpawnOptions,
+            ) =>
+              args[0] === "--version"
+                ? nativeResponseChild(
+                    `openshell-gateway ${version} secret-native-payload`,
+                  )
+                : original(executable, args, options)) as typeof spawn,
+          },
+        };
+        const captured: OwnedResource[] = [];
+        const failure = await startPrivateGateway(
+          host,
+          fixture.activation.signal,
+          (item) => captured.push(item),
+          () => undefined,
+        ).catch((error: unknown) => error);
+        expect(String(failure)).toContain(
+          "Private OpenShell gateway preparation failed",
+        );
+        expect(String(failure)).not.toContain("secret-native-payload");
+        expect(captured).toEqual([]);
+      } finally {
+        fixture.clock.restore();
+      }
+    },
+  );
   it("should retain recovery coordinates and provisional state when initial identity readback fails", async () => {
     const fixture = runtimeFixture();
     try {
@@ -188,7 +183,6 @@ describe("startPrivateGateway", () => {
       );
       try {
         expect(gateway.endpoint).toBe("https://127.0.0.1:43123");
-        expect(gateway.networkId).toBe(TEST_NETWORK);
         expect(gateway.labels).toEqual({
           "io.pi.openshell-sandbox.managed-by": "pi-openshell-sandbox",
           "io.pi.openshell-sandbox.owner-uid": "1000",
@@ -205,17 +199,11 @@ describe("startPrivateGateway", () => {
         expect(host.environment["SECRET_TOKEN"]).toBe("host-only");
         expect(Object.isFrozen(gateway)).toBe(true);
         expect(Object.isFrozen(gateway.labels)).toBe(true);
-        expect(captured.map((item) => item.kind)).toEqual([
-          "state",
-          "network",
-          "process",
-        ]);
+        expect(captured.map((item) => item.kind)).toEqual(["state", "process"]);
         expect(fixture.native.launches).toBe(1);
-        expect(fixture.native.networkPresent).toBe(true);
       } finally {
         await gateway.close();
       }
-      expect(fixture.native.networkPresent).toBe(false);
       await expect(host.filesystem.lstat(stateDirectory)).rejects.toMatchObject(
         { code: "ENOENT" },
       );
@@ -224,19 +212,17 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
-  it("should retain captured recovery capabilities and redact connection payloads when infrastructure cleanup cannot prove ownership", async () => {
+  it("should retain captured recovery capabilities and redact connection payloads when state cleanup cannot prove ownership", async () => {
     const fixture = runtimeFixture();
     try {
-      const inspected = withDockerOutput(
-        fixture.effects.host,
-        "network inspect",
-        "[]",
-      );
       const host: GatewayHostContext = {
-        ...inspected,
+        ...fixture.effects.host,
         gatewayEffects: {
           reservePort: () => Promise.resolve(RESERVED_PORT),
-          connect: () => Promise.reject(new Error("secret SDK payload")),
+          connect: () => {
+            fixture.filesystem.replace(directory);
+            return Promise.reject(new Error("secret SDK payload"));
+          },
         },
       };
       const captured: OwnedResource[] = [];
@@ -253,11 +239,9 @@ describe("startPrivateGateway", () => {
       expect(String(failure)).not.toContain("secret SDK payload");
       expect(coordinates.at(-1)).toEqual({
         tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls",
-        networkId: TEST_NETWORK,
         gatewayEndpoint: `https://127.0.0.1:${RESERVED_PORT}`,
       });
       expect(captured.some((item) => item.kind === "process")).toBe(true);
-      expect(fixture.native.networkPresent).toBe(true);
       expect(
         (
           await host.filesystem.lstat("/state/pi-openshell-abcdefghijklmnop")
@@ -332,16 +316,12 @@ describe("startPrivateGateway", () => {
     try {
       await portEntered.promise;
       const tlsDirectory = "/state/pi-openshell-abcdefghijklmnop/tls";
-      expect(coordinates).toEqual([
-        { tlsDirectory },
-        { tlsDirectory, networkId: TEST_NETWORK },
-      ]);
+      expect(coordinates).toEqual([{ tlsDirectory }]);
       expect(fixture.native.launches).toBe(0);
       port.resolve(RESERVED_PORT);
       await connectionEntered.promise;
       expect(coordinates.at(-1)).toEqual({
         tlsDirectory,
-        networkId: TEST_NETWORK,
         gatewayEndpoint: `https://127.0.0.1:${RESERVED_PORT}`,
       });
       expect(coordinates.every(Object.isFrozen)).toBe(true);
@@ -349,7 +329,6 @@ describe("startPrivateGateway", () => {
       expect(fixture.sdk.createCount).toBe(0);
       connection.resolve(fixture.sdk.client);
       await (await starting).close();
-      expect(fixture.native.networkPresent).toBe(false);
     } finally {
       port.resolve(RESERVED_PORT);
       connection.resolve(fixture.sdk.client);
@@ -360,44 +339,29 @@ describe("startPrivateGateway", () => {
       fixture.clock.restore();
     }
   });
-  it("should retain acknowledged network coordinates without starting TLS when cancellation arrives after create completes", async () => {
+  it("should retain state coordinates without starting TLS when cancellation arrives after state allocation", async () => {
     const fixture = runtimeFixture();
-    const host = withDockerOutput(
-      fixture.effects.host,
-      "network inspect",
-      "[]",
-    );
-    const { clearTimer } = host.processEffects;
-    const nativeSpawn = spyOn(host.processEffects, "spawn");
     const coordinates: GatewayRecoveryCoordinates[] = [];
-    spyOn(host.processEffects, "clearTimer").mockImplementation((timer) => {
-      clearTimer(timer);
-      if (fixture.native.networkPresent) {
-        fixture.activation.abort();
-      }
-    });
     try {
       await expect(
         startPrivateGateway(
-          host,
+          fixture.effects.host,
           fixture.activation.signal,
           () => undefined,
-          (known) => coordinates.push(known),
+          (known) => {
+            coordinates.push(known);
+            fixture.activation.abort();
+          },
         ),
       ).rejects.toBeInstanceOf(Error);
       expect(fixture.activation.signal.aborted).toBe(true);
-      expect(coordinates.at(-1)).toEqual({
-        tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls",
-        networkId: TEST_NETWORK,
-      });
-      expect(fixture.native.networkPresent).toBe(true);
+      expect(coordinates).toEqual([
+        { tlsDirectory: "/state/pi-openshell-abcdefghijklmnop/tls" },
+      ]);
       expect(fixture.native.launches).toBe(0);
-      expect(nativeSpawn.mock.calls.map(([, argv]) => argv?.[0])).not.toContain(
-        "generate-certs",
-      );
+      expect(fixture.native.calls).toEqual([["--version"]]);
     } finally {
       fixture.clock.restore();
-      nativeSpawn.mockRestore();
     }
   });
 });
