@@ -107,7 +107,7 @@ export async function startPrivateGateway(
 
 /** Configure, launch and authenticate one owned gateway after its state is captured.
  * @param host - Native gateway, Docker, filesystem, and readiness effects.
- * @param state - Owns network, process, and private configuration cleanup.
+ * @param state - Owns process and private configuration cleanup.
  * @param signal - Cancels preparation without shortening a transferred gateway's lifetime.
  * @param reportCoordinates - Publishes known coordinates before later startup stages can fail.
  * @returns An authenticated gateway using native supervisor defaults.
