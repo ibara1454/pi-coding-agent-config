@@ -11,7 +11,7 @@
     "biome": "./biome-manifest.json"
   },
   "devDependencies": {
-    "@biomejs/wasm-nodejs": "2.6.3"
+    "@biomejs/wasm-nodejs": "2.6.7"
   },
   "scripts": {
     "lint": "biome check --error-on-warnings .",
