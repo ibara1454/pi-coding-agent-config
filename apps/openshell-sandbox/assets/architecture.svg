@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="416" viewBox="0 0 1000 416" role="img" aria-labelledby="architecture-title architecture-desc">
+  <title id="architecture-title">Delegating Pi's model Bash tool to OpenShell</title>
+  <desc id="architecture-desc">Pi stays on the host. A model Bash tool call goes to the extension's Bash adapter, which sends the command and working directory through the OpenShell SDK. Bash runs in the workload container. Command output streams back, followed by the exit code; Pi formats the tool result. Session history, file tools, user Bash, and model API traffic stay host-side. The gateway and supervisor relay execution but are omitted from this tool-focused view. There is no host-execution fallback.</desc>
+  <style>
+    svg { color-scheme: light dark; color: var(--fg, CanvasText); }
+    text { fill: var(--fg, currentColor); font-family: system-ui, -apple-system, sans-serif; font-size: 16px; }
+    .boundary { fill: none; stroke: var(--border, GrayText); stroke-opacity: .45; stroke-width: 1.5; }
+    .card { fill: var(--surface, Canvas); stroke: var(--border, GrayText); stroke-opacity: .65; stroke-width: 1.5; }
+    .heading { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
+    .title { font-size: 21px; font-weight: 650; }
+    .muted { fill: var(--muted, currentColor); font-size: 14px; opacity: .75; }
+    .code { font-family: monospace; font-size: 14px; }
+    .label { font-size: 14px; font-weight: 550; }
+    .control { fill: none; stroke: var(--accent, LinkText); stroke-width: 2; }
+    .result { fill: none; stroke: var(--fg, currentColor); stroke-width: 2; }
+    .accent { fill: var(--accent, LinkText); }
+  </style>
+  <defs>
+    <marker id="control-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="var(--accent, LinkText)"/>
+    </marker>
+    <marker id="result-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="var(--fg, currentColor)"/>
+    </marker>
+  </defs>
+
+  <rect class="boundary" x="24" y="24" width="596" height="336" rx="18"/>
+  <text class="heading" x="48" y="58">HOST</text>
+  <rect class="boundary" x="748" y="24" width="228" height="336" rx="18"/>
+  <text class="heading" x="772" y="58">WORKLOAD CONTAINER</text>
+
+  <rect class="card" x="48" y="112" width="200" height="132" rx="12"/>
+  <text class="title accent" x="72" y="145">Pi agent</text>
+  <text class="muted" x="72" y="179">Receives model calls</text>
+  <text class="muted" x="72" y="207">Formats tool results</text>
+
+  <rect class="card" x="340" y="112" width="256" height="132" rx="12"/>
+  <text class="title" x="364" y="145">OpenShell extension</text>
+  <text class="muted" x="364" y="179">Replaces Bash execution</text>
+  <text class="muted" x="364" y="207">Uses OpenShell SDK</text>
+
+  <rect class="card" x="772" y="112" width="180" height="132" rx="12"/>
+  <text class="title accent" x="796" y="145">Bash</text>
+  <text class="code" x="796" y="179">/bin/bash -c …</text>
+  <text class="muted" x="796" y="207">Runs the command</text>
+
+  <path class="control" d="M248 160 H340" marker-end="url(#control-arrow)"/>
+  <text class="label accent" x="294" y="146" text-anchor="middle">Bash call</text>
+  <path class="control" d="M596 160 H772" marker-end="url(#control-arrow)"/>
+  <text class="label accent" x="684" y="130" text-anchor="middle">Command +</text>
+  <text class="label accent" x="684" y="148" text-anchor="middle">working directory</text>
+
+  <path class="result" d="M772 220 H596" marker-end="url(#result-arrow)"/>
+  <text class="label" x="684" y="190" text-anchor="middle">stdout / stderr</text>
+  <text class="label" x="684" y="208" text-anchor="middle">+ exit code</text>
+  <path class="result" d="M340 220 H248" marker-end="url(#result-arrow)"/>
+  <text class="label" x="294" y="206" text-anchor="middle">Tool result</text>
+
+  <text class="label" x="48" y="278">Stays on the host</text>
+  <text class="muted" x="48" y="306">Session history · file tools</text>
+  <text class="muted" x="48" y="330">User Bash (! / !!) · model traffic</text>
+  <text class="label accent" x="364" y="278">No host fallback</text>
+  <text class="muted" x="364" y="306">If OpenShell cannot execute,</text>
+  <text class="muted" x="364" y="330">the tool returns an error.</text>
+  <text class="label" x="772" y="278">OpenShell policy</text>
+  <text class="muted" x="772" y="306">Filesystem and network</text>
+  <text class="muted" x="772" y="330">limits stay enforced.</text>
+
+  <text class="muted" x="48" y="396">Execution goes through OpenShell's gateway and supervisor (not shown).</text>
+</svg>

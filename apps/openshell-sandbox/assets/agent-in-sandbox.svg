@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="680" viewBox="0 0 1000 680" role="img" aria-labelledby="architecture-title architecture-desc">
+  <title id="architecture-title">Typical OpenShell usage: agent inside the sandbox</title>
+  <desc id="architecture-desc">In this documented local Docker usage, a host CLI or SDK manages the gateway. Docker runs a trusted supervisor container and a separate workload container. The workload contains OpenShell's sandbox runtime, the coding agent, and the tools it runs. The supervisor starts the agent and checks network requests. Traffic from the agent and its tools reaches remote services through the supervisor.</desc>
+  <style>
+    svg { color-scheme: light dark; color: var(--fg, CanvasText); }
+    text { fill: var(--fg, currentColor); font-family: system-ui, -apple-system, sans-serif; font-size: 16px; }
+    .boundary { fill: none; stroke: var(--border, GrayText); stroke-opacity: .45; stroke-width: 1.5; }
+    .card { fill: var(--surface, Canvas); stroke: var(--border, GrayText); stroke-opacity: .65; stroke-width: 1.5; }
+    .heading { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
+    .title { font-size: 21px; font-weight: 650; }
+    .muted { fill: var(--muted, currentColor); font-size: 14px; opacity: .75; }
+    .label { font-size: 14px; font-weight: 550; }
+    .control { fill: none; stroke: var(--accent, LinkText); stroke-width: 2; }
+    .network { fill: none; stroke: var(--success, currentColor); stroke-width: 2; }
+    .accent { fill: var(--accent, LinkText); }
+    .badge { fill: var(--accent, LinkText); fill-opacity: .08; }
+  </style>
+  <defs>
+    <marker id="control-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="var(--accent, LinkText)"/>
+    </marker>
+    <marker id="network-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="var(--success, currentColor)"/>
+    </marker>
+  </defs>
+
+  <rect class="boundary" x="24" y="20" width="952" height="196" rx="18"/>
+  <text class="heading" x="48" y="49">HOST PROCESSES</text>
+
+  <rect class="card" x="48" y="76" width="320" height="106" rx="12"/>
+  <text class="title" x="72" y="111">OpenShell CLI / SDK</text>
+  <text class="muted" x="72" y="143">Create and connect to a sandbox</text>
+
+  <rect class="card" x="600" y="76" width="352" height="106" rx="12"/>
+  <text class="title" x="624" y="111">Gateway</text>
+  <text class="muted" x="624" y="143">Sandbox lifecycle, policy, and providers</text>
+
+  <path class="control" d="M368 128 H600" marker-end="url(#control-arrow)"/>
+  <text class="label accent" x="484" y="111" text-anchor="middle">Create / connect</text>
+
+  <rect class="boundary" x="24" y="288" width="952" height="244" rx="18"/>
+  <text class="heading" x="48" y="319">DOCKER CONTAINERS</text>
+
+  <rect class="card" x="48" y="350" width="320" height="140" rx="12"/>
+  <text class="title" x="72" y="383">Workload container</text>
+  <text x="72" y="414">Sandbox runtime + <tspan class="accent" font-weight="650">agent + tools</tspan></text>
+  <rect class="badge" x="68" y="442" width="160" height="28" rx="7"/>
+  <text class="label accent" x="148" y="461" text-anchor="middle">No direct network</text>
+
+  <rect class="card" x="600" y="350" width="352" height="140" rx="12"/>
+  <text class="title" x="624" y="383">Trusted supervisor</text>
+  <text x="624" y="414">Checks policy; handles credentials</text>
+  <text class="muted" x="624" y="461">Mediates outbound requests</text>
+
+  <path class="control" d="M776 182 V350" marker-start="url(#control-arrow)" marker-end="url(#control-arrow)"/>
+  <text class="label accent" x="796" y="255">Control + sessions</text>
+
+  <path class="control" d="M600 392 H368" marker-end="url(#control-arrow)"/>
+  <text class="label accent" x="484" y="376" text-anchor="middle">Start agent</text>
+  <path class="network" d="M368 452 H600" marker-end="url(#network-arrow)"/>
+  <text class="label" x="484" y="436" text-anchor="middle">Network requests</text>
+
+  <path class="network" d="M776 490 V578" marker-end="url(#network-arrow)"/>
+  <text class="label" x="796" y="554">Allowed requests only</text>
+  <rect class="card" x="600" y="578" width="352" height="74" rx="12"/>
+  <text class="title" x="776" y="610" text-anchor="middle">Remote services</text>
+  <text class="muted" x="776" y="634" text-anchor="middle">Git hosts · package registries · APIs</text>
+</svg>
