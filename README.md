@@ -142,17 +142,19 @@ Copying only `src/index.ts` is insufficient for packages with supporting modules
 For a one-off run from the repository root after installing workspace dependencies:
 
 ```sh
-pi -e "$(realpath apps/omp-extension-manager/src/index.ts)"
+pi -e "$(realpath apps/omp-welcome/src/index.ts)"
 ```
 
 Direct file references must use `apps/<package>/src/index.ts`; root `index.ts`
-entrypoints are no longer provided. Update explicit manager paths to
-`apps/omp-extension-manager` (or its `src/index.ts` entrypoint). The tracked
+entrypoints are no longer provided. The tracked
 `../../apps` setting needs no change because Pi discovers each package through
 its `pi.extensions` manifest.
 
 See Pi's [extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 for other loading options.
+
+Manage enabled resources with `pi config` (`pi config --local` for project
+overrides), then run `/reload` in an existing Pi session.
 
 ## Key packages
 
@@ -163,7 +165,6 @@ This table highlights the Pi packages in `apps/`.
 | [`provider-base-url-overrides`](apps/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs with `PROVIDER_BASE_URL`. | `bun test apps/provider-base-url-overrides` |
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
-| [`omp-extension-manager`](apps/omp-extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/omp-extension-manager` |
 | [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Platform verification limits](apps/openshell-sandbox/README.md#installation-and-prerequisites) |
 | [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
@@ -215,13 +216,6 @@ Every tested workspace preloads the shared `test/setup.ts` seam, which restores 
 and clears mock call state after each test. Use real host exports or restorable
 per-test spies: `mock.module()` overrides survive that cleanup and can contaminate
 other suites in a direct root run.
-
-Narrow a run to one file while working on the extension manager panel:
-
-```bash
-bun test apps/omp-extension-manager
-bun test apps/omp-extension-manager/src/panel/panel.test.ts
-```
 
 ### Coverage
 
