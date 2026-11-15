@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained TypeScript extensions; `packages/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
+This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained Pi packages with TypeScript extension entry points; `packages/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
 
 ## Rules and Guidance
 
@@ -38,14 +38,14 @@ Before editing and before delivery, ask: **Which requested behavior, observed fa
 - Provider base URL overrides: `apps/provider-base-url-overrides/src/index.ts` delegates to `src/pi/registration.ts`, which validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
 - OpenShell sandbox: `apps/openshell-sandbox/src/index.ts` registers fail-closed model Bash; scoped modules own session lifecycle, native configuration, SDK resources, and direct-child gateway cleanup. User Bash remains host-side.
 - Language servers: `apps/omp-lsp/src/index.ts` delegates to `src/pi/registration.ts`; configuration, host processes, runtime, and workspace operations live under `src/{configuration,host,runtime,workspace}`, with bundled server definitions in `assets/defaults.json`.
-- Agent configuration: `config/pi/settings.json` loads extension packages through `../../apps`; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
+- Agent configuration: `config/pi/settings.json` discovers Pi packages through the upstream `extensions: ["../../apps"]` setting; credentials and runtime state remain ignored beside it. `PI_CODING_AGENT_DIR` must name the canonical configuration directory, not `settings.json` or an unresolved symlink.
 
 ## Key Directories
 
 - `apps/omp-extension-manager/` — private ESM `/extensions` discovery, persistence, and terminal UI package with Bun tests.
-- `apps/omp-status-line/` — self-contained ESM status-line/editor-chrome extension and Bun test package.
-- `apps/omp-welcome/` — self-contained ESM welcome-header extension and Bun test package.
-- `apps/provider-base-url-overrides/` — private ESM Pi extension package with scoped README and Bun tests.
+- `apps/omp-status-line/` — self-contained ESM status-line/editor-chrome Pi package with Bun tests.
+- `apps/omp-welcome/` — self-contained ESM welcome-header Pi package with Bun tests.
+- `apps/provider-base-url-overrides/` — private ESM Pi package with scoped README and Bun tests.
 - `apps/openshell-sandbox/` — OpenShell-backed model Bash with colocated unit and integration tests.
 - `packages/biome-rules/` — custom GritQL rules with colocated Bun integration tests.
 - `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, and npm package state.
@@ -78,7 +78,7 @@ bun test packages/biome-rules
 
 - `README.md` — repository purpose and root setup entry point.
 - `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
-- `config/pi/settings.json` — tracked, non-secret Pi defaults and extension references.
+- `config/pi/settings.json` — tracked, non-secret Pi defaults, package sources, and resource paths.
 - `apps/omp-extension-manager/src/index.ts` — omp-extension-manager host entry point.
 - `apps/omp-status-line/src/index.ts` — status-line integration entry point.
 - `apps/omp-welcome/src/index.ts` — welcome integration entry point.
@@ -99,4 +99,4 @@ Use the default five canonical triage labels. See `docs/agents/triage-labels.md`
 
 ### Domain docs
 
-For package-specific terminology, context discovery, and ADR locations, see `docs/agents/domain.md`.
+For shared package/extension terminology, package-specific vocabulary, context discovery, and ADR locations, see `docs/agents/domain.md`.

@@ -1,6 +1,6 @@
 # oh-my-pi Welcome UI for Pi
 
-A Pi extension that recreates the startup welcome UI from [oh-my-pi](https://github.com/can1357/oh-my-pi).
+A Pi package providing a startup welcome UI extension based on [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 ## Origin and attribution
 
@@ -116,14 +116,14 @@ The extension has no extension-specific configuration.
 
 ## Installation in this repository
 
-Run `bun install --frozen-lockfile` from the repository root to install the extension's runtime dependencies before loading it. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
+Run `bun install --frozen-lockfile` from the repository root to install the package's runtime dependencies before loading it. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-welcome` through the `../../apps` directory entry.
 
 The `src/index.ts` factory delegates to `src/pi/registration.ts`. Discovery and settings
 snapshots live under `src/discovery/`; header, animation, and terminal rendering
 live under `src/rendering/`. The guarded host inventory override stays under
 `src/pi/`, and tests are colocated with their owning modules.
 
-Run the unit tests from the extension directory:
+Run the unit tests from the package directory:
 
 ```bash
 bun test

@@ -1,12 +1,12 @@
 # Pi Coding Agent Configuration
 [![codecov](https://codecov.io/gh/ibara1454/pi-coding-agent-config/graph/badge.svg?token=HPIISHJ6TG)](https://codecov.io/gh/ibara1454/pi-coding-agent-config)
 
-This repository contains personal configuration and customized extensions for
+This repository contains personal configuration and customized Pi packages for
 [pi-coding-agent](https://github.com/earendil-works/pi).
 
 ## Repository layout
 
-- `apps/` contains **Pi extension packages only**. Each package keeps metadata at
+- `apps/` contains **Pi packages only**. Each package keeps metadata at
   its root, a thin `src/index.ts` factory and domain-owned implementation with
   colocated tests under `src/`, shared test fixtures under each domain's `test/`,
   and static resources under `assets/` when needed.
@@ -14,11 +14,21 @@ This repository contains personal configuration and customized extensions for
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
 
+## Terminology
+
+The [shared glossary](CONTEXT.md) defines **package** and **extension**.
+Each `apps/<name>/` directory is a package; its `src/index.ts` is an extension
+declared by the package's `pi.extensions` manifest.
+
+Pi's upstream `--extension` / `-e` flag and `extensions` settings key accept
+package directories as well as extension files. These literal names do not make
+the two terms synonyms; see [Pi's package documentation](https://docs.pi.dev/latest/packages#create-a-package).
+
 ## Installation
 
 ### Install a compatible Pi version
 
-The extensions' Pi peer dependencies declare `^1.5.0`:
+The packages' Pi peer dependencies declare `^1.5.0`:
 **`>=1.5.0 <2.0.0`**, excluding prereleases. Install **Pi `1.5.0`** to match
 `pi-coding-agent`, `pi-ai`, and `pi-tui` in [`bun.lock`](bun.lock).
 The range declares compatibility; it does not guarantee every 1.x release was tested.
@@ -88,7 +98,7 @@ before normal model use.
 
 **`PI_CODING_AGENT_DIR` must name the directory containing `settings.json`, not
 the JSON file itself.** The export above selects `config/pi/settings.json` and
-makes its `../../apps` extension path resolve to this repository's `apps/`.
+makes its `../../apps` discovery path resolve to this repository's `apps/`.
 
 The export lasts for the current shell and its child processes. To make it
 persistent, add an equivalent export with the canonical absolute directory to
@@ -103,10 +113,10 @@ export PI_CODING_AGENT_DIR="$(realpath "$HOME/.pi/agent")"
 ```
 
 Using an unresolved symlink as the configuration directory can break relative
-extension paths and dependency lookup. This setup needs neither an `extensions`
+discovery paths and dependency lookup. This setup needs neither an `extensions`
 symlink nor a `node_modules` symlink inside `config/pi/`.
 
-### Copy extensions into your own Pi configuration
+### Copy packages into your own Pi configuration
 
 Use this option to keep an existing Pi configuration independent of this
 repository.
@@ -127,7 +137,7 @@ repository.
    directories; do not copy this repository's settings or its `../../apps` entry
    into your independent configuration.
 
-Copying only `src/index.ts` is insufficient for extensions with supporting modules.
+Copying only `src/index.ts` is insufficient for packages with supporting modules.
 
 For a one-off run from the repository root after installing workspace dependencies:
 
@@ -144,11 +154,11 @@ its `pi.extensions` manifest.
 See Pi's [extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 for other loading options.
 
-## Key extensions
+## Key packages
 
-This table highlights packaged extensions and is not an exhaustive list of standalone integrations.
+This table highlights the Pi packages in `apps/`.
 
-| Extension | Purpose | Scoped guidance and test status |
+| Package | Purpose | Scoped guidance and test status |
 | --- | --- | --- |
 | [`provider-base-url-overrides`](apps/provider-base-url-overrides/README.md) | Routes effective Pi provider model base URLs with `PROVIDER_BASE_URL`. | `bun test apps/provider-base-url-overrides` |
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
@@ -193,7 +203,7 @@ Run all workspace tests with coverage through Turborepo:
 bun run test
 ```
 
-Use `bun test` for all Bun suites in one process, or `bun test apps/...` for one extension.
+Use `bun test` for all Bun suites in one process, or `bun test apps/...` for one package.
 
 ## Testing
 

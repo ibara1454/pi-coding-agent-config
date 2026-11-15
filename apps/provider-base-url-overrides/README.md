@@ -1,6 +1,6 @@
 # Provider Base URL Overrides
 
-This extension rewrites model base URLs for effective Pi Providers at `session_start` when `PROVIDER_BASE_URL` is valid. It routes model endpoints by API type and does not implement or validate a proxy protocol.
+This Pi package provides an extension that rewrites model base URLs for effective Pi Providers at `session_start` when `PROVIDER_BASE_URL` is valid. It routes model endpoints by API type and does not implement or validate a proxy protocol.
 
 `src/index.ts` is Pi's factory entrypoint. Provider routing and its
 session hook live in `src/pi/registration.ts`, with colocated tests.
@@ -13,7 +13,7 @@ From the repository root, load the extension for a one-off Pi run:
 PROVIDER_BASE_URL=http://127.0.0.1:8787 pi -e "$(realpath apps/provider-base-url-overrides/src/index.ts)"
 ```
 
-When `PI_CODING_AGENT_DIR` names the canonical path of `config/pi`, its tracked `settings.json` loads this extension through `../../apps`; in that case, omit `-e`. Setting `PROVIDER_BASE_URL` only enables routing after the extension is loaded.
+When `PI_CODING_AGENT_DIR` names the canonical path of `config/pi`, its tracked `settings.json` loads this package through `../../apps`; in that case, omit `-e`. Setting `PROVIDER_BASE_URL` only enables routing after the extension is loaded.
 
 ### Model API mapping
 

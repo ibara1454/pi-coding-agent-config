@@ -1,6 +1,6 @@
 # oh-my-pi Extension Manager for Pi
 
-A [Pi Coding Agent](https://github.com/earendil-works/pi) extension that adds
+A [Pi Coding Agent](https://github.com/earendil-works/pi) package providing an extension that adds
 `/extensions`: a terminal panel for inspecting and persistently enabling or
 disabling extensions and skills.
 
@@ -211,7 +211,7 @@ failed, the same notification reports both results.
 
 If the manager was disabled, recover with `pi config` or edit the applicable
 global or project `settings.json`. Remove any exact
-`-.../omp-extension-manager/src/index.ts` filter, then add the extension directory:
+`-.../omp-extension-manager/src/index.ts` filter, then add the package directory:
 
 ```json
 {
