@@ -4,9 +4,9 @@
 
 Domain terminology follows package ownership:
 
-- `apps/<package>/CONTEXT.md` and `packages/<package>/CONTEXT.md` define package-specific terms.
+- `apps/<package>/CONTEXT.md` and `libs/<library>/CONTEXT.md` define package- and library-specific terms.
 - Root [`GLOSSARY.md`](../../GLOSSARY.md) is the shared glossary, including the distinction between Pi packages and extensions.
-- `apps/<package>/adr/` and `packages/<package>/adr/` contain package-specific architecture decision records.
+- `apps/<package>/adr/` and `libs/<library>/adr/` contain package- and library-specific architecture decision records.
 - `docs/adr/` contains only repository-wide architecture decision records.
 
 ## Consumer rules

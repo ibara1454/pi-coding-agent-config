@@ -12,7 +12,7 @@ The package remains private and is not published to npm. To use it in another
 project, install it from a local checkout:
 
 ```bash
-bun add --dev /path/to/this-repo/packages/biome-rules
+bun add --dev /path/to/this-repo/libs/biome-rules
 ```
 
 Add the presets to that project's `biome.jsonc`:
@@ -95,5 +95,5 @@ Keep `@biomejs/wasm-nodejs` pinned to the same version as the root
 Run only the custom-rule tests from the repository root:
 
 ```bash
-bun test packages/biome-rules
+bun test libs/biome-rules
 ```

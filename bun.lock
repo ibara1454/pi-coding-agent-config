@@ -89,7 +89,7 @@
         "@earendil-works/pi-coding-agent": "^1.5.0",
       },
     },
-    "packages/biome-rules": {
+    "libs/biome-rules": {
       "name": "biome-rules",
       "version": "1.0.0",
       "devDependencies": {
@@ -256,7 +256,7 @@
 
     "bignumber.js": ["bignumber.js@9.3.1", "", {}, "sha512-Ko0uX15oIUS7wJ3Rb30Fs6SkVbLmPBAKdlm7q9+ak9bbIeFf0MwuBsQV6z7+X768/cHsfg+WlysDWJcmthjsjQ=="],
 
-    "biome-rules": ["biome-rules@workspace:packages/biome-rules"],
+    "biome-rules": ["biome-rules@workspace:libs/biome-rules"],
 
     "bowser": ["bowser@2.14.1", "", {}, "sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg=="],
 

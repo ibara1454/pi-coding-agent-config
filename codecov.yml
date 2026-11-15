@@ -48,4 +48,4 @@ component_management:
     - component_id: biome-rules
       name: biome-rules
       paths:
-        - packages/biome-rules/**
+        - libs/biome-rules/**

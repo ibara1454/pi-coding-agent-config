@@ -10,7 +10,7 @@ This repository contains personal configuration and customized Pi packages for
   its root, a thin `src/index.ts` factory and domain-owned implementation with
   colocated tests under `src/`, shared test fixtures under each domain's `test/`,
   and static resources under `assets/` when needed.
-- `packages/` contains shared libraries and development tooling.
+- `libs/` contains shared libraries and development tooling.
 - `config/pi/` contains Pi configuration and local runtime state. It is not an
   application or a Bun workspace package.
 
@@ -182,7 +182,7 @@ Check formatting, import organization, and the lint policy in [`biome.jsonc`](bi
 bun run lint
 ```
 
-See [the custom Biome rules guide](packages/biome-rules/README.md) for rule
+See [the custom Biome rules guide](libs/biome-rules/README.md) for rule
 behavior, implementation, and testing guidance.
 
 Apply safe Biome fixes:

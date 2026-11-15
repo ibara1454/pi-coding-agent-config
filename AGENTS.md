@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained Pi packages with TypeScript extension entry points; `packages/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
+This repository is a personal [Pi Coding Agent](https://github.com/earendil-works/pi) configuration organized as a Bun workspace monorepo. `apps/` contains self-contained Pi packages with TypeScript extension entry points; `libs/` contains shared libraries and development tooling. `config/pi/` contains the non-workspace Pi configuration; its tracked `settings.json` loads `../../apps`. The root `package.json` and `bun.lock` manage workspace dependencies. Pi controls extension discovery and lifecycle. Follow the placement constraints and installation options in `README.md`.
 
 ## Rules and Guidance
 
@@ -47,7 +47,7 @@ Before editing and before delivery, ask: **Which requested behavior, observed fa
 - `apps/omp-welcome/` — self-contained ESM welcome-header Pi package with Bun tests.
 - `apps/provider-base-url-overrides/` — private ESM Pi package with scoped README and Bun tests.
 - `apps/openshell-sandbox/` — OpenShell-backed model Bash with colocated unit and integration tests.
-- `packages/biome-rules/` — custom GritQL rules with colocated Bun integration tests.
+- `libs/biome-rules/` — custom GritQL rules with colocated Bun integration tests.
 - `config/pi/` — Pi configuration, runtime ignore rules, managed binary metadata, and npm package state.
 - `package.json` and `bun.lock` — authoritative Bun workspace definition and dependency lock.
 
@@ -71,7 +71,7 @@ bun test apps/provider-base-url-overrides
 bun test apps/omp-status-line
 bun test apps/omp-welcome
 bun test apps/openshell-sandbox
-bun test packages/biome-rules
+bun test libs/biome-rules
 ```
 
 ## Important Files

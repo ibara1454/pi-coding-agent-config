@@ -33,6 +33,6 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "libs/*"
   ]
 }
