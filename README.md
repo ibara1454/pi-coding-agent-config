@@ -16,7 +16,7 @@ This repository contains personal configuration and customized Pi packages for
 
 ## Terminology
 
-The [shared glossary](CONTEXT.md) defines **package** and **extension**.
+The [shared glossary](GLOSSARY.md) defines **package** and **extension**.
 Each `apps/<name>/` directory is a package; its `src/index.ts` is an extension
 declared by the package's `pi.extensions` manifest.
 
