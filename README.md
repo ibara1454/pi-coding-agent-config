@@ -126,7 +126,7 @@ repository.
    `~/.pi/agent/extensions/omp-status-line/`. If `PI_CODING_AGENT_DIR` is already set, use
    its `extensions/` directory instead. Include `package.json`, the entrypoint,
    supporting source files, and assets; omit generated `node_modules/` directories.
-   For OpenShell, include its `bunfig.toml` and follow the linked prerequisites.
+   For OpenShell, include its `.npmrc` and follow the linked prerequisites.
 2. Open each copied package directory and install its runtime dependencies there:
 
    ```sh

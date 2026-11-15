@@ -3,6 +3,9 @@ node_modules/
 coverage/
 # Local npm configuration may contain authentication tokens.
 .npmrc
+# These tracked registry configs contain environment placeholders only.
+!/.npmrc
+!/apps/openshell-sandbox/.npmrc
 # The tracked Pi configuration lives under config/pi.
 /settings.json
 # OS and editor files

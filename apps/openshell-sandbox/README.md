@@ -74,7 +74,7 @@ Both binaries must be on `PATH`, both versions must be `0.1.8`, and `openshell s
 
 ### 3. Authenticate the SDK download
 
-Bun downloads `@nvidia/openshell-sdk` from GitHub Packages using `NVIDIA_NPM_TOKEN`, as configured in [`bunfig.toml`](bunfig.toml). This is **package-install authentication**, not a credential for model Bash or Pi's model provider.
+Bun downloads `@nvidia/openshell-sdk` from GitHub Packages using `NVIDIA_NPM_TOKEN`, as configured in [`.npmrc`](.npmrc). This is **package-install authentication**, not a credential for model Bash or Pi's model provider.
 
 1. In GitHub, open **Settings → Developer settings → Personal access tokens → Tokens (classic)** and generate a token with **`read:packages`**. Fine-grained tokens are not supported. See [GitHub's token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
 2. Ensure your account can access `@nvidia/openshell-sdk`; authorize the token for SSO if required by its organization. See [GitHub Packages authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages).

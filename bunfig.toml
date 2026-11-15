@@ -8,6 +8,3 @@ coveragePathIgnorePatterns = [
 ]
 # Per-file floors; keep headroom for incremental tests rather than chasing full coverage.
 coverageThreshold = 0.95
-
-[install.scopes]
-"@nvidia" = { url = "https://npm.pkg.github.com/", token = "$NVIDIA_NPM_TOKEN" }
