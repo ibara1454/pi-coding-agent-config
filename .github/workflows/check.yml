@@ -66,7 +66,15 @@ jobs:
       - name: Combine coverage reports
         id: coverage-report
         if: ${{ !cancelled() && steps.coverage.outcome != 'skipped' }}
-        run: cat apps/*/coverage/lcov.info libs/*/coverage/lcov.info > coverage/lcov.info
+        shell: bash
+        run: |
+          shopt -s nullglob
+          reports=(apps/*/coverage/lcov.info libs/*/coverage/lcov.info packages/*/coverage/lcov.info)
+          if (( ${#reports[@]} == 0 )); then
+            echo "No workspace coverage reports found" >&2
+            exit 1
+          fi
+          cat "${reports[@]}" > coverage/lcov.info
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && steps.coverage-report.outcome == 'success' }}
