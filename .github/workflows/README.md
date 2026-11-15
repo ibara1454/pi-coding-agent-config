@@ -6,6 +6,25 @@
 `config/pi/npm/package-lock.json` daily at **06:00 UTC** or via manual dispatch.
 Findings are report-only and appear under **Security → Code scanning**.
 
+## Dependabot registry authentication
+
+[`dependabot.yml`](../dependabot.yml) supplies GitHub Packages credentials through
+Dependabot's proxy. This is separate from the `NVIDIA_NPM_TOKEN` environment
+variable used by local Bun installs and Actions installation steps.
+
+Create a classic personal access token with only `read:packages`, using an account
+that can download `@nvidia/openshell-sdk`. Store it as a **Dependabot** secret
+(not an Actions secret) using the CLI's hidden-input prompt:
+
+```sh
+gh secret set NVIDIA_NPM_TOKEN --app dependabot --repo ibara1454/pi-coding-agent-config
+```
+
+Rotate the secret before the token expires. After merging the configuration,
+trigger **Check for updates** on the repository's Dependabot version-updates page
+and verify that the Bun update job succeeds. The GitHub-generated update workflow
+does not expose a repository-editable `env:` block.
+
 ## Automated PR review
 
 [Code review](code-review.md) uses [shared/pr-review-context.md](shared/pr-review-context.md)

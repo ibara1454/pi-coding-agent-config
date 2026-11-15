@@ -1,0 +1,2 @@
+[install.scopes]
+"@nvidia" = { url = "https://npm.pkg.github.com/", token = "$NVIDIA_NPM_TOKEN" }
