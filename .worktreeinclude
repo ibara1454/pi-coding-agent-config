@@ -1,3 +1,4 @@
+.npmrc
 auth.json
 models-store.json
 trust.json
