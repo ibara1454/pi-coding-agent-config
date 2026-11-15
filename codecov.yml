@@ -21,10 +21,6 @@ comment:
 
 component_management:
   individual_components:
-    - component_id: omp-extension-manager
-      name: omp-extension-manager
-      paths:
-        - apps/omp-extension-manager/**
     - component_id: omp-lsp
       name: omp-lsp
       paths:

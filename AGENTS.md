@@ -32,7 +32,6 @@ Before editing and before delivery, ask: **Which requested behavior, observed fa
 
 ## Architecture & Data Flow
 
-- Extension manager: `apps/omp-extension-manager/src/index.ts` delegates `/extensions` registration through `src/pi/index.ts`; `src/pi/extension-runtime.ts` binds discovery, persistence, panel creation, and disposal. Implementation and tests are grouped under `src/{pi,catalog,discovery,resource-paths,settings,panel}`, with explicit `index.ts` interfaces for cross-domain imports.
 - Status line: `apps/omp-status-line/src/index.ts` delegates to `src/pi/registration.ts`, which reads settings, aggregates session/context/git state, and wraps the editor and footer. Context, Git, and declarative rendering modules live under `src/{context,git,rendering}`.
 - Welcome UI: `apps/omp-welcome/src/index.ts` delegates to `src/pi/registration.ts`. `src/discovery/data.ts` handles discovery/settings snapshots; `src/rendering/welcome.ts` renders; `src/pi/resource-inventory.ts` is a deliberately guarded, fail-open private-host compatibility layer.
 - Provider base URL overrides: `apps/provider-base-url-overrides/src/index.ts` delegates to `src/pi/registration.ts`, which validates `PROVIDER_BASE_URL`, wraps effective Pi Providers at `session_start`, routes model base URLs by API type, and delegates original provider behavior; see its scoped README for the mapping.
@@ -42,7 +41,6 @@ Before editing and before delivery, ask: **Which requested behavior, observed fa
 
 ## Key Directories
 
-- `apps/omp-extension-manager/` — private ESM `/extensions` discovery, persistence, and terminal UI package with Bun tests.
 - `apps/omp-status-line/` — self-contained ESM status-line/editor-chrome Pi package with Bun tests.
 - `apps/omp-welcome/` — self-contained ESM welcome-header Pi package with Bun tests.
 - `apps/provider-base-url-overrides/` — private ESM Pi package with scoped README and Bun tests.
@@ -66,7 +64,6 @@ bun run check
 bun run test
 
 # Run one workspace's tests.
-bun test apps/omp-extension-manager
 bun test apps/provider-base-url-overrides
 bun test apps/omp-status-line
 bun test apps/omp-welcome
@@ -79,7 +76,6 @@ bun test libs/biome-rules
 - `README.md` — repository purpose and root setup entry point.
 - `package.json` and `bun.lock` — root workspace manifest and dependency lockfile.
 - `config/pi/settings.json` — tracked, non-secret Pi defaults, package sources, and resource paths.
-- `apps/omp-extension-manager/src/index.ts` — omp-extension-manager host entry point.
 - `apps/omp-status-line/src/index.ts` — status-line integration entry point.
 - `apps/omp-welcome/src/index.ts` — welcome integration entry point.
 - `apps/openshell-sandbox/src/index.ts` — OpenShell sandbox Pi factory.
