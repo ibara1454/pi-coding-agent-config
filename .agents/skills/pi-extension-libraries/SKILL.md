@@ -68,7 +68,7 @@ that the published package's types do not export. Prefer `@earendil-works/*` and
   Pi compatibility range (`^1.4.0`) rather than widening it blindly. Development
   copies belong in `devDependencies`; the workspace root already supplies the
   main Pi packages for local development.
-- Unrelated runtime packages belong in the owning extension's `dependencies`,
+- Unrelated runtime packages belong in the owning package's `dependencies`,
   not only `devDependencies`: distributed Pi installs omit development packages.
   Do not rely on an undeclared transitive package just because it resolves locally.
 - Check `package.json`, `bun.lock`, and the installed package's public declarations

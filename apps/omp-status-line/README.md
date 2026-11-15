@@ -1,6 +1,6 @@
 # oh-my-pi Status Line for Pi
 
-A Pi extension that recreates the status line and rounded editor UI from [oh-my-pi](https://github.com/can1357/oh-my-pi).
+A Pi package providing a status-line and rounded-editor UI extension based on [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 ## Origin and attribution
 
@@ -128,7 +128,7 @@ or when the current branch has no pull request.
 
 ## Installation in this repository
 
-The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-status-line` through the `../../apps` directory entry.
+The package has no runtime dependencies. Set `PI_CODING_AGENT_DIR` to the canonical path of `config/pi`; its tracked `settings.json` loads `apps/omp-status-line` through the `../../apps` directory entry.
 
 ## Source layout
 
@@ -139,7 +139,7 @@ The extension has no runtime package dependencies. Set `PI_CODING_AGENT_DIR` to 
 
 ## Testing
 
-Run the unit and integration tests from the extension directory:
+Run the unit and integration tests from the package directory:
 
 ```bash
 bun test

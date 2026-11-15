@@ -32,7 +32,7 @@ function hasExpired(expiresAt: number): boolean {
 
 ### Pi extension entry points
 
-**Files:** `apps/*/src/index.ts` (Pi-host-loaded entry points declared in each extension's `package.json`).
+**Files:** `apps/*/src/index.ts` (Pi-host-loaded extension entry points declared in each package's `package.json`).
 
 - Pi-host-loaded package entries default-export only the declared extension factory and do not re-export implementation helpers.
 
@@ -54,7 +54,7 @@ function hasExpired(expiresAt: number): boolean {
 
 ### Implementation and test pairing
 
-**Files:** `**/*.ts`, except `packages/biome-rules/**/*.ts`.
+**Files:** `**/*.ts`, except `libs/biome-rules/**/*.ts`.
 
 - Every implementation `name.ts` MUST have a same-directory `name.test.ts` unit-test file; every `name.test.ts` MUST have its corresponding `name.ts` implementation.
 - An integration suite `name.integration.test.ts` MUST have a same-directory `name.ts` implementation. It supplements, but does not replace, `name.test.ts`.
@@ -72,19 +72,19 @@ function hasExpired(expiresAt: number): boolean {
 
 ## Workspace manifests and tooling
 
-**Files:** `package.json`, `bun.lock`, `bunfig.toml`, `turbo.jsonc`, `apps/*/package.json`, `packages/*/package.json`.
+**Files:** `package.json`, `bun.lock`, `bunfig.toml`, `turbo.jsonc`, `apps/*/package.json`, `libs/*/package.json`.
 
 - `bun run test` dispatches the workspace `test` tasks through Turborepo. There is no root build command.
 
-### Pi extension manifests
+### Pi package manifests
 
 **Files:** `apps/*/package.json`.
 
-- Extension packages are private ESM packages with Pi entry points declared in their local `package.json` files.
+- Pi packages are private ESM packages with extension entry points declared in their local `package.json` files.
 
 ## Package-specific guidance
 
-**Files:** `apps/**/*`, `packages/biome-rules/**/*`.
+**Files:** `apps/**/*`, `libs/biome-rules/**/*`.
 
-- For `apps/**/*`, treat extension-specific READMEs as scoped guidance. In particular, sandbox prerequisites apply to sandbox deployment, not every extension.
-- For changes to `packages/biome-rules/**/*`, read the custom-rule testing notes in `packages/biome-rules/README.md`.
+- For `apps/**/*`, treat package-specific READMEs as scoped guidance. In particular, sandbox prerequisites apply to sandbox deployment, not every package.
+- For changes to `libs/biome-rules/**/*`, read the custom-rule testing notes in `libs/biome-rules/README.md`.

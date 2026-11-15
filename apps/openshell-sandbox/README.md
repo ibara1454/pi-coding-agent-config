@@ -2,7 +2,7 @@
 
 Start with [installation](#installation-and-prerequisites), then [configure a project and check Bash](#configuration). If OpenShell 0.1.8 is already installed and Docker host networking is enabled, skip those installation steps.
 
-This extension sandboxes **model-requested Bash only**. User Bash (`!` and `!!`), Pi, file tools, model traffic, and other extensions' host processes remain host-side. This is **not whole-agent isolation**. If setup, execution, or cleanup cannot be completed safely, model Bash stays blocked; it never falls back to the host.
+This Pi package provides an extension that sandboxes **model-requested Bash only**. User Bash (`!` and `!!`), Pi, file tools, model traffic, and other extensions' host processes remain host-side. This is **not whole-agent isolation**. If setup, execution, or cleanup cannot be completed safely, model Bash stays blocked; it never falls back to the host.
 
 ## About OpenShell
 
@@ -88,9 +88,9 @@ Bun downloads `@nvidia/openshell-sdk` from GitHub Packages using `NVIDIA_NPM_TOK
 
 The export lasts for this shell and its children. Use your own secret tooling for persistence; do not put token values in settings, policy files, or committed shell configuration.
 
-### 4. Load the extension in Pi
+### 4. Load the package in Pi
 
-Follow the root README's [repository setup](../../README.md#use-the-entire-repository) or [copy-package setup](../../README.md#copy-extensions-into-your-own-pi-configuration), installing dependencies in the shell from step 3. Those instructions also select the Pi configuration directory.
+Follow the root README's [repository setup](../../README.md#use-the-entire-repository) or [copy-package setup](../../README.md#copy-packages-into-your-own-pi-configuration), installing dependencies in the shell from step 3. Those instructions also select the Pi configuration directory.
 
 **Before normal model use, configure project access below.** Loading the extension does not grant access to your project.
 

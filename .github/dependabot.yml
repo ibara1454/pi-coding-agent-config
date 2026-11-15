@@ -6,7 +6,7 @@
 version: 2
 updates:
   - package-ecosystem: "bun"
-    # The root Bun workspace includes apps/* and packages/*, so shared
+    # The root Bun workspace includes apps/* and libs/*, so shared
     # dependencies are updated across their manifests in one PR.
     directory: "/"
     schedule:

@@ -1,7 +1,7 @@
 {
   "name": "pi-ibara1454-mono",
   "version": "1.0.0",
-  "description": "This repository contains personal configuration and customized extensions for [pi-coding-agent](https://github.com/earendil-works/pi).",
+  "description": "This repository contains personal configuration and customized Pi packages for [pi-coding-agent](https://github.com/earendil-works/pi).",
   "homepage": "https://github.com/ibara1454/pi-coding-agent-config#readme",
   "bugs": {
     "url": "https://github.com/ibara1454/pi-coding-agent-config/issues"
@@ -33,6 +33,6 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "libs/*"
   ]
 }

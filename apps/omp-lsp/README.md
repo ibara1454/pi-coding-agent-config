@@ -1,6 +1,6 @@
 # omp-lsp
 
-A [Pi](https://github.com/earendil-works/pi) extension providing the `lsp` tool for semantic code navigation, diagnostics, refactoring, and optional formatting. It includes all 55 Oh My Pi server presets and uses installed language servers; it never downloads servers or dependencies.
+A [Pi](https://github.com/earendil-works/pi) package providing an extension with the `lsp` tool for semantic code navigation, diagnostics, refactoring, and optional formatting. It includes all 55 Oh My Pi server presets and uses installed language servers; it never downloads servers or dependencies.
 
 ## Activate and install
 
@@ -19,7 +19,7 @@ For a one-off run after installing workspace dependencies:
 pi -e "$(realpath apps/omp-lsp/src/index.ts)"
 ```
 
-To use the extension independently, copy the complete `apps/omp-lsp/` directory into your Pi configuration's `extensions/` directory, omitting generated `node_modules/`. Run `bun install --production` inside the copied package, then restart Pi or run `/reload`. Keep its `src/` directory (including the `src/index.ts` entrypoint), `assets/defaults.json`, package metadata, and `LICENSE`; copying only `src/index.ts` is insufficient.
+To use the package independently, copy the complete `apps/omp-lsp/` directory into your Pi configuration's `extensions/` directory, omitting generated `node_modules/`. Run `bun install --production` inside the copied package, then restart Pi or run `/reload`. Keep its `src/` directory (including the `src/index.ts` entrypoint), `assets/defaults.json`, package metadata, and `LICENSE`; copying only `src/index.ts` is insufficient.
 
 ### Supported languages and servers to install
 

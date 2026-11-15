@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- What changed, why, and which extensions or configuration are affected? -->
+<!-- What changed, why, and which packages or configuration are affected? -->
 
 -
 
