@@ -73,7 +73,7 @@ binaries:
 
 This is illustrative configuration, not fresh native default-image acceptance. The host variable `WORK_NPM_TOKEN` supplies the value; `NPM_TOKEN` must match the profile's environment key. Keep any other needed providers/profiles when replacing arrays. The `/usr/bin/node` profile entry scopes native enforcement; it neither installs Node nor makes it a startup requirement.
 
-Providers supply credential environment placeholders, not client configuration. Workloads must configure Git/npm/pip manually while preserving TLS/proxy settings. The README owns the rejected [`providers[].client` migration and path-specific Git trust caveats](../README.md#configuration).
+Providers supply credential environment placeholders, not client configuration. Workloads must configure Git/npm/pip manually while preserving TLS/proxy settings. See the README for [Git ownership troubleshooting](../README.md#git-reports-dubious-ownership).
 
 ## Trade-off and sources
 

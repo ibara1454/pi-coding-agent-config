@@ -1,158 +1,249 @@
 # OpenShell model-Bash sandbox
 
-This Pi extension replaces **model-requested Bash**, not user Bash (`!` and `!!`). Pi, file tools, model traffic, and other extensions' host processes remain outside this boundary. Model Bash is registered fail-closed before SDK or configuration loading: setup, execution, or uncertain cleanup failures never reroute it to the host. User Bash remains host-side even when OpenShell is preparing or failed. This is not whole-agent isolation.
+Start with [installation](#installation-and-prerequisites), then [configure a project and check Bash](#configuration). If OpenShell 0.1.8 is already installed and Docker host networking is enabled, skip those installation steps.
 
-## Installation and prerequisites
-
-1. Install **Docker Desktop or Docker Engine 28.0+** using the official guide for your platform:
-   - **Linux:** [Docker Engine installation](https://docs.docker.com/engine/install/).
-   - **WSL2:** [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) and [WSL2 backend/integration setup](https://docs.docker.com/desktop/features/wsl/).
-   - **Apple Silicon macOS:** [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/).
-
-     Start Docker and ensure its local Unix socket is accessible to the Pi user. Arrange access/file sharing for the selected project yourself; the extension does not install or restart services. For WSL2, enable the WSL2 backend and distribution integration so the socket is available inside the distribution.
-
-     **Required for this integration: Docker host networking for the trusted supervisor.** OpenShell 0.1.8 defaults its supervisor to `network_mode=host` so it can reach the private gateway's loopback listener. The model-Bash workload stays on `network_mode=none`. Native bridge mode is optional and is not selected by this extension; no new Docker setting is required when upgrading a working 0.1.0 installation. See the [versioned Docker-driver requirement](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/crates/openshell-driver-docker/README.md#gateway-session-and-tls).
-
-     **Docker Desktop 4.34+:** open **Settings → Resources → Network → Enable host networking**, then follow your installed version's apply/restart prompt. Selecting host mode for a container does not enable this Desktop setting. Enhanced Container Isolation is incompatible with this setup. If a restart is required, it can interrupt other containers. See [Docker's setup instructions](https://docs.docker.com/engine/network/drivers/host/#docker-desktop).
-2. Install the **native OpenShell 0.1.8 CLI and gateway** using the commands below, based on the [versioned upstream instructions](https://docs.nvidia.com/openshell/v0.1.8/about/installation). Existing 0.0.x installations require sandbox cleanup, backups, and uninstall before installation; follow the [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/upgrade/0-1-0.mdx). Do not reuse old sandbox state or mix native/SDK versions.
-   - **Linux/WSL2:** Debian/Ubuntu or an RPM-based distribution, x86\_64 or ARM64, glibc 2.28+, package-install privileges (`sudo`), and a working systemd user session. Enable systemd in WSL2 before using this installer.
-   - **Apple Silicon macOS:** install [Homebrew](https://brew.sh/) first. Intel macOS is not supported by this release.
-   - Both platforms need `curl` and a SHA-256 utility (`sha256sum` or `shasum`).
-
-     Run as your normal user; the installer requests package-manager privileges when needed. Both the installer script and the selected release are pinned:
-
-     ```sh
-     installer="$(curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.8/install.sh)" &&
-       OPENSHELL_VERSION=v0.1.8 sh -c "$installer"
-     ```
-
-     The installer installs `openshell` and `openshell-gateway` through the native package manager, verifies downloaded Linux packages against release checksums, and starts/registers a default local gateway through systemd or Homebrew. That default gateway is separate from the private gateway this extension owns.
-
-     Verify in the same shell environment that will launch Pi:
-
-     ```sh
-     command -v openshell openshell-gateway
-     openshell --version
-     openshell-gateway --version
-     openshell status
-     ```
-
-     Both version commands must report `0.1.8`, both binaries must be on `PATH`, and `openshell status` should reach the installer's default gateway. This does not prove the extension's sandbox permissions or project access. Installing `openshell` from PyPI installs only the Python SDK, not these native binaries.
-3. Create a **GitHub personal access token (classic)** for [GitHub Packages authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages). Fine-grained tokens are not supported:
-   - Open GitHub **Settings &gt; Developer settings &gt; Personal access tokens &gt; Tokens (classic)**, then choose **Generate new token &gt; Generate new token (classic)**. See [GitHub's token creation guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
-   - Enter a descriptive name and expiration, select only **`read:packages`**, and click **Generate token**.
-   - Copy the generated PAT privately. Your account must have access to `@nvidia/openshell-sdk`; authorize the token for SSO if the package's organization requires it.
-4. Configure `NVIDIA_NPM_TOKEN` in your `~/.bashrc` (Bash) or `~/.zshrc` (Zsh), replacing the placeholder with your PAT:
-   ```sh
-     # For Bash
-     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.bashrc && source ~/.bashrc
-     # For Zsh
-     echo 'export NVIDIA_NPM_TOKEN="YOUR_GITHUB_PAT"' >> ~/.zshrc && source ~/.zshrc
-   ```
+This extension sandboxes **model-requested Bash only**. User Bash (`!` and `!!`), Pi, file tools, model traffic, and other extensions' host processes remain host-side. This is **not whole-agent isolation**. If setup, execution, or cleanup cannot be completed safely, model Bash stays blocked; it never falls back to the host.
 
 ## About OpenShell
 
-[OpenShell](https://github.com/NVIDIA/OpenShell) is NVIDIA's runtime for running AI-agent commands in isolated environments called sandboxes. This extension uses it with Docker and a policy file to control which files and network destinations model-requested Bash can access.
+[OpenShell](https://github.com/NVIDIA/OpenShell) runs commands in isolated environments called sandboxes. The [official architecture guide](https://docs.nvidia.com/openshell/latest/about/architecture) describes the agent running inside the sandbox.
 
-OpenShell prepares separate trusted supervisor and restricted workload containers, including the version-matched sandbox runtime. The workload has no direct Docker network; the supervisor mediates its network requests. The extension does not create a separate Docker network or override native runtime images.
+**This extension intentionally keeps Pi on the host**, so its session history remains there when sandbox containers are recreated. If you want to run the agent itself inside a container, use OpenShell directly instead of this extension.
 
-The default workload image is `nvcr.io/nvidia/base/ubuntu:24.04`, not the former Community tool image. It includes Bash but not Git, Node, Python, or curl. Select a fully qualified custom `image` with the tools you need; the extension does not install them. The baseline uses non-root UID/GID `1000`; custom policies and images must agree on workload identity and mounted-file ownership.
+Both diagrams below show a local Docker setup.
+
+### Typical OpenShell usage: agent inside the sandbox
+
+![Typical OpenShell usage: a host CLI or SDK manages the gateway; the agent and its tools run in the workload container, with network requests mediated by the supervisor.](assets/agent-in-sandbox.svg)
+
+### This extension: Pi on the host, model Bash in the sandbox
+
+![Bash delegation: Pi's model Bash call reaches the host-side extension, which sends the command through the OpenShell SDK to Bash in the workload container. Output and the exit code return to Pi as a tool result; other tools, session history, and model traffic stay on the host.](assets/architecture.svg)
+
+The extension starts its own gateway, separate from the installer's default gateway.
+
+The default workload image is `nvcr.io/nvidia/base/ubuntu:24.04`. It has Bash, **not Git, Node, Python, or curl**. To use those tools, select a fully qualified custom `image` in `openShellSandbox` settings. The extension does not install tools or override OpenShell's version-matched supervisor/runtime images.
+
+The bundled policy runs the workload as non-root UID/GID `1000`. Your image, policy, and mounted-file ownership must agree. Policy entries for an executable do not install it or make it a startup requirement.
+
+## Installation and prerequisites
+
+### 1. Prepare Docker
+
+Use **Docker Engine 28.0+** or **Docker Desktop 4.34+**:
+
+- **Linux:** [Docker Engine installation](https://docs.docker.com/engine/install/).
+- **WSL2:** [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/), with the [WSL2 backend and distribution integration](https://docs.docker.com/desktop/features/wsl/) enabled.
+- **Apple Silicon macOS:** [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/).
+
+Start Docker. Its local Unix socket must be accessible to the user launching Pi, and Docker must be able to share the selected project directory. The extension does not install or restart services or arrange file sharing.
+
+**Why host networking is required:** this integration uses OpenShell 0.1.8's default `host` network mode for the trusted supervisor so it can reach the private gateway at `127.0.0.1`. The workload still uses `none`. Native OpenShell also supports an optional supervisor bridge mode, but **this extension does not select it**. See the [pinned Docker-driver contract](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/crates/openshell-driver-docker/README.md#gateway-session-and-tls).
+
+**Docker Desktop only:** if not already enabled, open **Settings → Resources → Network → Enable host networking** and follow the apply/restart prompt. Selecting host mode for a container does **not** enable this separate Desktop setting. Enhanced Container Isolation is incompatible with this setup; a Docker restart can interrupt other containers. See [Docker's instructions](https://docs.docker.com/engine/network/drivers/host/#docker-desktop).
+
+### 2. Install and check native OpenShell 0.1.8
+
+Use the **native CLI and gateway**, matching the package's pinned SDK:
+
+- **Linux/WSL2:** Debian/Ubuntu or an RPM-based distribution; x86_64 or ARM64; glibc 2.28+; `sudo`; a working systemd user session. Enable systemd in WSL2 before installing.
+- **Apple Silicon macOS:** Intel macOS is unsupported by this release. **Extension behavior on macOS remains unverified.**
+- **Both:** `curl` and a SHA-256 utility (`sha256sum` or `shasum`).
+
+**Upgrading from 0.0.x?** Stop here and follow the [backup, cleanup, and uninstall guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/upgrade/0-1-0.mdx) first. Do not reuse old sandbox state or mix native/SDK versions.
+
+Run as your normal user; the installer requests package-manager privileges when needed. Both the script and release are pinned:
+
+```sh
+installer="$(curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.8/install.sh)" &&
+  OPENSHELL_VERSION=v0.1.8 sh -c "$installer"
+```
+
+The [native installer](https://docs.nvidia.com/openshell/v0.1.8/about/installation) installs `openshell` and `openshell-gateway`, verifies downloaded Linux packages against release checksums, and starts/registers a default gateway through systemd or Homebrew. The extension creates its own private gateway instead of using that default.
+
+In the same shell environment that will launch Pi, run:
+
+```sh
+command -v openshell openshell-gateway
+openshell --version
+openshell-gateway --version
+openshell status
+```
+
+Both binaries must be on `PATH`, both versions must be `0.1.8`, and `openshell status` should reach the installer's default gateway. This checks the native installation, **not** the extension's project permissions. The PyPI package provides only the Python SDK, not these native binaries.
+
+### 3. Authenticate the SDK download
+
+Bun downloads `@nvidia/openshell-sdk` from GitHub Packages using `NVIDIA_NPM_TOKEN`, as configured in [`bunfig.toml`](bunfig.toml). This is **package-install authentication**, not a credential for model Bash or Pi's model provider.
+
+1. In GitHub, open **Settings → Developer settings → Personal access tokens → Tokens (classic)** and generate a token with **`read:packages`**. Fine-grained tokens are not supported. See [GitHub's token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
+2. Ensure your account can access `@nvidia/openshell-sdk`; authorize the token for SSO if required by its organization. See [GitHub Packages authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages).
+3. Supply the token privately in the shell where you will install dependencies. For an interactive **Bash** shell, this prompt hides the value and keeps it out of the command itself:
+
+   ```bash
+   read -r -s -p 'GitHub Packages token: ' NVIDIA_NPM_TOKEN
+   printf '\n'
+   export NVIDIA_NPM_TOKEN
+   ```
+
+The export lasts for this shell and its children. Use your own secret tooling for persistence; do not put token values in settings, policy files, or committed shell configuration.
+
+### 4. Load the extension in Pi
+
+Follow the root README's [repository setup](../../README.md#use-the-entire-repository) or [copy-package setup](../../README.md#copy-extensions-into-your-own-pi-configuration), installing dependencies in the shell from step 3. Those instructions also select the Pi configuration directory.
+
+**Before normal model use, configure project access below.** Loading the extension does not grant access to your project.
 
 ## Configuration
 
-Add `openShellSandbox` to global `settings.json` under `PI_CODING_AGENT_DIR` or a **trusted** project's `.pi/settings.json`. For example, a complete project settings file selecting a manually maintained local policy and no inherited providers is:
+### 1. Create a project policy
+
+Open the project directory where you will launch Pi. Run this in your host shell to obtain its absolute canonical path:
+
+```sh
+pwd -P
+```
+
+Copy the complete [bundled policy](assets/policy.yaml) to **`.pi/openshell-sandbox.yaml` inside that project**; create `.pi/` if needed. Inside `filesystem_policy`, add the path printed above to the existing `read_write` list. For a project at `/work/my-project`, that list becomes:
+
+```yaml
+read_write:
+  - /sandbox
+  - /home/sandbox
+  - /tmp
+  - /dev/null
+  - "/work/my-project"
+```
+
+Replace `/work/my-project` with your actual path. Keep this list nested under `filesystem_policy` and leave the rest of the copied policy intact; the snippet is **not a complete policy file**.
+
+The baseline permits tool paths and selected GitHub/npm/PyPI operations, not your project's paths. Bind mounts, `include_workdir`, and the command's working directory do not replace explicit grants. Access also depends on workload identity, host permissions, and Docker file sharing. Never grant a parent directory, host home, SSH credentials, Docker socket, or unrelated worktrees just to bypass a denial.
+
+### 2. Select the policy in settings
+
+Add this field to the project's **`.pi/settings.json`**, preserving any other settings:
 
 ```json
 {
   "openShellSandbox": {
     "policyPath": "./openshell-sandbox.yaml",
+    "profilePaths": [],
     "providers": []
   }
 }
 ```
 
-- Precedence is built-in defaults, global settings, then trusted-project fields. Project settings are not read before trust. Trust includes authority to select host credential-variable names, custom profile destinations, and the image.
-- Relative `policyPath` and `profilePaths` resolve from the settings file declaring them. `providers` and `profilePaths` replace entire arrays, including `[]`. The selected YAML policy is one complete document, never merged into a broader default.
-- Missing settings are optional; malformed/unreadable present settings or selected documents fail closed. Native YAML is mapped to the pinned SDK schema without dropping unknown fields; native validation and enforcement remain authoritative. In policy/profile documents, the map key `__proto__` is rejected, including in nested maps and middleware JSON, because the pinned SDK cannot preserve it safely; other normal keys remain supported.
+Here `./openshell-sandbox.yaml` means **`.pi/openshell-sandbox.yaml`**, not a file at the project root. This example starts without credential providers and clears inherited profile/provider arrays.
 
-Before normal model use:
+Project settings are read only after you trust the project in Pi. Trust includes authority to select host credential-variable names, profile destinations, and the workload image.
 
-1. Copy the bundled [native baseline](assets/policy.yaml) to the selected `policyPath` and maintain it as a complete policy. Add **absolute canonical project paths** to `filesystem_policy.read_write`. The baseline grants tool paths and selected public GitHub/npm/PyPI operations, not your project's paths; mounts, `include_workdir`, and SDK exec working directories do not grant access.
-2. For a linked worktree, first launch Pi for inspection and run `/sandbox`. Copy the complete quoted external Git metadata paths under `Required explicit native read_write grants` into that policy, keeping their quotes and escapes (valid YAML scalars); do not attempt normal model work yet.
-3. Review the grants, edit the policy, then run `/reload` to activate it. Do not grant an ancestor directory, host home, SSH credentials, Docker socket, or other worktrees merely to make Git work. Grants remain subject to actual guest identity, host permissions, and Docker file sharing.
+#### Settings rules
 
-OpenShell 0.1.8 has **no built-in provider profiles**. For authenticated HTTPS Git, review the [versioned GitHub example](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/providers/github.yaml), adapt its binary paths and grants to your image, and save it as `github-profile.yaml` beside the declaring settings file. Add `./github-profile.yaml` to `openShellSandbox.profilePaths` and the following provider to `providers`, preserving any other needed entries:
+- **Locations and precedence:** built-in defaults → `$PI_CODING_AGENT_DIR/settings.json` → trusted project's `.pi/settings.json`. You can use global settings instead of project settings.
+- **Paths:** relative `policyPath` and `profilePaths` resolve beside the settings file that declares them. For global settings, that means inside `PI_CODING_AGENT_DIR`.
+- **Replacement:** `providers` and `profilePaths` replace entire arrays, including `[]`. The selected YAML policy replaces the bundled document; it is not merged with it.
+- **Validation:** absent settings are optional; malformed/unreadable present settings or selected documents block model Bash. Unknown native fields are not silently dropped.
 
-```json
-{
-  "name": "work-github",
-  "profile": "github",
-  "credentialMode": "explicit",
-  "credentialsFromEnv": { "GITHUB_TOKEN": "WORK_GITHUB_TOKEN" }
-}
-```
+See [configuration and trust boundaries](adr/0001-openshell-configuration-and-trust-boundaries.md) for native validation and permission details.
 
-Supply `WORK_GITHUB_TOKEN` through your own credential tooling in the **Pi process environment**. JSON contains variable names, not values; a missing selected value fails rather than silently using anonymous access. Explicit mode is the default; `native-refresh` is recognized but rejected as unsupported, never silently downgraded. Credential environment keys must be unique across attached providers.
+### 3. Activate and check model Bash
 
-**Network permissions are additive:** OpenShell combines the selected policy's grants with grants from attached provider profiles. A request may be permitted by either source; this is not an intersection. Keep existing policy rules in the policy—there is no need to move them into profiles or duplicate them there. Importing a profile alone does not attach it or grant its permissions.
+1. Launch Pi from that project directory. Trust it only after reviewing its settings and policy; run `/reload` if Pi is already open.
+2. Run `/sandbox` and check the selected policy/image and `Required explicit native read_write grants`. If you use [`git worktree`](#using-git-worktrees), add the external metadata grants before continuing.
+3. After any settings or policy edit, run `/reload`. Files are snapshotted; edits do not change the active sandbox.
+4. Ask the model: **“Use the Bash tool to run `pwd && ls -A`.”** Do not use `!` or `!!`; those test host Bash instead.
+5. Confirm that `pwd` matches your canonical project path, the listing succeeds, and `/sandbox` reports `ready`.
 
-Configured provider `name` values are policy-facing identities: explicit `credentialBinding.provider` references must name a configured provider whose profile has no endpoints. Each generation translates those references to unique native provider identities in a separate policy snapshot, without changing the selected policy or its grants. Profiles with endpoints supply their own credential bindings.
+That completes the basic Bash/directory-access check. **`ready` alone proves neither project access nor write permission, tool availability/version, or usable network access.** Check the actual tools and operations your task needs. Missing tools and denied operations remain command failures; the extension never widens permissions automatically.
 
-Credential binding controls where a credential may be used; it does **not** itself grant network access. Both effective network permission and endpoint-scoped credential binding must pass. Review permissions in **both** the selected policy and attached profiles, without disabling TLS verification. See [credential profiles and authenticated clients](adr/0001-openshell-configuration-and-trust-boundaries.md#custom-credential-profiles-and-authenticated-clients) for npm/PyPI guidance and [credential validation](adr/0001-openshell-configuration-and-trust-boundaries.md#credential-authority-and-isolation) for import/alias checks.
+### Using Git worktrees
 
-**Migration:** remove every `providers[].client` entry; it is rejected. Native providers supply credential environment placeholders, but workloads must configure Git/npm/pip clients manually while preserving TLS/proxy settings. The extension writes no client configuration, credential helper, or Git `safe.directory` entry. Mismatched mounted ownership may require deliberate, path-specific `safe.directory` configuration. Baseline executable/network grants remain unchanged; Node policy entries do not make Node a startup requirement.
+If this directory was created with [`git worktree add`](https://git-scm.com/docs/git-worktree), Git keeps some metadata outside it. Grant the container access to those metadata directories before running model Bash:
 
-The trusted host gateway and separate supervisor/proxy container handle real provider values; ordinary workload children receive opaque handles. This is not universal credential non-disclosure: an allowed endpoint can return the credential, and a granted project directory exposes raw `.env`/`.npmrc` files within it. Project client files are neither overwritten nor secret-masked. The selected image, native components, policy, attached profiles, and credential-bearing endpoints are trusted inputs.
+1. Launch Pi for inspection and run `/sandbox`; do not start normal model work yet.
+2. Copy the complete quoted external paths under `Required explicit native read_write grants` into the selected policy's `filesystem_policy.read_write` list. Add `- ` before each quoted path; preserve quotes and escapes, which are valid YAML.
+3. Review those exact grants and run `/reload`. Do not grant an ancestor or other worktrees to make Git work.
 
-## Use and recover
+Two Pi instances have separate runtime resources but may edit the same live files. Separate worktrees reduce edit conflicts but still share common Git metadata and can contend on Git locks.
 
-- `/sandbox` displays the **current activation's** cached phase, selected policy/image, required explicit native paths, ordinary failure details, and available recovery coordinates. It does not prepare, repair, discover, or delete resources.
-- Edit settings, policy, or profiles manually, review permissions, then run `/reload`. Edits do not mutate the active snapshot.
-- Every `session_start` (startup, reload, new, resume, fork) gets fresh private resources. Model calls share preparation only within that activation. **SDK readiness is not permission, tool-availability, tool-version, privilege, or project-write proof.** Missing tools and denied operations remain ordinary command failures; permissions are not widened automatically.
-- Cancellation/timeout or indeterminate execution invalidates the whole sandbox generation, including concurrent/background work. Confirmed cleanup permits a fresh generation; no command is replayed. A Bash timeout preserves streamed stdout/stderr and uses Pi's timeout result, but uncertain creation/cleanup blocks model Bash and takes precedence over that result.
+## Optional: access private repositories and package registries
+
+Configure credentials here for Git and package-manager commands **inside the container**. Skip this section for operations that need no credentials. The installation token `NVIDIA_NPM_TOKEN` is not forwarded automatically.
+
+A **provider profile** declares credential keys, destination bindings, and optional network grants. A **provider instance** stores concrete credentials and configuration for that profile. This extension creates provider instances from selected host credentials and attaches them to the sandbox. OpenShell 0.1.8 has **no built-in profiles**; importing a profile alone does not attach it or grant permissions.
+
+Policy and attached-profile network grants add together; a restrictive profile does not revoke policy grants.
+
+### Example: access a private GitHub repository from the container
+
+Use this setup to let `git fetch` and other Git commands that contact a remote GitHub repository—such as `git clone`, `git pull`, or `git push`—authenticate **from inside the OpenShell workload container**. It is not needed for local-only commands such as `git status` or `git diff`. Each remote operation must still be allowed by OpenShell's policy/profile grants and the GitHub account/token permissions.
+
+1. Select an image containing Git, `base64`, and `tr` (used by the check below). Review the [pinned GitHub profile](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/providers/github.yaml), adapt its binary paths and grants to that image, and save it as **`.pi/github-profile.yaml`** beside the project settings.
+2. Extend `.pi/settings.json` as below. Keep any custom `image` and any other needed provider/profile entries; arrays replace rather than merge.
+
+   ```json
+   {
+     "openShellSandbox": {
+       "policyPath": "./openshell-sandbox.yaml",
+       "profilePaths": ["./github-profile.yaml"],
+       "providers": [
+         {
+           "name": "work-github",
+           "profile": "github",
+           "credentialMode": "explicit",
+           "credentialsFromEnv": { "GITHUB_TOKEN": "WORK_GITHUB_TOKEN" }
+         }
+       ]
+     }
+   }
+   ```
+
+3. Supply `WORK_GITHUB_TOKEN` through your credential tooling **before launching Pi**. `GITHUB_TOKEN` is the profile's credential key; `WORK_GITHUB_TOKEN` is the host environment variable holding its value. JSON contains names, never secrets. Restart Pi from that environment if needed; `/reload` cannot import variables exported in another shell.
+4. After profile/settings edits, run `/reload`. Then ask the model to run the following through its **Bash tool inside the container**, not through `!`/`!!` or a host shell. Replace `OWNER/REPO` with a private repository the supplied token can read:
+
+   ```sh
+   remote='https://github.com/OWNER/REPO.git'
+   : "${GITHUB_TOKEN:?Run inside the OpenShell workload with the GitHub provider attached}"
+   auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+   GIT_TERMINAL_PROMPT=0 git -c credential.helper= \
+     -c "http.${remote}.extraHeader=Authorization: Basic ${auth}" \
+     ls-remote "$remote"
+   ```
+
+   `ls-remote` checks remote read access without fetching files or changing the repository. Success is exit code `0`, normally with commit IDs and reference names; an empty repository may list nothing. It does not prove push permission.
+
+The command uses OpenShell's workload `GITHUB_TOKEN` **placeholder**, not the host's real token. It encodes that placeholder into an HTTP Basic authentication header scoped to the selected repository URL. OpenShell resolves it only for an authorized request; TLS/proxy settings remain unchanged.
+
+Git's `-c` options apply only to this invocation: no credential helper is saved, and neither `~/.gitconfig` nor project Git configuration is written. Repeat the same command-scoped options for later authenticated operations—for example, replace `ls-remote "$remote"` with `fetch "$remote"` to fetch into the current repository.
+
+For an npm provider-profile example, see [custom credential profiles](adr/0001-openshell-configuration-and-trust-boundaries.md#custom-credential-profiles-and-authenticated-clients).
+
+## Usage
+
+- **Inspect:** `/sandbox` shows the cached phase, policy/image, required paths, failures, and available recovery coordinates for the current extension activation. It does not prepare, repair, discover, or delete resources.
+- **Apply changes:** edit settings, policy, or profiles, review permissions, then `/reload`.
+- **Expect fresh resources:** startup, reload, new, resume, and fork each create an independent *extension activation*. Commands share resources only within that activation. Container-only files/installations are disposable; normal cleanup keeps completed project writes and Docker's image cache.
+- **After cancellation, timeout, or uncertain execution:** the extension's entire sandbox generation, including concurrent/background work, is invalidated. Confirmed cleanup permits a fresh generation; commands are never replayed. Bash timeouts preserve streamed output and Pi's timeout result unless uncertain creation/cleanup requires blocking model Bash.
+
+## Troubleshooting
+
+### Git reports dubious ownership
+
+If Git rejects mounted ownership, review the ownership mismatch and configure `safe.directory` only for the intended path.
 
 ### After failed shutdown
 
-1. **Save the failed activation's transcript coordinates.** Shutdown publishes available recovery facts before retiring it: gateway endpoint, TLS directory, and sandbox identity/create outcome where known. Prepared-gateway coordinates remain useful even before sandbox creation; `creation: not started` neither proves creation nor transfers ownership.
-2. Use the saved transcript for that failed activation, not a later `/sandbox` display. `/reload` starts an **independent activation**; it does not adopt, repair, or clean up old resources.
-3. Before separate operator cleanup, inspect exact native identities/ownership and obtain independent backend-settlement proof for an unknown create. `NotFound` alone is not proof. Never delete by name prefix alone; there is no orphan/crash-recovery sweep.
+1. **Save the failed activation's transcript coordinates:** gateway endpoint, TLS directory, and sandbox identity/create outcome where available. A prepared gateway can exist before sandbox creation; `creation: not started` does not mean a sandbox exists or transfer ownership.
+2. Use that saved transcript, not a later `/sandbox` display. `/reload` starts an independent activation; it **does not repair or clean up old resources**.
+3. Before separate operator cleanup, verify exact native identities and ownership. If creation is unknown, independently prove the backend create operation has finished; `NotFound` alone is insufficient. Never delete by name prefix. There is no automatic orphan/crash-recovery sweep.
 
-[ADR-0002](adr/0002-openshell-runtime-and-lifecycle.md#lifetimes-and-cancellation) explains actual-settlement ownership, bounded cleanup, name-based RPC ownership checks, and direct-child termination limits. Caller timeouts and SDK stream aborts do not prove backend termination.
+See [lifecycle and cleanup guarantees](adr/0002-openshell-runtime-and-lifecycle.md#lifetimes-and-cancellation) before operator recovery. Caller timeouts and SDK stream aborts do not prove backend termination; cleanup tracks only the owned gateway's direct child, not all descendants.
 
-Normal cleanup retains Docker's image cache and completed project writes; container-only files/installations are disposable. Two Pi instances have separate runtime resources but may mount the same live project and conflict over edits, package outputs, or Git locks. Separate worktrees help with edits but still share common Git metadata.
+### Empty HTTP response bodies (OpenShell 0.1.8)
 
-## Package structure
+Source review of the [ordinary HTTP relay](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/crates/openshell-supervisor-network/src/l7/rest/http_response.rs#L197-L236) shows that it still treats non-SSE HTTP/1.1 responses as empty when `Content-Length`, `Transfer-Encoding`, and an explicit `Connection: close` response header are all absent. HTTP/1.0 now relays until EOF by default unless `Connection: keep-alive` is present. If you control the server, send a correct content length or an explicit response-close header. Native 0.1.8 behavior for this case has not been verified.
 
-```text
-openshell-sandbox/
-|-- adr/                       # Architecture decisions
-|-- assets/
-|   `-- policy.yaml            # Native policy
-`-- src/                       # Implementation and colocated tests
-    |-- index.ts               # Pi extension factory
-    |-- configuration/         # Trusted settings and policy/profile mapping
-    |   |-- native/
-    |   `-- validation/
-    |-- diagnostics/           # Sanitized failures
-    |-- gateway/               # Private gateway, configuration, and TLS
-    |-- host/                  # Host capabilities and owned resource handles
-    |-- image/                 # Default image reference, not an image builder
-    |-- pi/
-    |   |-- bash.ts            # Model-Bash adapter
-    |   |-- commands/          # Cached /sandbox status
-    |   `-- session/           # Activation lifecycle, trust, and UI
-    |-- providers/             # Credential profiles and native providers
-    |-- runtime/               # Whole-runtime disposal
-    |   |-- execution/         # Command streams
-    |   |-- generation/        # Provisioning and cleanup
-    |   `-- work/              # Raw-work settlement and bounded waits
-    `-- workspace/             # Guarded project and Git mounts
-```
+## Contributing
 
-Use explicit named `index.ts` exports across modules, including imports prefixed with `openshell-sandbox/`; import siblings directly within an owner. Nested modules are visible through their enclosing interface. Keep test helpers in the owning module's `test/*.helper.ts`; cross-module fixture imports use its fixture-only `test/index.helper.ts`. Production cannot import helpers or suites.
+See the [contributor guide](CONTRIBUTING.md) for the package structure and module/test-helper conventions.
 
-## Caveats
-
-**macOS behavior remains unverified.**
-
-**Empty HTTP response bodies (OpenShell 0.0.116).** Historical native verification found that the [HTTP relay](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-supervisor-network/src/l7/rest.rs#L3135-L3259) can drop non-SSE HTTP/1.0 or HTTP/1.1 bodies when the server uses implicit EOF framing without `Content-Length`, `Transfer-Encoding`, or an explicit `Connection: close` response header. Have the server send a correct length or explicit response-close header. No extension proxy workaround or native patch is supplied.

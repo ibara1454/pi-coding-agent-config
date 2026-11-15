@@ -154,7 +154,7 @@ This table highlights packaged extensions and is not an exhaustive list of stand
 | [`omp-status-line`](apps/omp-status-line/README.md) | Renders Pi's status line and editor chrome. | `bun test apps/omp-status-line` |
 | [`omp-welcome`](apps/omp-welcome/README.md) | Renders Pi's startup welcome UI. | `bun test apps/omp-welcome` |
 | [`omp-extension-manager`](apps/omp-extension-manager/README.md) | Discovers Pi extension resources and toggles them from the `/extensions` panel. | `bun test apps/omp-extension-manager` |
-| [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Native verification limits](apps/openshell-sandbox/README.md#caveats) |
+| [`openshell-sandbox`](apps/openshell-sandbox/README.md) | OpenShell-backed model Bash; user `!`/`!!` remains host-side. | [Platform verification limits](apps/openshell-sandbox/README.md#installation-and-prerequisites) |
 | [`omp-lsp`](apps/omp-lsp/README.md) | Adds semantic navigation, refactoring, diagnostics, and optional formatting through installed language servers. | `bun test apps/omp-lsp` |
 
 ## Validation
