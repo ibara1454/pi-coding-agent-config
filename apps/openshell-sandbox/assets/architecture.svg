@@ -9,7 +9,7 @@
     .heading { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
     .title { font-size: 21px; font-weight: 650; }
     .muted { fill: var(--muted, currentColor); font-size: 14px; opacity: .75; }
-    .code { font-family: ui-monospace, monospace; font-size: 14px; }
+    .code { font-family: monospace; font-size: 14px; }
     .label { font-size: 14px; font-weight: 550; }
     .control { fill: none; stroke: var(--accent, LinkText); stroke-width: 2; }
     .result { fill: none; stroke: var(--fg, currentColor); stroke-width: 2; }
