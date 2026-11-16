@@ -5,6 +5,10 @@
 
 version: 2
 registries:
+  npm-public:
+    type: npm-registry
+    url: https://registry.npmjs.org
+    token: ${{ secrets.NPM_READ_TOKEN }}
   github-packages:
     type: npm-registry
     url: https://npm.pkg.github.com
@@ -15,6 +19,8 @@ updates:
     # dependencies are updated across their manifests in one PR.
     directory: "/"
     registries:
+      # shortcut: public-first inference; remove when Bun honors explicit registry scopes.
+      - npm-public
       - github-packages
     schedule:
       interval: "daily"
