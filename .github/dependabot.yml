@@ -19,7 +19,8 @@ updates:
     # dependencies are updated across their manifests in one PR.
     directory: "/"
     registries:
-      # shortcut: public-first inference; remove when Bun honors explicit registry scopes.
+      # Workaround: keep public packages on npmjs instead of GitHub Packages.
+      # shortcut: public-first inference, remove when Dependabot's Bun updater honors scopes.
       - npm-public
       - github-packages
     schedule:
