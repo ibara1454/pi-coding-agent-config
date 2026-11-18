@@ -77,7 +77,7 @@
       "name": "biome-rules",
       "version": "1.0.0",
       "devDependencies": {
-        "@biomejs/wasm-nodejs": "2.6.3",
+        "@biomejs/wasm-nodejs": "2.6.8",
       },
     },
   },
@@ -146,7 +146,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.8", "", { "os": "win32", "cpu": "x64" }, "sha512-cD6HvGczZUiAYsY8s2TxxXj2AHFzEdMomvVJfEjzOjBM45nGqIDfBpbtvwGQzDCN8X2yKKk9u1jnDZisT2nxIg=="],
 
-    "@biomejs/wasm-nodejs": ["@biomejs/wasm-nodejs@2.6.3", "", {}, "sha512-DPI9t7DcsR+FPEUrhCIXfejI2j6dJ1NuKW8ke6tBVnCunTzDPvQpsuSvGJhaqsuOHc0U413MrB0/DDGM/+fiKw=="],
+    "@biomejs/wasm-nodejs": ["@biomejs/wasm-nodejs@2.6.8", "", {}, "sha512-wb7ox/FIg7Wlb6yFYVG1rLkw0uxQi7P5pfWDAy+jVRABZuuUTznxBkn7U2LF64HvRAQf3F3/xTJ7+DCysvbfsw=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.15.0", "", {}, "sha512-DAheWUkVr/SJTWCc+lg9dhY0eN4SaWlf4+bG1KzHeXbnqt0AfB/NX0Z+VunGlM1ki1B4zVvye27MpKh/svySUA=="],
 
