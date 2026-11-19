@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "1.5.2",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "xhigh",
   "enabledModels": [
     "openai-codex/gpt-6-luna",
@@ -13,13 +13,9 @@
     "preset": "default",
     "sessionAccent": true
   },
-  "packages": [
-    "npm:@plannotator/pi-extension"
-  ],
+  "packages": ["npm:@plannotator/pi-extension"],
   "hideThinkingBlock": false,
-  "extensions": [
-    "../../apps"
-  ],
+  "extensions": ["../../apps"],
   "theme": "dark",
   "skills": [
     "-skills/plannotator",
